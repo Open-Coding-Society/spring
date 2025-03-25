@@ -1,5 +1,5 @@
 package com.nighthawk.spring_portfolio.mvc.bathroom.bathroomML;
 
-public class BathroomML {
+public class BathroomPreprocess {
     
 }
