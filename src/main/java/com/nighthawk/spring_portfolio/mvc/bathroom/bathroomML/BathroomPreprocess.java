@@ -1,6 +1,8 @@
 package com.nighthawk.spring_portfolio.mvc.bathroom.bathroomML;
 
 import java.io.File;
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -24,21 +26,24 @@ public class BathroomPreprocess implements CommandLineRunner {
         List<Tinkle> logs = bathroomService.getAllLogs();
 
         // Create columns
-        StringColumn emailCol = StringColumn.create("Email");
+        StringColumn nameCol = StringColumn.create("Name");
         DoubleColumn durationCol = DoubleColumn.create("Duration"); // in minutes
         StringColumn dateCol = StringColumn.create("Date");
 
         for (Tinkle log : logs) {
-            if (log.getTimeIn() != null && log.getTimeOut() != null) {
-                long minutes = Duration.between(log.getTimeIn(), log.getTimeOut()).toMinutes();
+            for (LocalDateTime[] pair : log.getTimeInOutPairs()) {
+                LocalDateTime timeIn = pair[0];
+                LocalDateTime timeOut = pair[1];
 
-                emailCol.append(log.getEmail());
+                long minutes = Duration.between(timeIn, timeOut).toMinutes();
+
+                nameCol.append(log.getPersonName());
                 durationCol.append((double) minutes);
-                dateCol.append(log.getDate().toString());
+                dateCol.append(timeIn.toLocalDate().toString());
             }
         }
 
-        Table table = Table.create("Bathroom Logs", emailCol, durationCol, dateCol);
+        Table table = Table.create("Bathroom Logs", nameCol, durationCol, dateCol);
 
         // Normalize duration (optional)
         normalizeColumn(table, "Duration");
