@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 
 import com.nighthawk.spring_portfolio.mvc.bathroom.Tinkle;
 
+import tech.tablesaw.api.BooleanColumn;
 import tech.tablesaw.api.DoubleColumn;
 import tech.tablesaw.api.StringColumn;
 import tech.tablesaw.api.Table;
@@ -30,7 +31,9 @@ public class BathroomPreprocess implements CommandLineRunner {
         // Create columns
         StringColumn nameCol = StringColumn.create("Name");
         DoubleColumn durationCol = DoubleColumn.create("Duration"); // in minutes
+        DoubleColumn durationByPeriodCol = DoubleColumn.create("Average Duration By Period"); // in minutes
         StringColumn dateCol = StringColumn.create("Date");
+        BooleanColumn abnormalCol = BooleanColumn.create("Abnormal");
 
         for (Tinkle log : logs) {
             for (LocalDateTime[] pair : log.getTimeInOutPairs()) {
@@ -42,10 +45,11 @@ public class BathroomPreprocess implements CommandLineRunner {
                 nameCol.append(log.getPersonName());
                 durationCol.append((double) minutes);
                 dateCol.append(timeIn.toLocalDate().toString());
+                abnormalCol.append(minutes > 15);
             }
         }
 
-        Table table = Table.create("Bathroom Logs", nameCol, durationCol, dateCol);
+        Table table = Table.create("Bathroom Logs", nameCol, durationCol, durationByPeriodCol, dateCol, abnormalCol);
 
         // Normalize duration (optional)
         normalizeColumn(table, "Duration");
@@ -53,7 +57,6 @@ public class BathroomPreprocess implements CommandLineRunner {
         // Save to CSV
         File outputFile = new File("src/main/resources/data/bathroom_cleaned.csv");
         table.write().csv(outputFile);
-
         System.out.println("Preprocessing done. File saved as bathroom_cleaned.csv!");
     }
 
