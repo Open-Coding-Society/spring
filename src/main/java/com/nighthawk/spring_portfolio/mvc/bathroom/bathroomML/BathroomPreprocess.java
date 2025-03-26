@@ -12,6 +12,8 @@ import com.nighthawk.spring_portfolio.mvc.bathroom.Tinkle;
 import tech.tablesaw.api.DoubleColumn;
 import tech.tablesaw.api.StringColumn;
 import tech.tablesaw.api.Table;
+import java.time.Duration;
+
 
 @Component
 public class BathroomPreprocess implements CommandLineRunner {
