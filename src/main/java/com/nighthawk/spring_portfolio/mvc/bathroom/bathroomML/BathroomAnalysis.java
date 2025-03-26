@@ -13,7 +13,7 @@ import com.nighthawk.spring_portfolio.hacks.tablesaw.TitanicAnalysis;
 
 public class BathroomAnalysis {
     public static void main(String[] args) throws Exception {
-        InputStream inputStream = TitanicAnalysis.class.getResourceAsStream("src/main/resources/data/bathroom_cleaned.csv");
+        InputStream inputStream = BathroomAnalysis.class.getResourceAsStream("src/main/resources/data/bathroom_cleaned.csv");
 
         if (inputStream == null) {
             throw new IllegalArgumentException("File not found: bathroom_cleaned.csv");
