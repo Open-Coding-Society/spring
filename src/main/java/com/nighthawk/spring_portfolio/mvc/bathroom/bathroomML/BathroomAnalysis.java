@@ -26,16 +26,6 @@ public class BathroomAnalysis {
         }
         Table bathroom = Table.read().csv(inputStream);
 
-<<<<<<< HEAD
-        StringColumn nameCol = StringColumn.create("Name");
-        DoubleColumn durationCol = DoubleColumn.create("Duration"); // in minutes
-        DoubleColumn durationByPeriodCol = DoubleColumn.create("Average Duration By Period"); // in minutes
-        StringColumn dateCol = StringColumn.create("Date");
-        BooleanColumn abnormalCol = BooleanColumn.create("Abnormal");
-
-        
-
-=======
         // Analysis: Bathroom visits by student
         Table nameCounts = bathroom.countBy(bathroom.stringColumn("Name"));
         System.out.println("Bathroom visits per student:");
@@ -64,6 +54,5 @@ public class BathroomAnalysis {
 
         // Analysis: Duration Distribution
         Plot.show(Histogram.create("Distribution of Visit Durations", bathroom.numberColumn("Duration")));
->>>>>>> 89a07d4fe676d76076c288aa78d91fc3a75a1106
     }
 }
