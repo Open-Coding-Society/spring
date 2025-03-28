@@ -6,13 +6,10 @@ import static tech.tablesaw.aggregate.AggregateFunctions.mean;
 import tech.tablesaw.api.IntColumn;
 import tech.tablesaw.api.StringColumn;
 import tech.tablesaw.api.Table;
-<<<<<<< HEAD
 import tech.tablesaw.api.BooleanColumn;
 import tech.tablesaw.api.DoubleColumn;
 import tech.tablesaw.api.NumericColumn;
 import tech.tablesaw.api.StringColumn;
-=======
->>>>>>> 89a07d4fe676d76076c288aa78d91fc3a75a1106
 import tech.tablesaw.plotly.Plot;
 import tech.tablesaw.plotly.api.Histogram;
 import tech.tablesaw.plotly.api.VerticalBarPlot;
