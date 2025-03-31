@@ -17,7 +17,9 @@ import tech.tablesaw.api.DoubleColumn;
 import tech.tablesaw.api.StringColumn;
 import tech.tablesaw.api.Table;
 
-
+/*
+ * Retrieves bathroom logs from DB and creates CSV table. Categorizes dataset based on columns and normalizes data
+ */
 @Component
 public class BathroomPreprocess { 
     @Autowired

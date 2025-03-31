@@ -17,6 +17,9 @@ import weka.core.Attribute;
 import weka.core.DenseInstance;
 import weka.core.Instances;
 
+/*
+ * Loads bathroom CSV and uses machine learning models to make predictions
+ */
 public class BathroomML {
     public static void main(String[] args) throws Exception {
         // Step 1: Load Cleaned Data

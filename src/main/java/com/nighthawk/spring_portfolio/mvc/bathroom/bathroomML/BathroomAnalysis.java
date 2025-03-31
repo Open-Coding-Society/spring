@@ -10,6 +10,9 @@ import tech.tablesaw.plotly.Plot;
 import tech.tablesaw.plotly.api.Histogram;
 import tech.tablesaw.plotly.api.VerticalBarPlot;
 
+/*
+ * Loads bathroom CSV and displays analyzed data in a chart
+ */
 public class BathroomAnalysis {
     public static void main(String[] args) throws Exception {
         InputStream inputStream = BathroomAnalysis.class.getResourceAsStream("/data/bathroom_cleaned.csv");
