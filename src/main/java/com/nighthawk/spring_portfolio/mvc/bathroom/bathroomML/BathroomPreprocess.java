@@ -6,7 +6,8 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.CommandLineRunner;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Component;
 
 import com.nighthawk.spring_portfolio.mvc.bathroom.Tinkle;
@@ -15,18 +16,21 @@ import tech.tablesaw.api.BooleanColumn;
 import tech.tablesaw.api.DoubleColumn;
 import tech.tablesaw.api.StringColumn;
 import tech.tablesaw.api.Table;
-import java.time.Duration;
 
 
 @Component
-public class BathroomPreprocess implements CommandLineRunner {
-
+public class BathroomPreprocess { 
     @Autowired
     private BathroomService bathroomService;
 
-    @Override
-    public void run(String... args) throws Exception {
+    @EventListener(ApplicationReadyEvent.class)
+    public void process() { 
         List<Tinkle> logs = bathroomService.getAllLogs();
+        System.out.println("logs.size() = " + logs.size());
+
+        for (Tinkle log : logs) {
+            System.out.println("Tinkle record found: " + log.getPersonName());
+        }
 
         // Create columns
         StringColumn nameCol = StringColumn.create("Name");
@@ -36,6 +40,11 @@ public class BathroomPreprocess implements CommandLineRunner {
         BooleanColumn abnormalCol = BooleanColumn.create("Abnormal");
 
         for (Tinkle log : logs) {
+            // System.out.println("Log for: " + log.getPersonName());
+            if (log.getTimeInOutPairs() == null) {
+                System.out.println("timeInOutPairs is null!");
+                continue;
+            }
             for (LocalDateTime[] pair : log.getTimeInOutPairs()) {
                 LocalDateTime timeIn = pair[0];
                 LocalDateTime timeOut = pair[1];
@@ -51,13 +60,13 @@ public class BathroomPreprocess implements CommandLineRunner {
 
         Table table = Table.create("Bathroom Logs", nameCol, durationCol, durationByPeriodCol, dateCol, abnormalCol);
 
-        // Normalize duration (optional)
+    //     // Normalize duration (optional)
         normalizeColumn(table, "Duration");
 
-        // Save to CSV
-        File outputFile = new File("src/main/resources/data/bathroom_cleaned.csv");
+    //     // Save to CSV
+        File outputFile = new File("bathroom_cleaned.csv");
         table.write().csv(outputFile);
-        System.out.println("Preprocessing done. File saved as bathroom_cleaned.csv!");
+    //     System.out.println("Preprocessing done. File saved as bathroom_cleaned.csv!");
     }
 
     private void normalizeColumn(Table table, String columnName) {
