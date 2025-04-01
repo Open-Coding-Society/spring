@@ -1,0 +1,8 @@
+Name,MeanDuration,MaxDuration,StdDevDuration,TotalVisits,PercentAbnormal,AbnormalPerson
+Thomas Edison,1.0,1.0,0.8,1.0,1.0,true
+Alexander Graham Bell,0.2,0.0,0.4,1.0,1.0,true
+John Mortensen,0.0,0.0,0.6,1.0,0.0,true
+Alan Turing,0.6,0.3333333333333333,0.4,1.0,1.0,true
+Nikola Tesla,1.0,0.3333333333333333,0.0,0.0,1.0,true
+Madam Curie,0.4,0.6666666666666666,1.0,1.0,0.0,true
+Grace Hopper,1.0,1.0,0.8,1.0,1.0,true
