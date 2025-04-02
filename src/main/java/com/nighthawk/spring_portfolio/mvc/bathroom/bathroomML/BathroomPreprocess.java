@@ -15,6 +15,7 @@ import com.nighthawk.spring_portfolio.mvc.bathroom.Tinkle;
 import tech.tablesaw.api.BooleanColumn;
 import tech.tablesaw.api.DoubleColumn;
 import tech.tablesaw.api.StringColumn;
+import tech.tablesaw.columns.numbers.IntColumnType;
 import tech.tablesaw.api.Table;
 
 /*
