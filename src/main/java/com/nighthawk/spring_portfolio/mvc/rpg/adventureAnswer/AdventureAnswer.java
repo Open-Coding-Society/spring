@@ -44,7 +44,7 @@ public class AdventureAnswer {
     private AdventureChoice choice;    
 
     @Column(unique = false, nullable = true)
-    private Boolean is_correct; 
+    private Boolean isCorrect;
 
     @Column(unique = false, nullable = true)
     private Long chatScore;
@@ -58,12 +58,12 @@ public class AdventureAnswer {
 
 
 
-    public AdventureAnswer (String content, AdventureQuestion question, Person person, AdventureChoice choice, Boolean is_correct, Long chatScore) {
+    public AdventureAnswer (String content, AdventureQuestion question, Person person, AdventureChoice choice, Boolean isCorrect, Long chatScore) {
         this.content = content;
         this.question = question;
         this.person = person;
         this.choice = choice;
-        this.is_correct = is_correct;
+        this.isCorrect = isCorrect;
         this.chatScore = chatScore;
     }
 

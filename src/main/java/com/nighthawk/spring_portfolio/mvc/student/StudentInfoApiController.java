@@ -37,7 +37,6 @@ public class StudentInfoApiController {
     public static class CriteriaDto {
         private String username;
         private String course;
-        private int trimester;
         private int period; 
     }
 
@@ -45,7 +44,7 @@ public class StudentInfoApiController {
     public ResponseEntity<StudentInfo> getStudentByCriteria(
             @RequestBody CriteriaDto criteriaDto) {
         
-        List<StudentInfo> students = studentJPARepository.findByUsernameCourseTrimesterPeriod(criteriaDto.getUsername(), criteriaDto.getCourse(), criteriaDto.getTrimester(), criteriaDto.getPeriod());
+        List<StudentInfo> students = studentJPARepository.findByUsernameCoursePeriod(criteriaDto.getUsername(), criteriaDto.getCourse(), criteriaDto.getPeriod());
         
         if (students.isEmpty()) {
             return ResponseEntity.notFound().build();
@@ -89,7 +88,6 @@ public class StudentInfoApiController {
     @Getter
     public static class TeamDto {
         private String course;
-        private int trimester;
         private int period; 
         private int table;
     }
@@ -98,7 +96,7 @@ public class StudentInfoApiController {
     public ResponseEntity<Iterable<StudentInfo>> getTeamByCriteria(
             @RequestBody TeamDto teamDto) {
         
-        List<StudentInfo> students = studentJPARepository.findTeam(teamDto.getCourse(), teamDto.getTrimester(), teamDto.getPeriod(), teamDto.getTable());
+        List<StudentInfo> students = studentJPARepository.findTeam(teamDto.getCourse(), teamDto.getPeriod(), teamDto.getTable());
         
         if (students.isEmpty()) {
             return ResponseEntity.notFound().build();
@@ -206,7 +204,6 @@ public class StudentInfoApiController {
     @Getter 
     public static class PeriodDto {
         private String course;
-        private int trimester;
         private int period;
     }
 
@@ -214,7 +211,7 @@ public class StudentInfoApiController {
     public ResponseEntity<Iterable<StudentInfo>> getPeriodByTrimester(
         @RequestBody PeriodDto periodDto) {
             
-        List<StudentInfo> students = studentJPARepository.findPeriod(periodDto.getCourse(), periodDto.getTrimester(), periodDto.getPeriod());
+        List<StudentInfo> students = studentJPARepository.findPeriod(periodDto.getCourse(), periodDto.getPeriod());
 
         if (students.isEmpty()) {
             return ResponseEntity.notFound().build();

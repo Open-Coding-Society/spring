@@ -1,10 +1,8 @@
 <!DOCTYPE HTML>
 <html xmlns:layout="http://www.w3.org/1999/xhtml" xmlns:th="http://www.w3.org/1999/xhtml"
-      layout:decorate="~{layouts/base}" lang="en">
-
-<head>
-    <title>Grade Requests</title>
-
+    layout:decorate="~{layouts/base}" lang="en">
+<!-- page style -->
+<th:block layout:fragment="style" th:remove="tag">
     <style>
         .grade-request-card {
             border: 2px solid #ccc;
@@ -12,9 +10,9 @@
             margin: 20px auto;
             max-width: 800px;
             padding: 20px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
         }
-        
+
         .header-row {
             display: flex;
             justify-content: space-between;
@@ -23,11 +21,11 @@
             padding-bottom: 10px;
             border-bottom: 1px solid #eee;
         }
-        
+
         .person-info {
             flex: 1;
         }
-        
+
         .grade-display {
             font-size: 24px;
             font-weight: bold;
@@ -35,32 +33,32 @@
             background-color: #f8f9fa;
             border-radius: 4px;
         }
-        
+
         .label {
             font-weight: bold;
             color: #666;
             margin-bottom: 5px;
         }
-        
+
         .content {
             margin-top: 15px;
         }
-        
+
         .explanation {
             background-color: #f8f9fa;
             padding: 15px;
             border-radius: 4px;
             margin-top: 10px;
         }
-        
+
         .status-pending {
             color: #f0ad4e;
         }
-        
+
         .status-accepted {
             color: #5cb85c;
         }
-        
+
         .status-rejected {
             color: #d9534f;
         }
@@ -100,7 +98,8 @@
             background-color: #c9302c;
         }
 
-        .btn-accept:disabled, .btn-reject:disabled {
+        .btn-accept:disabled,
+        .btn-reject:disabled {
             background-color: #ccc;
             cursor: not-allowed;
         }
@@ -147,11 +146,13 @@
             background-color: #5a6268;
         }
     </style>
-</head>
+</th:block>
 
-<body>
+<!-- page title -->
+<th:block layout:fragment="title" th:remove="tag">Grade Requests</th:block>
+
+<!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
 <th:block layout:fragment="body" th:remove="tag">
-
     <h2>Grade Requests</h2>
 
     <div th:each="request : ${requests}" class="grade-request-card">
@@ -166,23 +167,25 @@
                     <span th:text="${request.student.name}">Student Name</span>
                 </div>
             </div>
-            
+
             <div class="grade-display">
-                Grade: <span th:text="${request.gradeSuggestion + '/1 (' + #numbers.formatDecimal(request.gradeSuggestion * 100, 1, 1) + '%)'}">0.9/1 (90%)</span>
+                Grade: <span
+                    th:text="${request.gradeSuggestion + '/1 (' + #numbers.formatDecimal(request.gradeSuggestion * 100, 1, 1) + '%)'}">0.9/1
+                    (90%)</span>
             </div>
         </div>
-        
+
         <div class="content">
             <div>
                 <span class="label">Assignment:</span>
                 <span th:text="${request.assignment.name}">Assignment Name</span>
             </div>
-            
+
             <div class="explanation">
                 <div class="label">Explanation:</div>
                 <p th:text="${request.explanation}">Explanation text here</p>
             </div>
-            
+
             <div class="mt-3">
                 <span class="label">Status: </span>
                 <span th:if="${request.status == 0}" class="status-pending">Pending</span>
@@ -191,18 +194,24 @@
             </div>
 
             <div class="action-buttons" th:if="${request.status == 0}">
-                <button type="button" th:onclick="'showAcceptModal(' + ${request.id} + ')'" class="btn-accept">Accept Request</button>
-                <button type="button" th:onclick="'showRejectModal(' + ${request.id} + ')'" class="btn-reject">Reject Request</button>
+                <button type="button" th:onclick="'showAcceptModal(' + ${request.id} + ')'" class="btn-accept">Accept
+                    Request</button>
+                <button type="button" th:onclick="'showRejectModal(' + ${request.id} + ')'" class="btn-reject">Reject
+                    Request</button>
             </div>
         </div>
 
         <div th:id="'acceptModal' + ${request.id}" class="modal">
             <div class="modal-content">
                 <h3>Confirm Accept</h3>
-                <p>Are you sure you want to accept this grade request? This will update the student's grade to <span th:text="${request.gradeSuggestion + '/1 (' + #numbers.formatDecimal(request.gradeSuggestion * 100, 1, 1) + '%)'}">0.9/1 (90%)</span></p>
+                <p>Are you sure you want to accept this grade request? This will update the student's grade to <span
+                        th:text="${request.gradeSuggestion + '/1 (' + #numbers.formatDecimal(request.gradeSuggestion * 100, 1, 1) + '%)'}">0.9/1
+                        (90%)</span></p>
                 <div class="modal-buttons">
-                    <button th:onclick="'hideModal(\'acceptModal' + ${request.id} + '\')'" class="btn-secondary">Cancel</button>
-                    <button th:onclick="'submit(true, \'acceptForm' + ${request.id} + '\')'" class="btn-accept">Confirm Accept</button>
+                    <button th:onclick="'hideModal(\'acceptModal' + ${request.id} + '\')'"
+                        class="btn-secondary">Cancel</button>
+                    <button th:onclick="'submit(true, \'acceptForm' + ${request.id} + '\')'" class="btn-accept">Confirm
+                        Accept</button>
                 </div>
             </div>
         </div>
@@ -212,67 +221,68 @@
                 <h3>Confirm Reject</h3>
                 <p>Are you sure you want to reject this grade request? This action cannot be undone.</p>
                 <div class="modal-buttons">
-                    <button th:onclick="'hideModal(\'rejectModal' + ${request.id} + '\')'" class="btn-secondary">Cancel</button>
-                    <button th:onclick="'submit(false, \'rejectForm' + ${request.id} + '\')'" class="btn-reject">Confirm Reject</button>
+                    <button th:onclick="'hideModal(\'rejectModal' + ${request.id} + '\')'"
+                        class="btn-secondary">Cancel</button>
+                    <button th:onclick="'submit(false, \'rejectForm' + ${request.id} + '\')'" class="btn-reject">Confirm
+                        Reject</button>
                 </div>
             </div>
         </div>
     </div>
 </th:block>
-</body>
 
 <th:block layout:fragment="script" th:remove="tag">
-<script>
-    function showAcceptModal(requestId) {
-        document.getElementById('acceptModal' + requestId).style.display = 'block';
-    }
-
-    function showRejectModal(requestId) {
-        document.getElementById('rejectModal' + requestId).style.display = 'block';
-    }
-
-    function hideModal(modalId) {
-        document.getElementById(modalId).style.display = 'none';
-    }
-
-    function submit(accepted, formId) {
-        // note for future, this bascially just removes the acceptForm and rejectForm part out to get the id itself
-        const requestId = parseInt(formId.replace(/(acceptForm|rejectForm)/, ''));
-        const body = {
-            requestId: requestId
-        };
-        console.log(body);
-
-        var url = '/api/synergy/grade/requests/reject';
-        if (accepted) {
-            url = '/api/synergy/grade/requests/accept';
+    <script>
+        function showAcceptModal(requestId) {
+            document.getElementById('acceptModal' + requestId).style.display = 'block';
         }
 
-        fetch(url, {
-            method: "POST",
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(body)
-        }).then(async response => {
-            if (response.ok) {
-                location.reload();
-            } else {
-                console.log(response.status);
-                console.log(response.statusText);
-                console.log(response.type);
-                console.log(await response.text());
-                console.error('Error submitting form');
+        function showRejectModal(requestId) {
+            document.getElementById('rejectModal' + requestId).style.display = 'block';
+        }
+
+        function hideModal(modalId) {
+            document.getElementById(modalId).style.display = 'none';
+        }
+
+        function submit(accepted, formId) {
+            // note for future, this bascially just removes the acceptForm and rejectForm part out to get the id itself
+            const requestId = parseInt(formId.replace(/(acceptForm|rejectForm)/, ''));
+            const body = {
+                requestId: requestId
+            };
+            console.log(body);
+
+            var url = '/api/synergy/grade/requests/reject';
+            if (accepted) {
+                url = '/api/synergy/grade/requests/accept';
             }
-        }).catch(error => console.error('Fetch error:', error));
-    }
 
-    window.onclick = function(event) {
-        if (event.target.classList.contains('modal')) {
-            event.target.style.display = 'none';
+            fetch(url, {
+                method: "POST",
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(body)
+            }).then(async response => {
+                if (response.ok) {
+                    location.reload();
+                } else {
+                    console.log(response.status);
+                    console.log(response.statusText);
+                    console.log(response.type);
+                    console.log(await response.text());
+                    console.error('Error submitting form');
+                }
+            }).catch(error => console.error('Fetch error:', error));
         }
-    }
-</script>
+
+        window.onclick = function (event) {
+            if (event.target.classList.contains('modal')) {
+                event.target.style.display = 'none';
+            }
+        }
+    </script>
 </th:block>
 
 </html>

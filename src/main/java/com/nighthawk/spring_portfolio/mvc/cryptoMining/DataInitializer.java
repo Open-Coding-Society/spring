@@ -9,19 +9,25 @@ public class DataInitializer implements CommandLineRunner {
     @Autowired
     private GPURepository gpuRepository;
 
+    @Autowired
+    private CryptocurrencyRepository cryptocurrencyRepository;
+
     @Override
     public void run(String... args) {
         // Only initialize if no GPUs exist
         if (gpuRepository.count() == 0) {
             initializeGPUs();
         }
+
+        // Only initialize if no cryptocurrencies exist
+        if (cryptocurrencyRepository.count() == 0) {
+            initializeCryptocurrencies();
+        }
     }
 
     private void initializeGPUs() {
-       // Free Starter GPU
-       createGPU("NVIDIA GeForce GT 1030", 1.55, 30, 65, 0, "Free Starter GPU");
-
        // Budget GPUs ($10000-20000)
+       createGPU("NVIDIA GeForce GT 1030", 1.55, 30, 65, 10000, "Budget GPUs ($10000-20000)");
        createGPU("NVIDIA GeForce GTX 1050", 14, 75, 67, 10000, "Budget GPUs ($10000-20000)");
        createGPU("AMD RX 570 8GB", 28, 120, 70, 15000, "Budget GPUs ($10000-20000)");
        createGPU("NVIDIA GeForce GTX 1060 6GB", 22, 120, 68, 20000, "Budget GPUs ($10000-20000)");
@@ -54,5 +60,64 @@ public class DataInitializer implements CommandLineRunner {
         gpu.setPrice(price);
         gpu.setCategory(category);
         gpuRepository.save(gpu);
+    }
+
+    private void initializeCryptocurrencies() {
+        // Bitcoin - the original cryptocurrency
+        createCryptocurrency(
+            "Bitcoin", 
+            "BTC", 
+            45000.0, 
+            "https://cryptologos.cc/logos/bitcoin-btc-logo.png",
+            "SHA-256", 
+            6.25, 
+            "Very High", 
+            0.001
+        );
+
+        // Ethereum - smart contract platform
+        createCryptocurrency(
+            "Ethereum", 
+            "ETH", 
+            3000.0, 
+            "https://cryptologos.cc/logos/ethereum-eth-logo.png",
+            "Ethash", 
+            2.0, 
+            "High", 
+            0.01
+        );
+
+        // Litecoin - faster alternative to Bitcoin
+        createCryptocurrency(
+            "Litecoin", 
+            "LTC", 
+            80.0, 
+            "https://cryptologos.cc/logos/litecoin-ltc-logo.png",
+            "Scrypt", 
+            12.5, 
+            "Medium", 
+            0.02
+        );
+
+        // Monero - privacy-focused cryptocurrency
+        createCryptocurrency(
+            "Monero", 
+            "XMR", 
+            170.0, 
+            "https://cryptologos.cc/logos/monero-xmr-logo.png",
+            "RandomX", 
+            0.6, 
+            "Medium", 
+            0.01
+        );
+    }
+
+    private void createCryptocurrency(String name, String symbol, double price, String logoUrl, 
+                                    String miningAlgorithm, double blockReward, 
+                                    String difficulty, double minPayout) {
+        Cryptocurrency crypto = new Cryptocurrency(name, symbol, price, logoUrl, 
+                                                 miningAlgorithm, blockReward, 
+                                                 difficulty, minPayout);
+        cryptocurrencyRepository.save(crypto);
     }
 }

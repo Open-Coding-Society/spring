@@ -1,9 +1,14 @@
 package com.nighthawk.spring_portfolio.mvc.backups;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.DriverManager;
@@ -11,6 +16,9 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
@@ -48,6 +56,8 @@ public class ImportsController {
 
     private final ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
     private final Object lock = new Object();
+
+    
 
     @EventListener(ApplicationReadyEvent.class)
     public synchronized void initializeOnStartup() {
@@ -237,12 +247,6 @@ public class ImportsController {
         }
     }
 
-    private void disableWalMode(Connection connection) throws SQLException {
-        try (Statement statement = connection.createStatement()) {
-            statement.execute("PRAGMA journal_mode=DELETE;");
-        }
-    }
-
     private void setBusyTimeout(Connection connection, int timeoutMillis) throws SQLException {
         try (Statement statement = connection.createStatement()) {
             statement.execute("PRAGMA busy_timeout=" + timeoutMillis + ";");
@@ -411,21 +415,6 @@ public class ImportsController {
 
     private String sanitizeTableName(String tableName) {
         return tableName.replaceAll("[^a-zA-Z0-9_]", "_");
-    }
-
-    private File getMostRecentBackupFile() {
-        File backupsDir = new File(BACKUP_DIR);
-        if (!backupsDir.exists() || !backupsDir.isDirectory()) {
-            return null;
-        }
-
-        File[] backupFiles = backupsDir.listFiles((dir, name) -> name.startsWith("backup_") && name.endsWith(".json"));
-        if (backupFiles == null || backupFiles.length == 0) {
-            return null;
-        }
-
-        Arrays.sort(backupFiles, Comparator.comparingLong(File::lastModified).reversed());
-        return backupFiles[0];
     }
 
     private void insertTableData(Connection connection, String tableName, List<Map<String, Object>> tableData) throws SQLException {
@@ -637,13 +626,9 @@ public class ImportsController {
         } catch (SQLException e) {
             System.err.println("Error creating table " + tableName + ": " + e.getMessage());
             throw e;
-        }
-    }
 
-    private boolean columnExists(Connection connection, String tableName, String columnName) throws SQLException {
-        DatabaseMetaData meta = connection.getMetaData();
-        try (ResultSet resultSet = meta.getColumns(null, null, tableName, columnName)) {
-            return resultSet.next();
+ 
+
         }
     }
 
@@ -689,6 +674,8 @@ public class ImportsController {
         }
     }
 
+    private static final String LOG_FILE_PATH = "./volumes/logs/restore_operations.log";
+
     @PostMapping("/revert")
     public String revertToBackup(@RequestParam("filename") String filename, Model model) {
         synchronized (lock) {
@@ -699,15 +686,75 @@ public class ImportsController {
                     return "db_management/db_error";
                 }
                 
+                // Log the restore operation
+                logRestoreOperation(filename);
+                
                 String result = importFromFile(backupFile);
                 model.addAttribute("message", result);
                 return "db_management/db_success";
             } catch (Exception e) {
                 e.printStackTrace();
+                // Log the error too
+                logRestoreOperation(filename + " (FAILED: " + e.getMessage() + ")");
                 model.addAttribute("message", "Failed to revert to backup: " + e.getMessage());
                 return "db_management/db_error";
             }
         }
+    }
+
+    private void logRestoreOperation(String filename) {
+        try {
+            // Create logs directory if it doesn't exist
+            File logDir = new File("./volumes/logs/");
+            if (!logDir.exists()) {
+                logDir.mkdirs();
+            }
+            
+            // Get current timestamp
+            LocalDateTime now = LocalDateTime.now();
+            String timestamp = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
+            
+            // Append to log file
+            Path logPath = Paths.get(LOG_FILE_PATH);
+            String logEntry = timestamp + " - Restore operation performed: " + filename + "\n";
+            
+            Files.write(logPath, logEntry.getBytes(), 
+                        java.nio.file.StandardOpenOption.CREATE, 
+                        java.nio.file.StandardOpenOption.APPEND);
+        } catch (IOException e) {
+            System.err.println("Failed to log restore operation: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/logs")
+    public String viewRestoreLogs(Model model) {
+        try {
+            List<String> logs = readLogFile();
+            model.addAttribute("logs", logs);
+            return "db_management/restore_logs";
+        } catch (IOException e) {
+            model.addAttribute("message", "Failed to read log file: " + e.getMessage());
+            return "db_management/db_error";
+        }
+    }
+
+    private List<String> readLogFile() throws IOException {
+        List<String> logs = new ArrayList<>();
+        File logFile = new File(LOG_FILE_PATH);
+        
+        if (!logFile.exists()) {
+            return logs;
+        }
+        
+        try (BufferedReader reader = new BufferedReader(new FileReader(logFile))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                logs.add(line);
+            }
+        }
+    
+        Collections.reverse(logs);
+        return logs;
     }
 
     @GetMapping("/view")

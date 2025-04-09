@@ -1,87 +1,77 @@
 <!DOCTYPE HTML>
 <html xmlns:layout="http://www.w3.org/1999/xhtml" xmlns:th="http://www.w3.org/1999/xhtml"
-      layout:decorate="~{layouts/base}" lang="en">
+    layout:decorate="~{layouts/base}" lang="en">
+
+<!-- page style -->
+<th:block layout:fragment="style" th:remove="tag"></th:block>
 
 <head>
-    <title>Reset Password</title> <!-- The title of the page displayed in the browser's title bar -->
-</head>
-
-<!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
-<th:block layout:fragment="body" th:remove="tag">
-
-    <!-- Main container for the login page with padding and spacing -->
-    <div class="container py-4">
-        <!-- Header section, with a border and styling -->
-        <header class="pb-3 mb-4 border-bottom border-primary text-light">
-            <span class="fs-4">Reset Password</span> <!-- Title of the page displayed inside the header -->
-        </header>
-    </div>
-
     <script>
-        function validation(event){
+        function validation(event) {
             event.preventDefault();
 
             var body = {
-                    uid: document.getElementById("uid").value,
-                }
+                uid: document.getElementById("uid").value,
+            }
             fetch("/mvc/person/reset/start", {
-                    method: "POST",
-                    body: JSON.stringify(body),
-                    cache: "no-cache",
-                    headers: new Headers({
-                        "content-type": "application/json"
-                    })
-                }).then(function (response) {
-                    if (response.status !== 200) {
-                        message.style.color = "red";
-                        message.innerText = "Something went wrong. Double check that you inputted the correct uid. Also remember, admins and auto-generated users cannot have their passwords reset by email. You cannot send multiple requests for a password change at a time, each request expires after 5 minutes.";
-                        message.style.display = "block";
-                    }
-                    else {
-                        window.location.replace("/mvc/person/reset/check");
-                    }
+                method: "POST",
+                body: JSON.stringify(body),
+                cache: "no-cache",
+                headers: new Headers({
+                    "content-type": "application/json"
+                })
+            }).then(function (response) {
+                if (response.status !== 200) {
+                    message.style.color = "red";
+                    message.innerText = "Something went wrong. Double check that you inputted the correct uid. Also remember, admins and auto-generated users cannot have their passwords reset by email. You cannot send multiple requests for a password change at a time, each request expires after 5 minutes.";
+                    message.style.display = "block";
+                }
+                else {
+                    window.location.replace("/mvc/person/reset/check");
+                }
             })
             return;
         }
     </script>
+</head>
 
-    <!-- Background color section for the login container, with a green success color -->
-    <div class="container py-4 text-light bg-primary rounded">
-        <!-- Nested container for a secondary background color and padding -->
-        <div class="container bg-secondary py-4 rounded">
-            <!-- The actual login form, inside a styled light background with rounded corners -->
-            <div class="p-5 mb-4 bg-success text-light rounded-3">
-                <!-- Heading for the login section, with added left margin for spacing -->
-                <h3 style="margin-left: 10px;">Reset Password</h3>
-                <table>
-                <!-- Form for resetting password. Uses POST method to submit the data to the /mvc/person/reset/start endpoint -->
-                    <tr>
-                        <td><input type="text" id='uid' name="uid" placeholder="GitHub ID" size="20" required style="margin-bottom: 10px; margin-left: 10px;"></td>
-                    </tr>
+<!-- page title -->
+<th:block layout:fragment="title" th:remove="tag">Reset Password</th:block>
 
-                    <!-- Submit button for the form, with added margin for spacing -->
-                    <tr>
-                        <th><input type="button" value="submit" onclick="validation(event)" style="margin-left: 10px;" class="btn btn-secondary"></th>
-                    </tr>
-                </table>
-                <table>
-                    <!-- Link to the signup page for users who don't have an account, with added left margin -->
-                    <tr>
-                        <td><a th:href="@{/mvc/person/reset/check}" style="margin-left: 10px;">Already have a code?</a></td>
-                    </tr>
-                </table>
+<!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
+<th:block layout:fragment="body" th:remove="tag">
+    <!-- Heading for the login section, with added left margin for spacing -->
+    <h3 style="margin-left: 10px;">Reset Password</h3>
+    <table>
+        <!-- Form for resetting password. Uses POST method to submit the data to the /mvc/person/reset/start endpoint -->
+        <tr>
+            <td><input type="text" id='uid' name="uid" placeholder="GitHub ID" size="20" required
+                    style="margin-bottom: 10px; margin-left: 10px;"></td>
+        </tr>
 
-                <table>
-                    <!-- Link to the signup page for users who don't have an account, with added left margin -->
-                    <tr>
-                        <td><a th:href="@{/login}" style="margin-left: 10px;">Login Page</a></td>
-                    </tr>
+        <!-- Submit button for the form, with added margin for spacing -->
+        <tr>
+            <th><input type="button" value="submit" onclick="validation(event)" style="margin-left: 10px;"
+                    class="btn btn-secondary"></th>
+        </tr>
+    </table>
+    <table>
+        <!-- Link to the signup page for users who don't have an account, with added left margin -->
+        <tr>
+            <td><a th:href="@{/mvc/person/reset/check}" style="margin-left: 10px;">Already have a code?</a></td>
+        </tr>
+    </table>
 
-                </table>
-                <label id="message" style="display: none;"></label>
-            </div>
-        </div>
-    </div>
+    <table>
+        <!-- Link to the signup page for users who don't have an account, with added left margin -->
+        <tr>
+            <td><a th:href="@{/login}" style="margin-left: 10px;">Login Page</a></td>
+        </tr>
+
+    </table>
+    <label id="message" style="display: none;"></label>
 
 </th:block>
 <!-- End of the body fragment -->
+
+</html>

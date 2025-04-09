@@ -2,17 +2,18 @@
 <html xmlns:layout="http://www.w3.org/1999/xhtml" xmlns:th="http://www.w3.org/1999/xhtml"
       layout:decorate="~{layouts/base}" lang="en">
 
-<head>
-    <title>401 error</title>
-</head>
+<!-- page style -->
+<th:block layout:fragment="style" th:remove="tag"></th:block>
 
-<body>
+<!-- page title -->
+<th:block layout:fragment="title" th:remove="tag">401 Error</th:block>
+
+<!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
 <th:block layout:fragment="body" th:remove="tag">
     <script>
         // Send 401 directly to /login
         window.location.replace("/login");
     </script>
-</th:block>>
-</body>
+</th:block>
 
 </html>

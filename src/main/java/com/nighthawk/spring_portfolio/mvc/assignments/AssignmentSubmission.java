@@ -2,13 +2,11 @@ package com.nighthawk.spring_portfolio.mvc.assignments;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.nighthawk.spring_portfolio.mvc.person.Person;
 
 import jakarta.persistence.Entity;
@@ -61,9 +59,9 @@ public class AssignmentSubmission {
 
     private String comment;
 
-    private long assignmentid;
+    private Long assignmentid;
 
-    private boolean isLate;
+    private Boolean isLate;
 
     @PreRemove
     private void removeStudentsFromSubmission() {
@@ -87,54 +85,8 @@ public class AssignmentSubmission {
 
     }
 
-    // Getters and Setters (if not using Lombok)
-    public Long getId() {
-        return id;
-    }
-
-    public Long getAssignmentId1() {
-        return assignmentid;
-    }
-
-    public Assignment getAssignment() {
-        return assignment;
-    }
-
-    public List<Person> getStudents() {
-        return students;
-    }
-
-    public String getContent() {
-        return content;
-    }
-
-    public String getComment() {
-        return comment;
-    }
-
-    public String getFeedback() {
-        return feedback;
-    }
-
     // Getter for assignment_id (foreign key column)
     public Long getAssignmentId2() {
         return assignment != null ? assignment.getId() : null;
-    }
-
-    public Double getGrade() {
-        return grade;
-    }
-
-    public Boolean getIsLate() {
-        return this.isLate;
-    }
-
-    public void setFeedback(String feedback) {
-        this.feedback = feedback;
-    }
-
-    public void setGrade(Double grade) {
-        this.grade = grade;
-    }
-    
+    }    
 }

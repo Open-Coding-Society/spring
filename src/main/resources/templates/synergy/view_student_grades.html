@@ -1,10 +1,9 @@
 <!DOCTYPE HTML>
 <html xmlns:layout="http://www.w3.org/1999/xhtml" xmlns:th="http://www.w3.org/1999/xhtml"
-      layout:decorate="~{layouts/base}" lang="en">
+    layout:decorate="~{layouts/base}" lang="en">
 
-<head>
-    <title>View Grades</title>
-
+<!-- page style -->
+<th:block layout:fragment="style" th:remove="tag">
     <style>
         table {
             width: 100%;
@@ -12,28 +11,35 @@
             overflow-x: auto;
             display: block;
         }
-        th, td {
+
+        th,
+        td {
             border: 1px solid #ccc;
             padding: 1em;
             text-align: center;
-            min-width: 5em; 
+            min-width: 5em;
         }
+
         th {
             background-color: #f2f2f2;
         }
+
         .container {
             overflow-x: auto;
             white-space: nowrap;
         }
     </style>
-</head>
+</th:block>
 
-<body>
+<!-- page title -->
+<th:block layout:fragment="title" th:remove="tag">View Grades</th:block>
+
+<!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
+
 <th:block layout:fragment="body" th:remove="tag">
 
     <div class="container">
         <h2>View Grades</h2>
-
         <table>
             <thead>
                 <tr>
@@ -49,14 +55,12 @@
             </tbody>
         </table>
     </div>
-    
 </th:block>
-</body>
 
 <th:block layout:fragment="script" th:remove="tag">
-<script>
-    // TODO: make site not be so ulgy
-</script>
+    <script>
+        // TODO: make site not be so ulgy
+    </script>
 </th:block>
 
 </html>

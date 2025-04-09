@@ -1,28 +1,18 @@
-<!DOCTYPE HTML> 
+<!DOCTYPE HTML>
 <html xmlns:layout="http://www.w3.org/1999/xhtml" xmlns:th="http://www.w3.org/1999/xhtml"
-      layout:decorate="~{layouts/base}" lang="en">
+    layout:decorate="~{layouts/base}" lang="en">
 
-<head>
-    <title>Person List</title>
+
+<!-- page style -->
+<th:block layout:fragment="style" th:remove="tag">
     <link rel="stylesheet" href="https://cdn.datatables.net/2.1.8/css/dataTables.dataTables.css" />
+    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.3.6/css/buttons.dataTables.min.css" />
     <style>
         /* Ensures that the custom checkbox images are appropriately sized */
         .custom-checkbox {
             width: 20px;
             height: 20px;
             cursor: pointer;
-        }
-
-        /* Highlights the header when hovering over a sortable column */
-        th.sortable:hover {
-            cursor: pointer;
-            color: #007bff;
-        }
-
-        /* Styling for the profile picture container */
-        .profile-picture-container {
-            position: relative;
-            display: inline-block;
         }
 
         /* Initial styling for the profile picture */
@@ -32,146 +22,114 @@
             border-radius: 50%;
             transition: transform 0.3s ease;
             opacity: 1;
-            transform-origin: bottom center; /* Set anchor point to bottom center */
+            transform-origin: bottom center;
+            /* Set anchor point to bottom center */
         }
 
         /* Enlarges the profile picture when hovered */
         .profile-picture-container:hover img {
-            transform: scale(2); /* Enlarges the image */
+            transform: scale(2);
+            /* Enlarges the image */
             opacity: 1;
         }
-
-        /* Styling for the search input container */
-        .search-container {
-            margin-bottom: 20px;
-        }
-
-        /* Uid column styling to limit text and show full uid on hover */
-        td.uid {
-            width: 18ch; /* Limit to 18 characters */
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-        }
-
-        td.uid:hover {
-            cursor: help;
-        }
     </style>
-</head>
+</th:block>
 
-<body>
+<!-- page title -->
+<th:block layout:fragment="title" th:remove="tag">Person List</th:block>
+
 <th:block layout:fragment="body" th:remove="tag">
-    <div class="container py-4 bg-primary rounded">
-        <!-- Main page content -->
-        <header class="pb-3 mb-4 border-bottom">
-            <a href="#" class="d-flex align-items-center text-light text-decoration-none">
-                <span class="fs-4">Database SQL Person</span>
-            </a>
-        </header>
+    <div class="container">
 
-        <div class="container py-4 text-light bg-success rounded">
-            <h2>Person Viewer</h2>
+        <h3>Person Viewer</h3>
 
-            <div class="row align-items-md-stretch">
-                <!-- Table displaying the list of persons -->
-                <table id="personTable" class="table">
-                    <thead>
+        <!-- Column visibility toggle buttons -->
+        <div class="d-flex flex-wrap mb-3">
+            <button class="btn btn-secondary toggle-column active" data-column="0">ID#</button>
+            <button class="btn btn-secondary toggle-column active" data-column="1">UID</button>
+            <button class="btn btn-secondary toggle-column active" data-column="2">Name</button>
+            <button class="btn btn-secondary toggle-column inactive" data-column="3">Email</button>
+            <button class="btn btn-secondary toggle-column inactive" data-column="4">KSM</button>
+            <button class="btn btn-secondary toggle-column active" data-column="5">PFP</button>
+            <button class="btn btn-secondary toggle-column inactive" data-column="6">SID</button>
+            <button class="btn btn-secondary toggle-column inactive" data-column="7">Balance</button>
+            <button class="btn btn-secondary toggle-column active" data-column="8">Action</button>
+        </div>
+
+        <div class="row align-items-md-stretch">
+            <!-- Table displaying the list of persons -->
+            <table id="personTable" class="table">
+                <thead>
                     <tr>
-                        <th class="sortable">ID#</th>
-                        <th class="sortable">UID</th> <!-- Changed GHID to UID -->
-                        <th class="sortable">UN</th>
-                        <th class="sortable">Email</th> <!-- Added Email column -->
-                        <th class="sortable">Balance</th>
+                        <th>ID#</th>
+                        <th>UID</th>
+                        <th>Name</th>
+                        <th>Email</th>
                         <th>KSM</th>
                         <th>PFP</th>
-                        <th class="sortable">SID</th>
+                        <th>SID</th>
+                        <th>Balance</th>
                         <th>Action</th>
                     </tr>
-                    </thead>
-                    <tbody>
+                </thead>
+                <tbody>
                     <tr th:each="person : ${list}">
                         <td th:text="${person.id}">Person ID</td>
                         <td>
-                            <a th:href="'https://github.com/' + ${person.uid}" target="_blank" th:text="${person.uid}">User UID</a>
+                            <a th:href="'https://github.com/' + ${person.uid}" target="_blank"
+                                th:text="${person.uid}">User UID</a>
                         </td>
                         <td th:text="${person.name}">Name</td>
-                        <td th:text="${person.email}">Email</td> <!-- Display Email -->
-                        <td th:text="${person.balance}">Balance</td>
-                        <!-- Checkbox for Kasm Image status -->
+                        <td th:text="${person.email}">Email</td>
                         <td>
-                            <img th:src="@{${person.kasmServerNeeded} ? 'https://github.com/user-attachments/assets/da1c6827-8c47-4ba9-a979-980eb3c685cd' : 'https://github.com/user-attachments/assets/53e808fc-3c01-4cae-b403-73116a71122f'}" 
-                                 class="custom-checkbox" alt="KSM Status" />
+                            <img th:src="@{${person.kasmServerNeeded} ? 'https://github.com/user-attachments/assets/da1c6827-8c47-4ba9-a979-980eb3c685cd' : 'https://github.com/user-attachments/assets/53e808fc-3c01-4cae-b403-73116a71122f'}"
+                                class="custom-checkbox" alt="KSM Status" />
                         </td>
-                        <!-- Profile Picture column -->
                         <td>
                             <div class="profile-picture-container">
-                                <!-- Profile picture with fallback image on error -->
                                 <a id="profile-link-${person.id}" data-person-id="${person.id}" target="_blank">
                                     <img id="profile-img-${person.id}" th:src="|https://github.com/${person.uid}.png|"
-                                         alt="Profile Picture"
-                                         onerror="this.onerror=null; this.src='https://github.com/user-attachments/assets/13dec9b2-21d6-458e-b099-f5f85ae9caf2';" />
+                                        alt="Profile Picture"
+                                        onerror="this.onerror=null; this.src='https://github.com/user-attachments/assets/13dec9b2-21d6-458e-b099-f5f85ae9caf2';" />
                                 </a>
                             </div>
                         </td>
-
-                        <!-- Scrum Group column -->
                         <td th:text="${person.sid}">Student ID</td>
-
-                        <!-- Actions column for Update and Delete -->
+                        <td th:text="${person.balance}">Balance</td>
                         <td>
-                            <a th:href="@{/mvc/person/update/{id}(id = ${person.id})}" class="btn btn-warning btn-sm">Update</a>
-                            <a th:href="@{/mvc/person/delete/{id}(id = ${person.id})}" class="btn btn-danger btn-sm">Delete</a>
+                            <a th:href="@{/mvc/person/update/{id}(id = ${person.id})}"
+                                class="btn btn-warning btn-sm">Update</a>
+                            <a th:href="@{/mvc/person/delete/{id}(id = ${person.id})}"
+                                class="btn btn-danger btn-sm">Delete</a>
                         </td>
                     </tr>
-                    </tbody>
-                </table>
-            </div>
-
+                </tbody>
+            </table>
         </div>
     </div>
 
     <script src="https://cdn.datatables.net/2.1.8/js/dataTables.js"></script>
 
     <script>
-        const table = $('#personTable').DataTable();
-        // Function to check if an image exists by loading it
-        function imageExists(url) {
-            var img = new Image();
-            img.onload = function() {
-                return true;
-            };
-            img.onerror = function() {
-                return false;
-            };
-            img.src = url;
-        }
-
-        // Function to dynamically update the profile picture link
-        function updateProfilePicture(personId) {
-            var imgUrl = 'https://github.com/' + personId + '.png';
-            var link = document.getElementById('profile-link-' + personId);
-            var img = document.getElementById('profile-img-' + personId);
-
-            // If the image exists, set the link to the profile picture; otherwise, remove the link
-            if (imageExists(imgUrl)) {
-                link.href = imgUrl;
-            } else {
-                link.removeAttribute('href');
-            }
-        }
-
-        // Add sorting to each sortable column (excluding "Action" and "PFP")
-        window.onload = function() {
-            // Update all profile pictures on page load
-            var personIds = document.querySelectorAll('[data-person-id]');
-            personIds.forEach(function(element) {
-                var personId = element.getAttribute('data-person-id');
-                updateProfilePicture(personId);
+        $(document).ready(function () {
+            const table = $('#personTable').DataTable({
+                columnDefs: [
+                    { targets: [3, 4, 6, 7], visible: false } // Hide Email (index 3) and SID (index 6) by default
+                ]
             });
-        };
+
+            // Toggle column visibility and update button styles
+            $('.toggle-column').on('click', function () {
+                const column = table.column($(this).attr('data-column'));
+                const isVisible = column.visible();
+                column.visible(!isVisible);
+
+                // Update button styles
+                $(this).toggleClass('active', !isVisible);
+                $(this).toggleClass('inactive', isVisible);
+            });
+        });
     </script>
 </th:block>
-</body>
 
 </html>

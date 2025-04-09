@@ -89,8 +89,9 @@ public class SynergyViewController {
             model.addAttribute("assignmentGrades", assignmentGrades);
             return "synergy/view_student_grades";
         } else if (user.hasRoleWithName("ROLE_TEACHER") || user.hasRoleWithName("ROLE_ADMIN")) {
-            // Load info from db
-            List<Person> students = personRepository.findPeopleWithRole("ROLE_STUDENT");
+            // Load info from db, for now we'll show everyone but ideally it should only show students in future
+            // List<Person> students = personRepository.findPeopleWithRole("ROLE_STUDENT");
+            List<Person> students = personRepository.findAll();
             List<SynergyGrade> gradesList = gradeRepository.findAll();
             List<SynergyGradeRequest> gradeRequests = gradeRequestRepository.findAll();
 

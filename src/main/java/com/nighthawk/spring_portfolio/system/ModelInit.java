@@ -29,6 +29,8 @@ import com.nighthawk.spring_portfolio.mvc.comment.Comment;
 import com.nighthawk.spring_portfolio.mvc.comment.CommentJPA;
 import com.nighthawk.spring_portfolio.mvc.jokes.Jokes;
 import com.nighthawk.spring_portfolio.mvc.jokes.JokesJpaRepository;
+import com.nighthawk.spring_portfolio.mvc.media.MediaJpaRepository;
+import com.nighthawk.spring_portfolio.mvc.media.Score;
 import com.nighthawk.spring_portfolio.mvc.note.Note;
 import com.nighthawk.spring_portfolio.mvc.note.NoteJpaRepository;
 import com.nighthawk.spring_portfolio.mvc.person.Person;
@@ -77,6 +79,7 @@ public class ModelInit {
     @Autowired AdventureRubricJpaRepository rubricJpaRepository;
     @Autowired AdventureChoiceJpaRepository choiceJpaRepository;
     @Autowired GameJpaRepository gameJpaRepository;
+    @Autowired MediaJpaRepository mediaJpaRepository;
 
     @Bean
     @Transactional
@@ -110,7 +113,7 @@ public class ModelInit {
                 }
             }
 
-            studentService.initialization();
+            studentService.initialization(personArray);
 
 
             
@@ -269,6 +272,18 @@ public class ModelInit {
                 }
             }
 
+
+            //Media Bias Table
+
+            List<Score> scores = new ArrayList<>();
+            scores.add(new Score("Thomas Edison", 0));
+            for (Score score : scores) {
+                List<Score> existingPlayers = mediaJpaRepository.findByPersonName(score.getPersonName());
+
+                if (existingPlayers.isEmpty()) {
+                    mediaJpaRepository.save(score);
+                }
+            }
         };
     }
 }

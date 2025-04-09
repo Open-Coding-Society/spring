@@ -1,15 +1,14 @@
 package com.nighthawk.spring_portfolio.mvc.assignments;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.junit.experimental.theories.internal.Assignments;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -376,7 +375,6 @@ public class AssignmentsApiController {
 
         assignmentRepo.save(assignment);
 
-        System.out.println("hi");
         return ResponseEntity.ok("Persons assigned successfully");
     }
 
@@ -399,6 +397,7 @@ public class AssignmentsApiController {
     }
     
     @GetMapping("/assigned")
+    @Transactional
     public ResponseEntity<?> getAssignedAssignments(@AuthenticationPrincipal UserDetails userDetails) {
         if (userDetails == null) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
@@ -424,5 +423,75 @@ public class AssignmentsApiController {
         }
 
         return ResponseEntity.ok(formattedAssignments);
+    }
+
+    @PostMapping("/randomizeGraders/{id}")
+    @Transactional
+    public ResponseEntity<?> randomizePeerGraders(@PathVariable Long id) {
+        Optional<Assignment> assignmentOptional = assignmentRepo.findById(id);
+        if (!assignmentOptional.isPresent()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Assignment not found");
+        }
+
+        List<AssignmentSubmission> submissions = submissionRepo.findByAssignmentId(id);
+    
+        if (submissions.isEmpty()) {
+            return ResponseEntity.badRequest().body("No submissions found for this assignment");
+        }
+        
+        if (submissions.size() == 1) {
+            return ResponseEntity.badRequest().body("Only one submission found for this assignment, can't really do peer grading");
+        }
+
+        
+        // Keep latest submission
+        Map<Long, AssignmentSubmission> latestSubmissions = submissions.stream()
+        .collect(Collectors.toMap(
+            submission -> submission.getStudents().get(0).getId(), // Get the first student's ID
+            submission -> submission,
+            (existing, replacement) -> replacement
+        ));
+    
+        List<AssignmentSubmission> uniqueSubmissions = new ArrayList<>(latestSubmissions.values());
+
+    
+        Collections.shuffle(uniqueSubmissions);
+    
+        for (int i = 0; i < uniqueSubmissions.size(); i++) {
+            AssignmentSubmission currentSubmission = uniqueSubmissions.get(i);
+            
+            // grader whos not the asme persoon
+            List<AssignmentSubmission> possibleGraders = uniqueSubmissions.stream()
+                .filter(submission -> !submission.getStudents().get(0).equals(currentSubmission.getStudents().get(0))) // just check if the FIRST student is different, will make this better later
+                .collect(Collectors.toList());
+    
+            if (possibleGraders.isEmpty()) {
+                continue; 
+            }
+    
+            // Randomly select
+            AssignmentSubmission graderSubmission = possibleGraders.get(
+                (int)(Math.random() * possibleGraders.size())
+            );
+    
+            // Assign graders to the current submission
+            // Create a new list instead of sharing the existing one
+            currentSubmission.setAssignedGraders(
+                new ArrayList<>(graderSubmission.getStudents())
+            );
+        }
+
+    
+        submissionRepo.saveAll(uniqueSubmissions);
+        // test debug
+        // for (AssignmentSubmission sub : uniqueSubmissions) {
+        //     System.out.println("Submission by: " + sub.getStudents().get(0).getName() + 
+        //                     " is graded by: " + 
+        //                     sub.getAssignedGraders().stream()
+        //                         .map(Person::getName)
+        //                         .collect(Collectors.joining(", ")));
+        // }
+    
+        return ResponseEntity.ok("Graders randomized successfully!");
     }
 }

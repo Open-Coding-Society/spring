@@ -1,13 +1,11 @@
+
 package com.nighthawk.spring_portfolio.mvc.blackjack;
 
-import java.util.ArrayList;
 import java.util.List;
-import java.util.ArrayList;
 import java.util.Map;
 import java.util.Optional;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.util.ArrayList;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.nighthawk.spring_portfolio.mvc.person.Person;
 import com.nighthawk.spring_portfolio.mvc.person.PersonJpaRepository;
+
+import io.jsonwebtoken.lang.Arrays;
 
 @RestController
 @RequestMapping("/api/casino/blackjack")
@@ -184,6 +184,6 @@ public class BlackjackApiController {
         if (obj instanceof List) {
             return (List<String>) obj;
         }
-        return new ArrayList<>();
+        return Arrays.asList(new String[0]);
     }
 }

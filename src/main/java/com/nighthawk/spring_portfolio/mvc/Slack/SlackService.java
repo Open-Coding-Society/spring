@@ -1,17 +1,17 @@
 package com.nighthawk.spring_portfolio.mvc.Slack;
 
-import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
-import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.stereotype.Service;
+import org.springframework.web.client.RestTemplate;
 
 @Service
 public class SlackService {
 
     // Slack Incoming Webhook URL (replace this with your actual webhook URL)
-    private static final String SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/your/slack/webhook";
+    private static final String SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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";
 
     // Method to send a message to Slack
     public void sendMessage(String message) {

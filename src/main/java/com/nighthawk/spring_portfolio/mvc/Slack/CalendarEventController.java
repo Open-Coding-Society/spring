@@ -1,7 +1,5 @@
 package com.nighthawk.spring_portfolio.mvc.Slack;
 
-import java.net.URLDecoder;
-import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.HashMap;
@@ -28,6 +26,7 @@ public class CalendarEventController {
 
     @Autowired
     private CalendarEventService calendarEventService;
+
     @PostMapping("/add")
     public void addEventsFromSlackMessage(@RequestBody Map<String, String> jsonMap) {
         LocalDateTime now = LocalDateTime.now();
@@ -74,7 +73,6 @@ public class CalendarEventController {
         }
     }
 
-
     @GetMapping("/events/{date}")
     public List<CalendarEvent> getEventsByDate(@PathVariable String date) {
         LocalDate localDate = LocalDate.parse(date);
@@ -87,6 +85,7 @@ public class CalendarEventController {
         try {
             String newTitle = payload.get("newTitle");
             String description = payload.get("description");
+            String dateStr = payload.get("date");
 
             if (newTitle == null || newTitle.trim().isEmpty()) {
                 return ResponseEntity.badRequest().body("New title cannot be null or empty.");
@@ -94,16 +93,25 @@ public class CalendarEventController {
             if (description == null || description.trim().isEmpty()) {
                 return ResponseEntity.badRequest().body("Description cannot be null or empty.");
             }
+            if (dateStr == null || dateStr.trim().isEmpty()) {
+                return ResponseEntity.badRequest().body("Date cannot be null or empty.");
+            }
 
-            boolean updated = calendarEventService.updateEventById(id, newTitle.trim(), description.trim());
+            LocalDate date;
+            try {
+                date = LocalDate.parse(dateStr);
+            } catch (Exception e) {
+                return ResponseEntity.badRequest().body("Invalid date format. Use YYYY-MM-DD.");
+            }
+
+            boolean updated = calendarEventService.updateEventById(id, newTitle.trim(), description.trim(), date);
             return updated ? ResponseEntity.ok("Event updated successfully.")
-                        : ResponseEntity.status(HttpStatus.NOT_FOUND).body("Event with the given title not found.");
+                        : ResponseEntity.status(HttpStatus.NOT_FOUND).body("Event with the given id not found.");
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("An error occurred while updating the event: " + e.getMessage());
         }
-}
-
+    }
 
     @GetMapping("/events")
     public List<CalendarEvent> getAllEvents() {
@@ -123,29 +131,17 @@ public class CalendarEventController {
     @DeleteMapping("/delete/{id}")
     @CrossOrigin(origins = {"http://127.0.0.1:4100","https://nighthawkcoders.github.io/portfolio_2025/"}, allowCredentials = "true")
     public ResponseEntity<String> deleteEvent(@PathVariable int id) {
-        // Decode the title to handle multi-word or special character titles
-        // Log the decoded title for debugging purposes
         System.out.println("Attempting to delete event...");
         try {
-            // Call your service to delete the event
             boolean deleted = calendarEventService.deleteEventById(id);
-            // If the event wasn't found and deleted, return a 404 response
             if (!deleted) {
-                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Event with the given title not found.");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Event with the given id not found.");
             }
-            // Return a success response if the event is deleted
             return ResponseEntity.ok("Event deleted successfully.");
         } catch (Exception e) {
-            // Log the exception and return a 500 error response
             e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("An error occurred: " + e.getMessage());
         }
     }
-
-
-
-
-
-
 }

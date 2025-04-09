@@ -1,11 +1,7 @@
 package com.nighthawk.spring_portfolio.mvc.rpg.gamifyGame;
 
-
-
-import java.util.ArrayList;
-
 import com.nighthawk.spring_portfolio.mvc.person.Person;
-import com.nighthawk.spring_portfolio.mvc.person.Person;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;

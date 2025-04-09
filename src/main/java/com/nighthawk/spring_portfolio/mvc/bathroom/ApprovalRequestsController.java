@@ -9,9 +9,6 @@ import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
 
-import com.nighthawk.spring_portfolio.mvc.person.Person;
-import com.nighthawk.spring_portfolio.mvc.person.PersonJpaRepository;
-
 @Controller  // This is needed to serve Thymeleaf templates
 public class ApprovalRequestsController {
 

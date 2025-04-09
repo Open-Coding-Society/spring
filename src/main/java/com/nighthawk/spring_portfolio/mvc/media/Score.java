@@ -40,29 +40,4 @@ public class Score {
         this.personName = personName;
         this.score = score;
     }
-
-    @Service
-    public static class ScoreService {
-        
-        @Autowired
-        private MediaJpaRepository mediaJpaRepository;
-
-        @PostConstruct
-        public void initializeScores() {
-            if (mediaJpaRepository == null) {
-                throw new RuntimeException("Leaderboard is not initialized!");
-            }
-            
-            List<Score> scores = new ArrayList<>();
-            scores.add(new Score("Thomas Edison", 0));
-
-            for (Score score : scores) {
-                List<Score> existingPlayers = mediaJpaRepository.findByPersonName(score.personName);
-                
-                if (existingPlayers.isEmpty()) {
-                    mediaJpaRepository.save(score);
-                }
-            }
-        }
-    }
 }

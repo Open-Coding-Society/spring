@@ -11,36 +11,33 @@ import org.springframework.data.repository.query.Param;
 public interface StudentInfoJPARepository extends JpaRepository<StudentInfo, Long> {
     Optional<StudentInfo> findByUsername(String username);
     @Query(
-        value = "SELECT * FROM students WHERE course = :course AND trimester = :trimester AND period = :period AND table_number = :table",
+        value = "SELECT * FROM students WHERE course = :course AND period = :period AND table_number = :table",
         nativeQuery = true
     )
     List<StudentInfo> findTeam(
         @Param("course") String course, 
-        @Param("trimester") int trimester, 
         @Param("period") int period,
         @Param("table") int table
     );
 
     @Query(
-        value = "SELECT * FROM students WHERE course = :course AND trimester = :trimester AND period = :period",
+        value = "SELECT * FROM students WHERE course = :course AND period = :period",
         nativeQuery = true
     )
     List<StudentInfo> findPeriod(
         @Param("course") String course, 
-        @Param("trimester") int trimester, 
         @Param("period") int period
     );
 
 
 
     @Query(
-        value = "SELECT * FROM students WHERE username = :username AND course = :course AND trimester = :trimester AND period = :period",
+        value = "SELECT * FROM students WHERE username = :username AND course = :course AND period = :period",
         nativeQuery = true
     )
-    List<StudentInfo> findByUsernameCourseTrimesterPeriod(
+    List<StudentInfo> findByUsernameCoursePeriod(
         @Param("username") String username, 
         @Param("course") String course, 
-        @Param("trimester") int trimester, 
         @Param("period") int period
     );
 

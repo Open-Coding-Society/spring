@@ -2,6 +2,7 @@ package com.nighthawk.spring_portfolio.mvc.person;
 
 import java.util.List;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,6 +25,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.security.core.GrantedAuthority;
 import jakarta.validation.Valid;
+
+import org.springframework.http.HttpHeaders;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -146,6 +149,10 @@ public class PersonViewController {
         if (person.getSid() != null && !person.getSid().equals(personToUpdate.getSid())) {
             personToUpdate.setSid(person.getSid());
         }
+        if (person.getBalance() != null && !person.getBalance().equals(personToUpdate.getBalance())) {
+            personToUpdate.setBalance(person.getBalance());
+        }
+                
 
         // Save the updated person and ensure the roles are correctly maintained
         repository.save(personToUpdate, samePassword);
@@ -369,28 +376,81 @@ public class PersonViewController {
     @Getter
     public static class PersonVerificationBody {
         private String uid;
+        private String code;
     }
 
-    @PostMapping("/verficiation")
+    @PostMapping("/verification")
     public ResponseEntity<Object> verficiation(@RequestBody PersonVerificationBody personVerificationBody) {
         if(personVerificationBody.getUid() == null){
-            return new ResponseEntity<Object>(HttpStatus.BAD_REQUEST);
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String body = "{\"state\":0}"; //0 == failed
+            return new ResponseEntity<Object>(body,responseHeaders,HttpStatus.BAD_REQUEST);
         }
 
         if(personVerificationBody.getUid().contains("@")){
             //assuming uid is an email
             String code = VerificationCode.GenerateVerificationCode(personVerificationBody.getUid());
             Email.sendVerificationEmail(personVerificationBody.getUid(),code);
-            new ResponseEntity<Object>(HttpStatus.OK);
+
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String body = "{\"state\":2}"; //2 == email
+            return new ResponseEntity<Object>(body,responseHeaders,HttpStatus.OK);
         }
         else{
             if(HttpSender.verifyGithub(personVerificationBody.getUid())==true){
-                new ResponseEntity<Object>(HttpStatus.OK);
+                HttpHeaders responseHeaders = new HttpHeaders();
+                responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+                String body = "{\"state\":1}"; //1 == success
+                return new ResponseEntity<Object>(body,responseHeaders,HttpStatus.OK);
             };
-            new ResponseEntity<Object>(HttpStatus.NOT_FOUND);
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String body = "{\"state\":0}"; //0 == failed
+            return new ResponseEntity<Object>(body,responseHeaders,HttpStatus.NOT_FOUND);
+        }
+    }
+
+    @PostMapping("/verification/code")
+    public ResponseEntity<Object> verficiationWithCode(@RequestBody PersonVerificationBody personVerificationBody) {
+
+        //person not found
+        if (personVerificationBody.getUid() == null){
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String body = "{\"state\":0}"; //0 == failed
+            return new ResponseEntity<Object>(body,responseHeaders,HttpStatus.BAD_REQUEST);
         }
 
-        return new ResponseEntity<Object>(HttpStatus.BAD_REQUEST);
+        // code to check doesn't exist
+        if(personVerificationBody.getCode() == null){
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String body = "{\"state\":0}"; //0 == failed
+            return new ResponseEntity<Object>(body,responseHeaders,HttpStatus.BAD_REQUEST);
+        }
+
+        if(VerificationCode.getCodeForUid(personVerificationBody.getUid()) == null){
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String body = "{\"state\":0}"; //0 == failed
+            return new ResponseEntity<Object>(body,responseHeaders,HttpStatus.NO_CONTENT);
+        }
+
+        //if there is a code submitted for the given uid, and it matches the code that is expected, then reset the users password
+        if(VerificationCode.getCodeForUid(personVerificationBody.getUid()).equals(personVerificationBody.getCode())){
+            VerificationCode.removeCodeByUid(personVerificationBody.getUid());
+
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            String body = "{\"state\":1}"; //1 == success
+            return new ResponseEntity<Object>(body,responseHeaders,HttpStatus.OK);
+        }
+        HttpHeaders responseHeaders = new HttpHeaders();
+        responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+        String body = "{\"state\":0}"; //0 == failed
+        return new ResponseEntity<Object>(body,responseHeaders,HttpStatus.BAD_REQUEST);
     }
 
 }

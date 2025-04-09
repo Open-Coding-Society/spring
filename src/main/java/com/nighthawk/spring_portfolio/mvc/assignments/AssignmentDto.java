@@ -2,7 +2,7 @@ package com.nighthawk.spring_portfolio.mvc.assignments;
 
 import java.util.List;
 import java.util.stream.Collectors;
-import lombok.Getter;
+
 import lombok.Setter;
 
 @Setter

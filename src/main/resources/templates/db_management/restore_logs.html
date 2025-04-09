@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <title>Database Restore Logs</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+        }
+        .log-entry {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+        }
+        .log-entry:nth-child(odd) {
+            background-color: #f9f9f9;
+        }
+        .empty-message {
+            color: #666;
+            font-style: italic;
+        }
+        .back-button {
+            display: inline-block;
+            margin-top: 20px;
+            padding: 8px 16px;
+            background-color: #4285f4;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+        }
+        .back-button:hover {
+            background-color: #3367d6;
+        }
+        .timestamp {
+            font-weight: bold;
+            color: #555;
+        }
+        .failure {
+            color: #d32f2f;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Database Restore Logs</h1>
+        
+        <div th:if="${logs.isEmpty()}" class="empty-message">
+            No restore operations have been logged yet.
+        </div>
+        
+        <div th:if="${!logs.isEmpty()}">
+            <div th:each="log : ${logs}" class="log-entry">
+                <span th:if="${log.contains('FAILED')}" class="failure" th:text="${log}"></span>
+                <span th:unless="${log.contains('FAILED')}" th:text="${log}"></span>
+            </div>
+        </div>
+        
+        <a th:href="@{/api/imports/backups}" class="back-button">Back to Backups</a>
+    </div>
+</body>
+</html>

@@ -1,9 +1,9 @@
 <!DOCTYPE HTML>
 <html xmlns:layout="http://www.w3.org/1999/xhtml" xmlns:th="http://www.w3.org/1999/xhtml"
-      layout:decorate="~{layouts/base}" lang="en">
+    layout:decorate="~{layouts/base}" lang="en">
 
-<head>
-    <title>Teacher Toolkit - Period 1</title>
+<!-- page style -->
+<th:block layout:fragment="style" th:remove="tag">
     <style>
         /* Navigation Bar */
         .navbar {
@@ -13,6 +13,7 @@
             padding: 10px 0;
             font-size: 18px;
         }
+
         .navbar a {
             margin: 0 15px;
             color: #ebebeb;
@@ -37,6 +38,7 @@
             gap: 10px;
             padding: 20px;
         }
+
         .search-container select {
             width: 300px;
             padding: 8px;
@@ -44,6 +46,7 @@
             border: 1px solid #ccc;
             font-size: 16px;
         }
+
         .search-container button {
             padding: 8px 12px;
             font-size: 16px;
@@ -81,13 +84,14 @@
             align-items: center;
             justify-content: center;
         }
-        
+
         /* Table Icon Styling */
         .table-icon {
             position: relative;
             width: 200px;
             height: 200px;
         }
+
         .table {
             position: absolute;
             top: 50%;
@@ -98,6 +102,7 @@
             transform: translate(-50%, -50%);
             border-radius: 5px;
         }
+
         .chair {
             position: absolute;
             width: 30px;
@@ -105,96 +110,133 @@
             background-color: #555;
             border-radius: 50%;
         }
-        .chair1 { top: 5px; left: 50%; transform: translateX(-50%); }
-        .chair2 { bottom: 5px; left: 50%; transform: translateX(-50%); }
-        .chair3 { left: 35px; top: 50%; transform: translateY(10%); }
-        .chair4 { right: 35px; top: 50%; transform: translateY(10%); }
-        .chair5 { left: 35px; top: 50%; transform: translateY(-110%); }
-        .chair6 { right: 35px; top: 50%; transform: translateY(-110%); }
+
+        .chair1 {
+            top: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .chair2 {
+            bottom: 5px;
+            left: 50%;
+            transform: translateX(-50%);
+        }
+
+        .chair3 {
+            left: 35px;
+            top: 50%;
+            transform: translateY(10%);
+        }
+
+        .chair4 {
+            right: 35px;
+            top: 50%;
+            transform: translateY(10%);
+        }
+
+        .chair5 {
+            left: 35px;
+            top: 50%;
+            transform: translateY(-110%);
+        }
+
+        .chair6 {
+            right: 35px;
+            top: 50%;
+            transform: translateY(-110%);
+        }
+
         .table-icon:hover .chair {
             background-color: #FFD700;
         }
     </style>
-</head>
+</th:block>
 
-<body>
-    <div layout:fragment="body" th:remove="tag">
-        <!-- Navigation Bar -->
-        <div class="navbar">
-            <a th:href="@{/mvc/student/tablesper1}">Period 1</a>
-            <a th:href="@{/mvc/student/tablesper3}">Period 3</a>
+<!-- page title -->
+<th:block layout:fragment="title" th:remove="tag">Teacher Toolkit - Period 1</th:block>
+
+<!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
+<th:block layout:fragment="body" th:remove="tag">
+    <!-- Navigation Bar -->
+    <div class="navbar">
+        <a th:href="@{/mvc/student/tablesper1}">Period 1</a>
+        <a th:href="@{/mvc/student/tablesper3}">Period 3</a>
+    </div>
+
+    <!-- Period Header -->
+    <div class="period-header">Period 1</div>
+
+    <!-- Search Bar with Dropdown -->
+    <div class="search-container">
+        <select id="studentDropdown">
+            <option value="">Select a student</option>
+        </select>
+        <button onclick="searchStudent()">Search</button>
+    </div>
+
+    <!-- Tables Section (One Table Per Row) -->
+    <div class="tables-container">
+        <div>
+            <button class="table-button" onclick="fetchRequest(1)">
+                <div class="table-icon">
+                    <div class="table"></div>
+                    <div class="chair chair1"></div>
+                    <div class="chair chair2"></div>
+                    <div class="chair chair3"></div>
+                    <div class="chair chair4"></div>
+                    <div class="chair chair5"></div>
+                    <div class="chair chair6"></div>
+                </div>
+                Table 1
+            </button>
         </div>
-
-        <!-- Period Header -->
-        <div class="period-header">Period 1</div>
-
-        <!-- Search Bar with Dropdown -->
-        <div class="search-container">
-            <select id="studentDropdown">
-                <option value="">Select a student</option>
-            </select>
-            <button onclick="searchStudent()">Search</button>
+        <div>
+            <button class="table-button" onclick="fetchRequest(2)">
+                <div class="table-icon">
+                    <div class="table"></div>
+                    <div class="chair chair1"></div>
+                    <div class="chair chair2"></div>
+                    <div class="chair chair3"></div>
+                    <div class="chair chair4"></div>
+                    <div class="chair chair5"></div>
+                    <div class="chair chair6"></div>
+                </div>
+                Table 2
+            </button>
         </div>
-
-        <!-- Tables Section (One Table Per Row) -->
-        <div class="tables-container">
-            <div>
-                <button class="table-button" onclick="fetchRequest(1)">
-                    <div class="table-icon">
-                        <div class="table"></div>
-                        <div class="chair chair1"></div>
-                        <div class="chair chair2"></div>
-                        <div class="chair chair3"></div>
-                        <div class="chair chair4"></div>
-                        <div class="chair chair5"></div>
-                        <div class="chair chair6"></div>
-                    </div>
-                    Table 1
-                </button>
-            </div>
-            <div>
-                <button class="table-button" onclick="fetchRequest(2)">
-                    <div class="table-icon">
-                        <div class="table"></div>
-                        <div class="chair chair1"></div>
-                        <div class="chair chair2"></div>
-                        <div class="chair chair3"></div>
-                        <div class="chair chair4"></div>
-                        <div class="chair chair5"></div>
-                        <div class="chair chair6"></div>
-                    </div>
-                    Table 2
-                </button>
-            </div>
-            <div>
-                <button class="table-button" onclick="fetchRequest(3)">
-                    <div class="table-icon">
-                        <div class="table"></div>
-                        <div class="chair chair1"></div>
-                        <div class="chair chair2"></div>
-                        <div class="chair chair3"></div>
-                        <div class="chair chair4"></div>
-                        <div class="chair chair5"></div>
-                        <div class="chair chair6"></div>
-                    </div>
-                    Table 3
-                </button>
-            </div>
+        <div>
+            <button class="table-button" onclick="fetchRequest(3)">
+                <div class="table-icon">
+                    <div class="table"></div>
+                    <div class="chair chair1"></div>
+                    <div class="chair chair2"></div>
+                    <div class="chair chair3"></div>
+                    <div class="chair chair4"></div>
+                    <div class="chair chair5"></div>
+                    <div class="chair chair6"></div>
+                </div>
+                Table 3
+            </button>
         </div>
+    </div>
+</th:block>
+<!-- End of the body fragment -->
 
-        <script type="text/javascript">
-            function loadStudents() {
-                const requestBody = {
-                    period: 1,
-                    course: "CSA",
-                    trimester: 2
-                };
+<th:block layout:fragment="script" th:remove="tag">
+    <script type="text/javascript">
+        function loadStudents() {
+            const requestBody = {
+                period: 1,
+                course: "CSA",
+                trimester: 2
+            };
 
-                fetch('/api/students/find-period', {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(requestBody)
-                })
+            fetch('/api/students/find-period', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(requestBody)
+            })
                 .then(response => response.json())
                 .then(data => {
                     const dropdown = document.getElementById("studentDropdown");
@@ -208,27 +250,27 @@
                     });
                 })
                 .catch(error => console.error("Error fetching student data:", error));
+        }
+
+        function searchStudent() {
+            const selectedUsername = document.getElementById("studentDropdown").value;
+            if (!selectedUsername) {
+                alert("Please select a student.");
+                return;
             }
 
-            function searchStudent() {
-                const selectedUsername = document.getElementById("studentDropdown").value;
-                if (!selectedUsername) {
-                    alert("Please select a student.");
-                    return;
-                }
+            const criteriaDto = {
+                username: selectedUsername,
+                course: "CSA",
+                trimester: 2,
+                period: 1
+            };
 
-                const criteriaDto = {
-                    username: selectedUsername,
-                    course: "CSA",
-                    trimester: 2,
-                    period: 1
-                };
-
-                fetch('/api/students/find', {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(criteriaDto)
-                })
+            fetch('/api/students/find', {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(criteriaDto)
+            })
                 .then(response => response.json())
                 .then(data => {
                     const params = new URLSearchParams({
@@ -243,15 +285,14 @@
                     console.error("Error:", error);
                     alert("Student not found.");
                 });
-            }
+        }
 
-            function fetchRequest(tableNumber) {
-                window.location.href = '/mvc/student/tabledetails?table=' + tableNumber + '&period=1';
-            }
+        function fetchRequest(tableNumber) {
+            window.location.href = '/mvc/student/tabledetails?table=' + tableNumber + '&period=1';
+        }
 
-            window.onload = loadStudents;
-        </script>
-    </div>
-</body>
+        window.onload = loadStudents;
+    </script>
+</th:block>
 
 </html>

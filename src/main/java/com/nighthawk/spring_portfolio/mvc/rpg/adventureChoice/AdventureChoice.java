@@ -40,156 +40,127 @@ public class AdventureChoice {
     public static String[][] init() {
         return new String[][] {
             // GitHub Command Quiz
-            {"1", "git fork", "false"},
-            {"1", "git copy", "false"},
-            {"1", "git clone", "true"},
-            {"1", "git download", "false"},
+            {"1", "capital goods.", "false"},
+            {"1", "scarcity.", "false"},
+            {"1", "opportunity cost.", "true"},
+            {"1", "noneconomic wants.", "false"},
+
+            {"2", "manipulate financial data to indicate profitability.", "false"},
+            {"2", "ensure that it is following government regulations.", "true"},
+            {"2", "develop efficient production processes.", "false"},
+            {"2", "evaluate its vendors' performance.", "false"},
+
+            {"3", "Ease of transitions", "false"},
+            {"3", "Decreased cost", "true"},
+            {"3", "Increased efficiency  ", "false"},
+            {"3", "Risk of increased fraud", "false"},
+
+            {"4", "To automate financial decision-making.", "true"},
+            {"4", "To manage physical office supplies.", "false"},
+            {"4", "To handle customer complaints manually.", "false"},
+            {"4", "To replace all employees.", "false"},
+
+            {"5", "Git.", "true"},
+            {"5", "Excel.", "false"},
+            {"5", "Slack.", "false"},
+            {"5", "Zoom.", "false"},
+
+            {"6", "Phishing.", "true"},
+            {"6", "Cloud backup.", "false"},
+            {"6", "Two-factor authentication.", "false"},
+            {"6", "VPN usage.", "false"},
+
+            {"7", "Allows access from multiple locations and devices.", "true"},
+            {"7", "Eliminates the need for internet.", "false"},
+            {"7", "Requires local installation of all software.", "false"},
+            {"7", "Only works on weekends.", "false"},
+
+            {"8", "To identify and fix software bugs.", "true"},
+            {"8", "To redesign UI only.", "false"},
+            {"8", "To launch advertisements.", "false"},
+            {"8", "To reset passwords.", "false"},
+
+            {"9", "It protects data from unauthorized access.", "true"},
+            {"9", "It compresses image files.", "false"},
+            {"9", "It blocks websites.", "false"},
+            {"9", "It stores files temporarily.", "false"},
+
+            {"10", "Collaboration and adaptability in development.", "true"},
+            {"10", "Avoiding feedback loops.", "false"},
+            {"10", "Heavy reliance on documentation only.", "false"},
+            {"10", "Complete design before any coding.", "false"},
+
+            {"11", "Enables software to communicate with other software.", "true"},
+            {"11", "Increases screen resolution.", "false"},
+            {"11", "Secures Wi-Fi networks.", "false"},
+            {"11", "Manages employee schedules.", "false"},
+
+            {"12", "It protects digital assets from attacks.", "true"},
+            {"12", "It slows down network speed.", "false"},
+            {"12", "It creates physical backups.", "false"},
+            {"12", "It tracks time usage.", "false"},
+        
+            {"13", "Interest earned only on principal", "false"},
+            {"13", "Interest earned on both principal and previously earned interest", "true"},
+            {"13", "A tax deduction", "false"},
+            {"13", "Simple interest", "false"},
+
+          
+            {"14", "Bonds", "false"},
+            {"14", "Savings accounts", "false"},
+            {"14", "Index funds", "false"},
+            {"14", "Individual stocks", "true"},
+
+       
+            {"15", "Putting all your money in one stock", "false"},
+            {"15", "Investing in crypto only", "false"},
+            {"15", "Spreading investments across different assets", "true"},
+            {"15", "Selling all investments before a crash", "false"},
+
+           
+            {"16", "A market where prices are rising", "false"},
+            {"16", "A market where prices are stable", "false"},
+            {"16", "A market where prices are falling", "true"},
+            {"16", "A market with rapid trades", "false"},
+
+        
+            {"17", "Electronic Transfer Fund", "false"},
+            {"17", "Exchange-Traded Fund", "true"},
+            {"17", "Equity Tax Fund", "false"},
+            {"17", "Emergency Treasury Fund", "false"},
+
+    
+            {"18", "IRA", "false"},
+            {"18", "403b", "false"},
+            {"18", "401k", "true"},
+            {"18", "HSA", "false"},
+
             
-            {"2", "git commit", "false"},
-            {"2", "git push", "false"},
-            {"2", "git add", "true"},
-            {"2", "git stage", "false"},
+            {"19", "principal", "true"},
+            {"19", "dividend", "false"},
+            {"19", "yield", "false"},
+            {"19", "revenue", "false"},
+
+       
+            {"20", "Stocks", "false"},
+            {"20", "Bond", "true"},
+            {"20", "Mutual funds", "false"},
+            {"20", "Real estate", "false"},
+
             
-            {"3", "git add", "false"},
-            {"3", "git commit", "true"},
-            {"3", "git save", "false"},
-            {"3", "git push", "false"},
+            {"21", "Bear", "false"},
+            {"21", "Bull", "true"},
+            {"21", "Correction", "false"},
+            {"21", "Crash", "false"},
+
             
-            {"4", "git commit", "false"},
-            {"4", "git send", "false"},
-            {"4", "git push", "true"},
-            {"4", "git upload", "false"},
-            
-            {"5", "git pull", "true"},
-            {"5", "git receive", "false"},
-            {"5", "git update", "false"},
-            {"5", "git fetch", "false"},
-            
-            {"6", "git log", "false"},
-            {"6", "git check", "false"},
-            {"6", "git info", "false"},
-            {"6", "git status", "true"},
-            
-            {"7", "git create-branch", "false"},
-            {"7", "git branch", "true"},
-            {"7", "git checkout", "false"},
-            {"7", "git new-branch", "false"},
-            
-            {"8", "git checkout", "true"},
-            {"8", "git change-branch", "false"},
-            {"8", "git switch", "false"},
-            {"8", "git branch", "false"},
-            
-            {"9", "git integrate", "false"},
-            {"9", "git join", "false"},
-            {"9", "git combine", "false"},
-            {"9", "git merge", "true"},
-            
-            {"10", "git commits", "false"},
-            {"10", "git show", "false"},
-            {"10", "git history", "false"},
-            {"10", "git log", "true"},
-            
-            {"11", "list", "false"},
-            {"11", "dir", "false"},
-            {"11", "show", "false"},
-            {"11", "ls", "true"},
-            
-            {"12", "cd", "true"},
-            {"12", "changedirectory", "false"},
-            {"12", "chdir", "false"},
-            {"12", "changedir", "false"},
-            
-            {"13", "mkdir", "true"},
-            {"13", "makedir", "false"},
-            {"13", "newdir", "false"},
-            {"13", "createdir", "false"},
-            
-            {"14", "rm", "true"},
-            {"14", "delete", "false"},
-            {"14", "erase", "false"},
-            {"14", "remove", "false"},
-            
-            {"15", "rmdir", "true"},
-            {"15", "deletedir", "false"},
-            {"15", "removedir", "false"},
-            {"15", "erasedir", "false"},
-            
-            {"16", "cp", "true"},
-            {"16", "xerox", "false"},
-            {"16", "duplicate", "false"},
-            {"16", "copy", "false"},
-            
-            {"17", "move", "false"},
-            {"17", "mv", "true"},
-            {"17", "relocate", "false"},
-            {"17", "transfer", "false"},
-            
-            {"18", "cat", "true"},
-            {"18", "display", "false"},
-            {"18", "show", "false"},
-            {"18", "view", "false"},
-            
-            {"19", "grep", "true"},
-            {"19", "locate", "false"},
-            {"19", "find", "false"},
-            {"19", "search", "false"},
-            
-            {"20", "less", "true"},
-            {"20", "more", "false"},
-            {"20", "cat", "false"},
-            {"20", "view", "false"},
-            
-            {"21", "Shift + Enter", "true"},
-            {"21", "Ctrl + Enter", "false"},
-            {"21", "Alt + Enter", "false"},
-            {"21", "Tab + Enter", "false"},
-            
-            {"22", "A", "true"},
-            {"22", "B", "false"},
-            {"22", "C", "false"},
-            {"22", "D", "false"},
-            
-            {"23", "B", "true"},
-            {"23", "A", "false"},
-            {"23", "C", "false"},
-            {"23", "D", "false"},
-            
-            {"24", "M", "true"},
-            {"24", "Y", "false"},
-            {"24", "R", "false"},
-            {"24", "K", "false"},
-            
-            {"25", "Y", "true"},
-            {"25", "M", "false"},
-            {"25", "C", "false"},
-            {"25", "D", "false"},
-            
-            {"26", "D, D", "true"},
-            {"26", "X", "false"},
-            {"26", "Del", "false"},
-            {"26", "Ctrl + D", "false"},
-            
-            {"27", "Ctrl + S", "true"},
-            {"27", "Shift + S", "false"},
-            {"27", "Tab + S", "false"},
-            {"27", "Alt + S", "false"},
-            
-            {"28", "0, 0", "true"},
-            {"28", "R, R", "false"},
-            {"28", "K, K", "false"},
-            {"28", "Shift + R", "false"},
-            
-            {"29", "I, I", "true"},
-            {"29", "Ctrl + C", "false"},
-            {"29", "Shift + I", "false"},
-            {"29", "Alt + I", "false"},
-            
-            {"30", "L", "true"},
-            {"30", "N", "false"},
-            {"30", "T", "false"},
-            {"30", "G", "false"}
+            {"22", "HSA", "false"},
+            {"22", "IRA", "true"},
+            {"22", "ETF", "false"},
+            {"22", "GDP", "false"},
+
         };
+
     }
     
 }

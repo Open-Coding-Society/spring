@@ -112,6 +112,10 @@
             border-radius: 8px;
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
         }
+        .btn-randomize {
+            background-color: #6610f2;
+        }
+
 
         .close-btn {
             color: #aaa;
@@ -149,6 +153,7 @@
                 padding: 8px 16px;
             }
         }
+        
     </style>
 </head>
 
@@ -191,6 +196,16 @@
                 </div>
             </div>
             
+            <div id="randomizeGradersModal" class="modal">
+                <div class="modal-content">
+                    <span class="close-btn" onclick="closeRandomizeGradersModal()">&times;</span>
+                    <h2>Randomize Graders</h2>
+                    <p>Are you sure you want to randomly assign graders for this assignment?</p>
+                    <button class="btn" onclick="confirmRandomizeGraders()">Confirm</button>
+                    <button class="btn" onclick="closeRandomizeGradersModal()">Cancel</button>
+                </div>
+            </div>
+
             <table id="assignmentTable">
                 <thead>
                     <tr>
@@ -288,17 +303,18 @@
                 assignments.forEach(assignment => {
                     const row = document.createElement('tr');
                     row.innerHTML = `
-                        <td>${assignment.name}</td>
-                        <td>${assignment.type}</td>
-                        <td>${assignment.description || ''}</td>
-                        <td>${assignment.points}</td>
-                        <td>${assignment.dueDate}</td>
-                        <td>
-                            <button class="btn btn-view-submissions" onclick="viewSubmissions(${assignment.id})">View Submissions</button>
-                            <button class="btn btn-delete" onclick="deleteAssignment('${assignment.id}')">Delete</button>
-                            <button class="btn btn-grade" onclick="showAssignToGradeModal(${assignment.id})">Assign to Grade</button>
-                        </td>
-                    `;
+                    <td>${assignment.name}</td>
+                    <td>${assignment.type}</td>
+                    <td>${assignment.description || ''}</td>
+                    <td>${assignment.points}</td>
+                    <td>${assignment.dueDate}</td>
+                    <td>
+                        <button class="btn btn-view-submissions" onclick="viewSubmissions(${assignment.id})">View Submissions</button>
+                        <button class="btn btn-delete" onclick="deleteAssignment('${assignment.id}')">Delete</button>
+                        <button class="btn btn-grade" onclick="showAssignToGradeModal(${assignment.id})">Assign to Grade</button>
+                        <button class="btn btn-randomize" onclick="showRandomizeGradersModal(${assignment.id})">Randomize Graders</button>
+                    </td>
+                `;
                     tableBody.appendChild(row);
                 });
             });
@@ -586,8 +602,42 @@
             item.style.display = 'none'; // Hide item
         }
     });
+
+    
 }
 
+// Functions for randomize graders modal
+function showRandomizeGradersModal(assignmentId) {
+        const modal = document.getElementById('randomizeGradersModal');
+        modal.dataset.assignmentId = assignmentId;
+        modal.style.display = 'block';
+    }
+
+function closeRandomizeGradersModal() {
+    document.getElementById('randomizeGradersModal').style.display = 'none';
+}
+function confirmRandomizeGraders() {
+    const modal = document.getElementById('randomizeGradersModal');
+    const assignmentId = modal.dataset.assignmentId;
+
+    fetch(`/api/assignments/randomizeGraders/${assignmentId}`, {
+        method: 'POST'
+    })
+    .then(response => {
+        if (response.ok) {
+            alert('Graders randomized successfully!');
+            closeRandomizeGradersModal();
+        } else {
+            return response.text().then(errorMsg => {
+                throw new Error(errorMsg);
+            });
+        }
+    })
+    .catch(error => {
+        console.error('Error randomizing graders:', error);
+        alert('Failed to randomize graders: ' + error.message);
+    });
+}
 </script>
 </th:block>
 </html>

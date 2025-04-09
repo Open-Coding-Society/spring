@@ -4,11 +4,11 @@
 <html xmlns:layout="http://www.w3.org/1999/xhtml" xmlns:th="http://www.w3.org/1999/xhtml"
       layout:decorate="~{layouts/base}" lang="en">
 
-<head>
-    <title>Tinkle Time</title>
+<!-- page style -->
+<th:block layout:fragment="style" th:remove="tag">
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <style>
-        .container {
+        .container-page {
             max-width: 600px;
         }
         #additionalInput {
@@ -18,15 +18,18 @@
             color: black; 
         }
     </style>
-</head>
-
-<body>
-    <th:block layout:fragment="body" th:remove="tag">
-<div class="container py-5 text-center">
-    <h1 class="display-4">Thank You!</h1>
-    <p class="lead">Your hall pass request has been successfully processed.</p>
-    <p class="mt-4">We hope you find your time helpful. If you need further assistance, please reach out to your teacher.</p>
-</div>
 </th:block>
-</body>
+
+<!-- page title -->
+<th:block layout:fragment="title" th:remove="tag">Tinkle Time</th:block>
+
+<!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
+<th:block layout:fragment="body" th:remove="tag">
+    <div class="container-page py-5 text-center">
+        <h1 class="display-4">Thank You!</h1>
+        <p class="lead">Your hall pass request has been successfully processed.</p>
+        <p class="mt-4">We hope you find your time helpful. If you need further assistance, please reach out to your teacher.</p>
+    </div>
+</th:block>
+
 </html>
