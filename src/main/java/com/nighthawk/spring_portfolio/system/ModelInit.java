@@ -251,6 +251,7 @@ public class ModelInit {
 
                     // create sample submission
                     submissionJPA.save(new AssignmentSubmission(newAssignment, List.of(personJpaRepository.findByUid("madam")), "test submission","test comment", false));
+                    submissionJPA.save(new AssignmentSubmission(newAssignment, List.of(personJpaRepository.findByUid("madam")), "oiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfooiasjdfoajsdofjasoidjfoisajdfo","test comment", false));
                 }
             }
 
