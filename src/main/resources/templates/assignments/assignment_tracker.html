@@ -8,7 +8,7 @@
     <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.3.6/css/buttons.dataTables.min.css" />
     <style>
         .container {
-            max-width: 1000px;
+            max-width: 1200px;
             margin: 20px auto;
             padding: 20px;
             font-family: Arial, sans-serif;
@@ -296,12 +296,13 @@
                     .then(assignments => {
                         assignmentTable.clear();
                         assignments.forEach(assignment => {
+                            const formattedDueDate = formatDate(assignment.dueDate);
                             assignmentTable.row.add([
                                 assignment.name,
                                 assignment.type,
                                 assignment.description || '',
                                 assignment.points,
-                                assignment.dueDate,
+                                formattedDueDate,
                                 `
                                     <button class="btn btn-view-submissions" onclick="viewSubmissions(${assignment.id})">View Submissions</button>
                                     <button class="btn btn-delete" onclick="deleteAssignment(${assignment.id})">Delete</button>
@@ -755,6 +756,14 @@
                     alert('Failed to grade submission');
                 });
             }
+        }
+
+        function formatDate(dateString) {
+            const date = new Date(dateString);
+            const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-based
+            const day = String(date.getDate()).padStart(2, '0');
+            const year = date.getFullYear();
+            return `${month}/${day}/${year}`;
         }
         
 
