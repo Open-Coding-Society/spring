@@ -17,18 +17,34 @@ public class CalendarEventService {
     private CalendarEventRepository calendarEventRepository;
 
     @Autowired
-    private SlackService slackService; // Assuming you have a Slack service to send messages
+    private SlackService slackService;
+
+    private final String CSA_WEBHOOK_URL = "https://hooks.slack.com/services/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"; 
+    private final String CSP_WEBHOOK_URL = "https://hooks.slack.com/services/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";
+    private final String CSSE_WEBHOOK_URL = "https://hooks.slack.com/services/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"; 
+    private String SLACK_WEBHOOK_URL = CSA_WEBHOOK_URL;
 
     // Save a new event
     public CalendarEvent saveEvent(CalendarEvent event) {
         CalendarEvent savedEvent = calendarEventRepository.save(event);
-        slackService.sendMessage("New Event Added:\n" +
-                "Title: " + savedEvent.getTitle() + "\n" +
-                "Description: " + savedEvent.getDescription() + "\n" +
-                "Date: " + savedEvent.getDate() + "\n" +
-                "Type: " + savedEvent.getType() + "\n" +
-                "Period: " + savedEvent.getPeriod());
+        //slackService.sendMessage("New Event Added:\n" +
+        //        "Title: " + savedEvent.getTitle() + "\n" +
+        //        "Description: " + savedEvent.getDescription() + "\n" +
+        //        "Date: " + savedEvent.getDate() + "\n" +
+        //        "Type: " + savedEvent.getType() + "\n" +
+        //        "Period: " + savedEvent.getPeriod(), SLACK_WEBHOOK_URL);
         return savedEvent;
+    }
+
+    // Create a calendar event
+    public void createCalendarEvent(String title, LocalDate eventDate, String description, String type, String period) {
+        CalendarEvent event = new CalendarEvent();
+        event.setTitle(title);
+        event.setDate(eventDate);
+        event.setDescription(description);
+        event.setType(type);
+        event.setPeriod(period);
+        calendarEventRepository.save(event);
     }
 
     // Get events by a specific date
@@ -59,7 +75,7 @@ public class CalendarEventService {
                     "Type: " + event.getType() + "\n" +
                     "Period: " + event.getPeriod();
 
-            slackService.sendMessage("Event Updated:\n" + oldDetails + "\n\n" + newDetails);
+            //slackService.sendMessage("Event Updated:\n" + oldDetails + "\n\n" + newDetails, SLACK_WEBHOOK_URL);
             return true;
         }
         return false;
@@ -70,12 +86,12 @@ public class CalendarEventService {
         CalendarEvent event = getEventById(id);
         if (event != null) {
             calendarEventRepository.delete(event);
-            slackService.sendMessage("Event Deleted:\n" +
-                    "Title: " + event.getTitle() + "\n" +
-                    "Description: " + event.getDescription() + "\n" +
-                    "Date: " + event.getDate() + "\n" +
-                    "Type: " + event.getType() + "\n" +
-                    "Period: " + event.getPeriod());
+            //slackService.sendMessage("Event Deleted:\n" +
+            //        "Title: " + event.getTitle() + "\n" +
+            //        "Description: " + event.getDescription() + "\n" +
+            //        "Date: " + event.getDate() + "\n" +
+            //        "Type: " + event.getType() + "\n" +
+            //        "Period: " + event.getPeriod(), SLACK_WEBHOOK_URL);
             return true;
         }
         return false;
@@ -83,34 +99,25 @@ public class CalendarEventService {
 
     // Delete event by title
     public boolean deleteEventByTitle(String title) {
-        // Retrieve all events from the repository
         List<CalendarEvent> allEvents = calendarEventRepository.findAll(); 
-    
-        // Filter events that match the given title
         List<CalendarEvent> eventsToDelete = allEvents.stream()
                 .filter(event -> event.getTitle().equals(title))
                 .toList();
-    
-        // If there are events to delete
-        if (!eventsToDelete.isEmpty()) {
-            // Delete each event manually
-            eventsToDelete.forEach(calendarEventRepository::delete);
 
+        if (!eventsToDelete.isEmpty()) {
+            eventsToDelete.forEach(calendarEventRepository::delete);
             return true;
         }
-    
-        // If no events matched the title, return false
         return false;
-    }
-
-    // Get events within a date range
-    public List<CalendarEvent> getEventsWithinDateRange(LocalDate startDate, LocalDate endDate) {
-        return calendarEventRepository.findByDateBetween(startDate, endDate);
     }
 
     // Retrieve all events
     public List<CalendarEvent> getAllEvents() {
         return calendarEventRepository.findAll();
+    }
+
+    public List<CalendarEvent> getEventsWithinDateRange(LocalDate startDate, LocalDate endDate) {
+        return calendarEventRepository.findByDateBetween(startDate, endDate);
     }
 
     // Get event by id
@@ -120,22 +127,33 @@ public class CalendarEventService {
 
     // Parse Slack message and create events
     public void parseSlackMessage(Map<String, String> jsonMap, LocalDate weekStartDate) {
-        String text = jsonMap.get("text");
-        List<CalendarEvent> events = extractEventsFromText(text, weekStartDate);
+        List<CalendarEvent> events = extractEventsFromText(jsonMap, weekStartDate);
         for (CalendarEvent event : events) {
-            saveEvent(event); // Save each parsed event
+            saveEvent(event);
         }
     }
 
-    // Extract events and calculate date for each day of the week
-    private List<CalendarEvent> extractEventsFromText(String text, LocalDate weekStartDate) {
+    private final String CSP_CHANNEL_ID = "CUS8E3M6Z";
+    private final String CSA_CHANNEL_ID = "CRRJL1F1D";
+    private final String CSSE_CHANNEL_ID = "C05MNRWC2A1";
+
+    private List<CalendarEvent> extractEventsFromText(Map<String, String> jsonMap, LocalDate weekStartDate) {
+        String text = jsonMap.get("text");
+        // Use SlackService to determine the correct week start date from the message
+        LocalDate parsedWeekStartDate = null;
+        try {
+            java.lang.reflect.Method method = SlackService.class.getDeclaredMethod("getWeekStartDateFromMessage", String.class);
+            method.setAccessible(true);
+            parsedWeekStartDate = (LocalDate) method.invoke(slackService, text);
+        } catch (Exception e) {
+            // Handle exception or log as needed
+        }
+        if (parsedWeekStartDate != null) {
+            weekStartDate = parsedWeekStartDate;
+        }
         List<CalendarEvent> events = new ArrayList<>();
         Pattern dayPattern = Pattern.compile("\\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?: - (Mon|Tue|Wed|Thu|Fri|Sat|Sun))?\\]:\\s*(\\*\\*|\\*)?\\s*(.+)");
         Pattern descriptionPattern = Pattern.compile("(\\*\\*|\\*)?\\s*\\u2022\\s*(.+)");
-
-        boolean hasPeriod1 = text.toLowerCase().contains("period 1");
-        boolean hasPeriod3 = text.toLowerCase().contains("period 3");
-
         String[] lines = text.split("\\n");
         CalendarEvent lastEvent = null;
 
@@ -147,14 +165,20 @@ public class CalendarEventService {
                 String endDay = dayMatcher.group(2) != null ? dayMatcher.group(2) : startDay;
                 String asterisks = dayMatcher.group(3);
                 String currentTitle = dayMatcher.group(4).trim();
-                String period;
-                // Append period info if found anywhere in the text
-                if (hasPeriod1) {
-                    period = "1";
-                } else if (hasPeriod3) {
-                    period = "3";
-                } else {
-                    period = "0";
+                String period = "0";
+                switch(jsonMap.get("channel")) {
+                    case CSP_CHANNEL_ID:
+                        period = "CSP";
+                        SLACK_WEBHOOK_URL = CSP_WEBHOOK_URL;
+                        break;
+                    case CSA_CHANNEL_ID:
+                        period = "CSA";
+                        SLACK_WEBHOOK_URL = CSA_WEBHOOK_URL;
+                        break;
+                    case CSSE_CHANNEL_ID:
+                        period = "CSSE";
+                        SLACK_WEBHOOK_URL = CSSE_WEBHOOK_URL;
+                        break;
                 }
 
                 String type = "daily plan";
@@ -181,7 +205,9 @@ public class CalendarEventService {
                         type = "grade";
                     }
 
-                    lastEvent.setDescription(lastEvent.getDescription() + (lastEvent.getDescription().isEmpty() ? "" : ", ") + description);
+                    lastEvent.setDescription(lastEvent.getDescription() +
+                            (lastEvent.getDescription().isEmpty() ? "" : ", ") +
+                            description);
                     lastEvent.setType(type);
                 }
             }
@@ -189,7 +215,6 @@ public class CalendarEventService {
         return events;
     }
 
-    // Helper to generate dates in the range [startDay - endDay]
     private List<LocalDate> getDatesInRange(String startDay, String endDay, LocalDate weekStartDate) {
         List<String> days = List.of("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun");
         int startIndex = days.indexOf(startDay);
@@ -204,5 +229,3 @@ public class CalendarEventService {
         return dateRange;
     }
 }
-
-

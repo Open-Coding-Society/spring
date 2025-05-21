@@ -7,7 +7,6 @@ import org.hibernate.annotations.OnDeleteAction;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.nighthawk.spring_portfolio.mvc.person.Person;
-import static com.nighthawk.spring_portfolio.mvc.person.Person.startingBalance;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -85,6 +84,8 @@ public class userStocksTable {
 
     // Method to initialize an array of userStocksTable objects for a list of Person entities
     public static userStocksTable[] init(Person[] persons) {
+        String startingBalance = "100000"; // TODO: this was once deleted from Person, I have moved it here to avoid errors but this should probably be stored somewhere else
+
         ArrayList<userStocksTable> stocks = new ArrayList<>();
         for (Person person : persons) {
             stocks.add(new userStocksTable("AAPL,TSLA,AMZN", "BTC,ETH", startingBalance, person.getEmail(), person, false, true, ""));

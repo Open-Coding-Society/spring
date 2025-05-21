@@ -1,5 +1,7 @@
 package com.nighthawk.spring_portfolio.mvc.teamteach;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
+import java.time.LocalDate;
 import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -16,7 +18,9 @@ public class Topic {
     private Long id;
 
     private String topicName;
-    private String date;
+
+    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "MM/dd/yyyy")
+    private LocalDate date;
 
     @Column(columnDefinition = "TEXT") // Stores names as a comma-separated list
     private String students = "";

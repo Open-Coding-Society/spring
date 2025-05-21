@@ -5,16 +5,7 @@
 
 <!-- page style -->
 <th:block layout:fragment="style" th:remove="tag">
-    <link rel="stylesheet" href="https://cdn.datatables.net/2.1.8/css/dataTables.dataTables.css" />
-    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.3.6/css/buttons.dataTables.min.css" />
     <style>
-        /* Ensures that the custom checkbox images are appropriately sized */
-        .custom-checkbox {
-            width: 20px;
-            height: 20px;
-            cursor: pointer;
-        }
-
         /* Initial styling for the profile picture */
         .profile-picture-container img {
             width: 64px;
@@ -54,7 +45,9 @@
             <button class="btn btn-secondary toggle-column inactive" data-column="6">SID</button>
             <button class="btn btn-secondary toggle-column inactive" data-column="7">Balance</button>
             <button class="btn btn-secondary toggle-column active" data-column="8">Action</button>
-        </div>
+        </div> <br>
+
+        <button sec:authorize="hasRole('ROLE_ADMIN')" id="export-all" class="btn btn-info btn-sm">export all people</button>
 
         <div class="row align-items-md-stretch">
             <!-- Table displaying the list of persons -->
@@ -83,7 +76,7 @@
                         <td th:text="${person.email}">Email</td>
                         <td>
                             <img th:src="@{${person.kasmServerNeeded} ? 'https://github.com/user-attachments/assets/da1c6827-8c47-4ba9-a979-980eb3c685cd' : 'https://github.com/user-attachments/assets/53e808fc-3c01-4cae-b403-73116a71122f'}"
-                                class="custom-checkbox" alt="KSM Status" />
+                                class="custom-checkbox" alt="KSM Status" style="width: 20px; height: 20px;" />
                         </td>
                         <td>
                             <div class="profile-picture-container">
@@ -97,8 +90,10 @@
                         <td th:text="${person.sid}">Student ID</td>
                         <td th:text="${person.balance}">Balance</td>
                         <td>
-                            <a th:href="@{/mvc/person/update/{id}(id = ${person.id})}"
-                                class="btn btn-warning btn-sm">Update</a>
+                            <a th:href="@{/mvc/person/update/{id}(id = ${person.id})}" class="btn btn-warning btn-sm"
+                                name="update">Update</a>
+                            <a sec:authorize="hasRole('ROLE_ADMIN')" th:href="@{/mvc/person/update/roles/{id}(id = ${person.id})}" class="btn btn-warning btn-sm"
+                                name="update">Update Roles</a>
                             <a th:href="@{/mvc/person/delete/{id}(id = ${person.id})}"
                                 class="btn btn-danger btn-sm">Delete</a>
                         </td>
@@ -107,29 +102,21 @@
             </table>
         </div>
     </div>
+</th:block>
 
-    <script src="https://cdn.datatables.net/2.1.8/js/dataTables.js"></script>
+<!-- Overlay for update page-->
+<th:block layout:fragment="overlay-body" th:remove="tag">
+    <div id="overlay-Container"></div>
+</th:block>
 
-    <script>
-        $(document).ready(function () {
-            const table = $('#personTable').DataTable({
-                columnDefs: [
-                    { targets: [3, 4, 6, 7], visible: false } // Hide Email (index 3) and SID (index 6) by default
-                ]
-            });
-
-            // Toggle column visibility and update button styles
-            $('.toggle-column').on('click', function () {
-                const column = table.column($(this).attr('data-column'));
-                const isVisible = column.visible();
-                column.visible(!isVisible);
-
-                // Update button styles
-                $(this).toggleClass('active', !isVisible);
-                $(this).toggleClass('inactive', isVisible);
-            });
-        });
-    </script>
+<!-- scripts -->
+<th:block layout:fragment="script" th:remove="tag">
+    <!-- script for extracting people (not included if user is not admin)-->
+    <script sec:authorize="hasRole('ROLE_ADMIN')" type="module" src="/static/js/person-extraction.js" th:src="@{/js/person-extraction.js}"></script>
+    <!-- script for filtering columns-->
+    <script type="text/javascript" src="/static/js/read-filter.js" th:src="@{/js/read-filter.js}"></script>
+    <!-- script for updating overlay (used for update button)-->
+    <script type="text/javascript" src="/static/js/read-overlay.js" th:src="@{/js/read-overlay.js}"></script>
 </th:block>
 
 </html>

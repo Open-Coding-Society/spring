@@ -1,5 +1,6 @@
 package com.nighthawk.spring_portfolio.mvc.person;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -30,6 +31,7 @@ import com.nighthawk.spring_portfolio.mvc.userStocks.UserStocksRepository;
 import com.nighthawk.spring_portfolio.mvc.userStocks.userStocksTable;
 
 import lombok.Getter;
+import lombok.Setter;
 
 /**
  * This class provides RESTful API endpoints for managing Person entities.
@@ -86,16 +88,6 @@ public class PersonApiController {
     }
 
     /**
-     * Retrieves all the Person entities in the database, people
-     * 
-     * @return A ResponseEntity containing a list for Person entities
-     */
-    @GetMapping("/people")
-    public ResponseEntity<List<Person>> getPeople() {
-        return new ResponseEntity<>( repository.findAllByOrderByNameAsc(), HttpStatus.OK);
-    }
-
-    /**
      * Retrieves a Person entity by its ID.
      *
      * @param id The ID of the Person entity to retrieve.
@@ -141,13 +133,13 @@ public class PersonApiController {
      * .. represents the data in the request body
      */
     @Getter
+    @Setter
     public static class PersonDto {
         private String email;
         private String uid;
         private String sid;
         private String password;
         private String name;
-        private String dob;
         private String pfp;
         private double balance;
         private Boolean kasmServerNeeded; 
@@ -162,21 +154,13 @@ public class PersonApiController {
      */
     @PostMapping("/person/create")
     public ResponseEntity<Object> postPerson(@RequestBody PersonDto personDto) {
-        // Validate dob input
-        Date dob;
-        try {
-            dob = new SimpleDateFormat("MM-dd-yyyy").parse(personDto.getDob());
-        } catch (Exception e) {
-            return new ResponseEntity<>(personDto.getDob() + " error; try MM-dd-yyyy", HttpStatus.BAD_REQUEST);
-        }
+
+  
         // A person object WITHOUT ID will create a new record in the database
-        String startingBalance = "100000";
-        Person person = new Person(personDto.getEmail(), personDto.getUid(),personDto.getPassword(),personDto.getSid(), personDto.getName(), dob, "pfp1", startingBalance, true, personDetailsService.findRole("USER"));
+        Person person = new Person(personDto.getEmail(), personDto.getUid(),personDto.getPassword(),personDto.getSid(), personDto.getName(),  "/images/default.png", "0", true, personDetailsService.findRole("USER"));
 
         personDetailsService.save(person);
 
-        userStocksTable userStocks = new userStocksTable(null, "BTC", "1000", person.getEmail(), person, false, true, "");
-        userStocksRepository.save(userStocks);
 
         HttpHeaders responseHeaders = new HttpHeaders();
         responseHeaders.setContentType(MediaType.APPLICATION_JSON);
@@ -187,6 +171,100 @@ public class PersonApiController {
         return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.OK);
     }
 
+    /**
+     * Retrieves all the Person entities in the database, people
+     * 
+     * @return A ResponseEntity containing a list for Person entities
+     */
+    @GetMapping("/people")
+    public ResponseEntity<List<Person>> getPeople() {
+        // Fetch the data from the repository into a variable
+        List<Person> people = repository.findAllByOrderByNameAsc();
+
+        // Return the variable in the ResponseEntity
+        return new ResponseEntity<>(people, HttpStatus.OK);
+    }
+
+    /**
+     * Bulk create Person entities from a list of PersonDto objects.
+     * 
+     * @param personDtos A list of PersonDto objects to be created.
+     * @return A ResponseEntity containing the result of the bulk creation.
+     */
+    @PostMapping("/people/bulk/create")
+    public ResponseEntity<Object> bulkCreatePersons(@RequestBody List<PersonDto> personDtos) {
+        List<String> createdPersons = new ArrayList<>();
+        List<String> duplicatePersons = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+
+        for (PersonDto personDto : personDtos) {
+            try {
+                // Call the existing postPerson method
+                ResponseEntity<Object> response = postPerson(personDto);
+
+                // Check if the response is successful
+                if (response.getStatusCode() == HttpStatus.OK) {
+                    createdPersons.add(personDto.getEmail());
+                } else {
+                    errors.add("Failed to create person with email: " + personDto.getEmail());
+                }
+            } catch (Exception e) {
+                // Check if the exception is caused by a unique constraint violation
+                if (e.getCause() != null && e.getCause().getMessage().contains("constraint [email]")) {
+                    duplicatePersons.add(personDto.getEmail());
+                } else if (e.getCause() != null && e.getCause().getMessage().contains("constraint [uid]")) {
+                    duplicatePersons.add(personDto.getUid());
+                } else {
+                    errors.add("Exception occurred for email: " + personDto.getEmail() + " - " + e.getMessage());
+                }
+            }
+        }
+
+        // Prepare the response
+        Map<String, Object> response = new HashMap<>();
+        response.put("created", createdPersons);
+        response.put("duplicates", duplicatePersons);
+        response.put("errors", errors);
+
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
+
+    /**
+     * Bulk extract all Person entities from the database.
+     * 
+     * @return A ResponseEntity containing a list of PersonDto objects.
+     */
+    @GetMapping("/people/bulk/extract")
+    public ResponseEntity<List<PersonDto>> bulkExtractPersons() {
+        // Fetch all Person entities from the database
+        List<Person> people = repository.findAllByOrderByNameAsc();
+
+        // Map Person entities to PersonDto objects
+        List<PersonDto> personDtos = new ArrayList<>();
+        for (Person person : people) {
+            PersonDto personDto = new PersonDto();
+            personDto.setEmail(person.getEmail());
+            personDto.setUid(person.getUid());
+            personDto.setSid(person.getSid());
+            personDto.setPassword(person.getPassword()); // Optional: You may want to exclude passwords for security reasons
+            personDto.setName(person.getName());
+            personDto.setPfp(person.getPfp());
+            personDto.setBalance(Double.parseDouble(person.getBalance())); // Assuming balance is stored as a String
+            personDto.setKasmServerNeeded(person.getKasmServerNeeded());
+            personDtos.add(personDto);
+        }
+
+        // Return the list of PersonDto objects
+        return new ResponseEntity<>(personDtos, HttpStatus.OK);
+    }
+    /**
+     * Update a Person entity by its ID.
+     *
+     * @param id       The ID of the Person entity to update.
+     * @param personDto The updated PersonDto object.
+     * @return A ResponseEntity containing the updated Person entity if found, or a
+     *         NOT_FOUND status if not found.
+     */
     @PostMapping(value = "/person/update", produces = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<Object> updatePerson(Authentication authentication, @RequestBody final PersonDto personDto) {
         // Get the email of the current user from the authentication context
@@ -235,14 +313,6 @@ public class PersonApiController {
     }
 
 
-    /**
-     * Search for a Person entity by name or email.
-     * 
-     * @param map of a key-value (k,v), the key is "term" and the value is the
-     *            search term.
-     * @return A ResponseEntity containing a list of Person entities that match the
-     *         search term.
-     */
 
     /**
      * Search for a Person entity by name or email.
@@ -353,6 +423,7 @@ public class PersonApiController {
         // Return NOT_FOUND if the person with the given ID does not exist
         return new ResponseEntity<>(HttpStatus.NOT_FOUND);
     }
+    
     @GetMapping("/top5bybalance")
     public ResponseEntity<List<Person>> getTop5ByBalance() {
         List<Person> top5Users = repository.findTop5ByOrderByBalanceDesc();

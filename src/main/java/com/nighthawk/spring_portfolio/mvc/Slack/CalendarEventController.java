@@ -34,6 +34,21 @@ public class CalendarEventController {
         calendarEventService.parseSlackMessage(jsonMap, weekStartDate);
     }
 
+    @PostMapping("/add_bulk")
+    public void addBulkEvents(@RequestBody List<Map<String, String>> events) {
+        for (Map<String, String> eventMap : events) {
+            String dateStr = eventMap.get("date");
+            String title = eventMap.get("title");
+            String description = eventMap.get("description");
+            String type = eventMap.get("type");
+            String period = eventMap.get("period");
+
+            LocalDate date = LocalDate.parse(dateStr);
+            CalendarEvent event = new CalendarEvent(date, title, description, type, period);
+            calendarEventService.saveEvent(event);
+        }
+    }
+
     @PostMapping("/add_event")
     public ResponseEntity<Map<String, String>> addEvent(@RequestBody Map<String, String> jsonMap) {
         Map<String, String> response = new HashMap<>();
@@ -142,6 +157,26 @@ public class CalendarEventController {
             e.printStackTrace();
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body("An error occurred: " + e.getMessage());
+        }
+    }
+
+    @GetMapping("/events/bulk")
+    public ResponseEntity<List<CalendarEvent>> bulkExtractEvents(
+            @RequestParam(required = false) String startDate,
+            @RequestParam(required = false) String endDate) {
+        try {
+            List<CalendarEvent> events;
+            if (startDate != null && endDate != null) {
+                LocalDate start = LocalDate.parse(startDate);
+                LocalDate end = LocalDate.parse(endDate);
+                events = calendarEventService.getEventsWithinDateRange(start, end);
+            } else {
+                events = calendarEventService.getAllEvents();
+            }
+            return ResponseEntity.ok(events);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(null);
         }
     }
 }

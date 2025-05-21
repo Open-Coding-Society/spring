@@ -28,10 +28,7 @@ public class BathroomQueueApiController {
 
     @Autowired
     private BathroomQueueJPARepository repository; // Repository for database operations
-
-    @Autowired
-    private EmailService emailService; // Service for handling email-related functionality
-
+    
     // DTO (Data Transfer Object) for queue operations
     @Getter
     public static class QueueDto {

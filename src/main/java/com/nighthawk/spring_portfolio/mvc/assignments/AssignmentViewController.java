@@ -106,21 +106,6 @@ public class AssignmentViewController {
         );
     }
 
-    @GetMapping("/create")
-    public String showCreateAssignmentForm(Model model, @AuthenticationPrincipal UserDetails userDetails) {
-        String uid = userDetails.getUsername();
-        Person user = personRepository.findByUid(uid);
-        
-        if (user == null || (!user.hasRoleWithName("ROLE_TEACHER") && !user.hasRoleWithName("ROLE_ADMIN"))) {
-            throw new ResponseStatusException(
-                HttpStatus.FORBIDDEN, "You must be a teacher or admin to create assignments"
-            );
-        }
-
-        model.addAttribute("assignment", new Assignment());
-        return "assignments/create_assignment";
-    }
-
     @GetMapping("/{id}/submissions")
     public String viewAssignmentSubmissions(
             @PathVariable Long id, 

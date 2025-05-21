@@ -65,12 +65,6 @@
                 <small th:if="${#fields.hasErrors('sid')}" th:errors="*{sid}">Student ID Error</small>
             </div>
 
-            <!-- Date of Birth input feild-->
-            <div class="input-group mb-2 mr-sm-2" id="feild6" style="display: none;">
-                <input type="date" th:field="*{dob}" id="dob">
-                <small th:if="${#fields.hasErrors('dob')}" th:errors="{dob}">DOB Error</small>
-            </div>
-
             <!-- Kasm Server Needed checkbox -->
             <div class="input-group mb-2 mr-sm-2" id="feild7" style="display: none;">
                 <label for="kasmServerNeeded"> Request Kasm Server: </label>

@@ -152,6 +152,80 @@ public class GroupsApiController {
         }
     }
 
+
+    /**
+ * Bulk create multiple groups from a list of GroupDto objects.
+ * 
+ * @param groupDtos List of GroupDto objects containing group information
+ * @return A ResponseEntity containing information about the created, duplicate, and error groups
+ */
+@PostMapping("/bulk/create")
+public ResponseEntity<Object> bulkCreateGroups(@RequestBody List<GroupDto> groupDtos) {
+    List<String> createdGroups = new ArrayList<>();
+    List<String> duplicateGroups = new ArrayList<>();
+    List<String> errors = new ArrayList<>();
+    
+    for (GroupDto groupDto : groupDtos) {
+        try {
+            // Call the existing createGroup method
+            ResponseEntity<Object> response = createGroup(groupDto);
+            
+            // Check if the response is successful
+            if (response.getStatusCode() == HttpStatus.CREATED) {
+                createdGroups.add(groupDto.getName() + " (Period: " + groupDto.getPeriod() + ")");
+            } else {
+                errors.add("Failed to create group: " + groupDto.getName() + " (Period: " + groupDto.getPeriod() + ")");
+            }
+        } catch (Exception e) {
+            // Check for duplicates or other errors
+            if (e.getMessage() != null && e.getMessage().contains("duplicate")) {
+                duplicateGroups.add(groupDto.getName() + " (Period: " + groupDto.getPeriod() + ")");
+            } else {
+                errors.add("Exception occurred for group: " + groupDto.getName() 
+                    + " (Period: " + groupDto.getPeriod() + ") - " + e.getMessage());
+            }
+        }
+    }
+    
+    // Prepare the response
+    Map<String, Object> response = new HashMap<>();
+    response.put("created", createdGroups);
+    response.put("duplicates", duplicateGroups);
+    response.put("errors", errors);
+    
+    return new ResponseEntity<>(response, HttpStatus.OK);
+}
+
+    /**
+     * Bulk extract all groups with their members in a simplified format
+     */
+    @GetMapping("/bulk/extract")
+    public ResponseEntity<List<Map<String, Object>>> bulkExtractGroups() {
+        // Fetch all Groups entities from the database
+        List<Groups> groups = groupsRepository.findAll();
+        
+        // Map Groups entities to Map objects
+        List<Map<String, Object>> groupsList = new ArrayList<>();
+        for (Groups group : groups) {
+            Map<String, Object> groupMap = new HashMap<>();
+            groupMap.put("id", group.getId());
+            groupMap.put("name", group.getName());
+            groupMap.put("period", group.getPeriod());
+            
+            // Extract basic info for each member
+            List<Map<String, Object>> membersList = new ArrayList<>();
+            for (Person person : group.getGroupMembers()) {
+                membersList.add(getPersonBasicInfo(person));
+            }
+            groupMap.put("members", membersList);
+            
+            groupsList.add(groupMap);
+        }
+        
+        // Return the list of group maps
+        return new ResponseEntity<>(groupsList, HttpStatus.OK);
+    }
+
     /**
      * Add people to an existing group
      */

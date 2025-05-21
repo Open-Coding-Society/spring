@@ -154,9 +154,6 @@
             <h1>Assignment Teacher Grading Team Teach</h1>
             <form onChange="selectTeamTeachAssignments(event)">
 
-                <h1>Teacher Grading Team Teach</h1>
-                <form onChange="selectTopic(event)">
-
                     <label for="cars">Choose a topic:</label>
                     <select id="topics">
                     </select><br><br>
@@ -178,69 +175,6 @@
                 <button class="btn" onclick="submitComment()">submit Comment</button>
         </div>
     </div>
-
-    <!-- timer -->
-    <h1>Custom Countdown Timer</h1>
-
-    <label for="timeInput">Set Time (minutes): </label>
-    <input type="number" id="timeInput" min="1" value="1">
-    <br>
-
-    <div class="timer" id="displayTimer">01:00</div>
-
-    <button class"btn" onclick="startTimer()">Start</button>
-    <button class"btn" onclick="pauseTimer()">Pause</button>
-    <button class"btn" onclick="resetTimer()">Reset</button>
-</th:block>
-<!-- End of the body fragment -->
-
-<th:block layout:fragment="script" th:remove="tag">
-    <script>
-        let countdown;
-        let timeLeft = 60; // Default 1 minute
-        let isPaused = true;
-
-        function updateDisplay() {
-            const minutes = Math.floor(timeLeft / 60);
-            const seconds = timeLeft % 60;
-            document.getElementById('displayTimer').textContent =
-                `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
-        }
-
-        function startTimer() {
-            if (!isPaused) return; // Prevent multiple timers
-            isPaused = false;
-            countdown = setInterval(() => {
-                if (timeLeft > 0) {
-                    timeLeft--;
-                    updateDisplay();
-                } else {
-                    clearInterval(countdown);
-                    alert("Time's up!");
-                }
-            }, 1000);
-        }
-
-        function pauseTimer() {
-            isPaused = true;
-            clearInterval(countdown);
-        }
-
-        function resetTimer() {
-            pauseTimer();
-            let minutes = parseInt(document.getElementById('timeInput').value, 10) || 1;
-            timeLeft = minutes * 60; // Convert minutes to seconds
-            updateDisplay();
-        }
-
-        document.getElementById('timeInput').addEventListener('change', () => {
-            resetTimer();
-        });
-
-        // Initialize the display
-        resetTimer();
-    </script>
-
     <script>
         var data;
         var selectedTopic;
@@ -254,10 +188,7 @@
         * On loading of the page fetch all assginments and filter by teamteach;
         */
         function fetchTeamTeachAssignments() {
-            fetch('/api/assignments/')
-
             fectchtopics();
-            fetchAssignments();
         };
 
         function getItemById(list, id) {
@@ -266,7 +197,7 @@
 
 
         function fectchtopics() {
-            fetch('/api/topics/all')
+            fetch('/api/assignments/')
 
                 .then(response => response.json())
                 .then(grades => {
@@ -302,69 +233,21 @@
                 .then(grades => {
                     submissions = grades;
                     submissions.forEach(submission => {
-                        var studentName = submission.student.name;
-                        var submissionId = submission.id;
-                        const row = document.createElement('tr');
-                        row.id = submissionId;
-                        row.innerHTML = `
-                            <td id="name-studentName">${studentName}</td>
-                            <td><input type=text" id="input-${submissionId}"></td>
-                        `;
-                        tableBody.appendChild(row);
+                        var students = submission.students;
+                        students.forEach(student => {
+                            var studentName = student.name;
+                            var submissionId = submission.id;
+                            const row = document.createElement('tr');
+                            row.id = submissionId;
+                            row.innerHTML = `
+                                <td id="name-studentName">${studentName}</td>
+                                <td><input type=text" id="input-${submissionId}"></td>
+                            `;
+                            tableBody.appendChild(row);
+                        })
                     });
-                    grades.forEach(topic => {
-                        const option = document.createElement('option');
-                        option.value = topic.id
-                        option.text = topic.topicName
-                        selecttopics.appendChild(option);
-                    })
                 });
-        }
-
-        function selectTopic(event) {
-            var selectElement = event.target;
-            var value = selectElement.value;
-            selectedTopic = value;
-            var topic = getItemById(data, value);
-
-            //Clear table
-            const tableBody = document.getElementById('gradingList');
-            tableBody.innerHTML = '';
-            var students = topic.students
-            const studentsArray = students.split(",");
-            for (let i = 0; i < studentsArray.length; i++) {
-                var studentName = studentsArray[i];
-                const row = document.createElement('tr');
-                row.id = studentName;
-                row.innerHTML = `
-                    <td id="name-studentName">${studentName}</td>
-                    <td><input type=text" id="input-${studentName}"></td>
-                `;
-                tableBody.appendChild(row);
             }
-
-        }
-
-        function fetchAssignments() {
-            fetch('/api/teachergradingteamteach/debug')
-                .then(response => response.json())
-                .then(grades => {
-                    const tableBody = document.getElementById('gradingList');
-                    tableBody.innerHTML = '';
-
-                    grades.forEach(grade => {
-                        const row = document.createElement('tr');
-                        row.innerHTML = `
-                        <td>${grade.student}</td>
-                        <td>${grade.grade}</td>
-
-                    `;
-                        tableBody.appendChild(row);
-                    });
-                });
-
-        }
-
 
         /**
         * On submit comment get all the Assignmentsubmissions and iterate through 
@@ -423,43 +306,6 @@
 
         }
 
-        function saveGradeforStudent(student, grade, commentText) {
-            const postURL = "/api/teachergradingteamteach/submit"; // Endpoint
-            const data = {
-                comment: commentText,  // Ensure it matches the expected format
-                topic_id: selectedTopic,
-                grade: grade,
-                student: student
-            };
-
-            // Fetch API options
-            const fetchOptions = {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(data)
-            };
-
-            fetch(postURL, fetchOptions)
-                .then(response => {
-                    if (response.status === 201) {
-                        return response.json();
-                    } else {
-                        throw new Error("Failed to submit comment: " + response.status);
-                    }
-                })
-                .then(data => {
-                    console.log("Comment submitted successfully:", data);
-                    alert("Comment submitted successfully!");
-                    document.getElementById('comment').value = ""; // Clear input
-                })
-
-                .catch(error => {
-                    console.error(error);
-                    alert("Error submitting comment. See console for details.");
-                });
-        }
 
         /**
         * Add a delay due to SQL Lock in the backend.

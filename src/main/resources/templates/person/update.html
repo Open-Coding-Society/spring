@@ -1,236 +1,53 @@
 <!DOCTYPE HTML>
 <html xmlns:layout="http://www.w3.org/1999/xhtml" xmlns:th="http://www.w3.org/1999/xhtml"
-    layout:decorate="~{layouts/base}" lang="en">
+    layout:decorate="~{layouts/style-only}" lang="en">
 
-<!-- page style -->
-<th:block layout:fragment="style" th:remove="tag">
-    <style>
-        /* Role Table Styling */
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-bottom: 20px;
-        }
-
-        th {
-            text-align: left;
-            padding: 10px;
-            background-color: #181818;
-            border-bottom: 2px solid #ddd;
-            border-radius: 4px;
-        }
-
-        td {
-            padding: 10px;
-            border-bottom: 1px solid #ddd;
-        }
-
-        input[type="checkbox"] {
-            margin-right: 10px;
-        }
-
-        /* Button Styling */
-        .btn-custom {
-            background-color: #28a745;
-            /* Same green color for both buttons */
-            color: black;
-            padding: 8px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-        }
-
-        .btn-custom:hover {
-            background-color: #218838;
-            /* Darker green for hover effect */
-        }
-
-        /* Error Messages */
-        .error {
-            color: red;
-            font-size: 12px;
-        }
-
-        /* Footer info styling */
-        #footerInfo {
-            font-size: 14px;
-            font-weight: 5px;
-        }
-    </style>
-</th:block>
-
-<head>
-    <script>
-        // JavaScript to handle form validation and prevent empty fields
-        function validateForm(event) {
-            // Prevent form submission
-            event.preventDefault();
-
-            var form = event.target;
-
-            var password = document.getElementById('password').value;
-            var confirmPassword = document.getElementById('confirm_password').value;
-
-            // If both password fields are filled, check that they match
-            if (password && confirmPassword) {
-                if (password !== confirmPassword) {
-                    alert("Passwords do not match.");
-                    return; // Prevent form submission if passwords don't match
-                }
-            }
-            // If both password fields are empty, it's valid (no validation)
-            else if (password || confirmPassword) {
-                // If only one password field is filled, it's an error
-                alert("Both password fields must be filled to update the password.");
-                return; // Prevent form submission
-            }
-
-            // Check if name is empty and prevent overwriting with a blank value
-            var name = document.getElementById('name').value;
-            if (name === "") {
-                form.querySelector('[name="name"]').value = null; // Do not update name if empty
-            }
-
-            // Continue with form submission after validation
-            form.submit();
-        }
-
-        window.addEventListener("load", () => {
-            document.getElementById("addRoleButton").addEventListener("click", () => {
-                var roleNames = [];
-                if (document.getElementById("addRole1").checked == true) {
-                    roleNames.push("ROLE_USER");
-                }
-                if (document.getElementById("addRole2").checked == true) {
-                    roleNames.push("ROLE_ADMIN");
-                }
-                if (document.getElementById("addRole3").checked == true) {
-                    roleNames.push("ROLE_TESTER");
-                }
-                if (document.getElementById("addRole4").checked == true) {
-                    roleNames.push("ROLE_TEACHER");
-                }
-                if (document.getElementById("addRole5").checked == true) {
-                    roleNames.push("ROLE_STUDENT");
-                }
-                if (roleNames.length == 0) { return; }
-                var body = {
-                    uid: document.getElementById("uid").value,
-                    roleNames: roleNames,
-                }
-                fetch("/mvc/person/update/roles", {
-                    method: "POST",
-                    credentials: "include",
-                    body: JSON.stringify(body),
-                    cache: "no-cache",
-                    headers: new Headers({
-                        "content-type": "application/json"
-                    })
-                }).then(function (response) {
-                    if (response.status !== 200) {
-                        const errorMsg = 'Database response error: ' + response.status;
-                        console.error(errorMsg);
-                        document.getElementById("footerInfo").style.color = "red";
-                        document.getElementById("footerInfo").innerText = "Failed to update roles.";
-                        if (response.status = 403) {
-                            document.getElementById("footerInfo").innerText = "Unauthorized action, you must be an admin to update roles.";
-                        }
-                        return;
-                    }
-                    else {
-                        document.getElementById("footerInfo").style.color = "green";
-                        document.getElementById("footerInfo").innerText = "Successfully updated roles";
-                        return;
-                    }
-                })
-            })
-        });
-
-        /**
-         * @Function validateForm(); // Function to validate the form (password confirmation)
-         * @Param @Event event, form Submission event
-        **/
-    </script>
-</head>
-
-<!-- page title -->
-<th:block layout:fragment="title" th:remove="tag">Update</th:block>
-
-<!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
 <th:block layout:fragment="body" th:remove="tag">
-    <div class="p-5 mb-4 rounded-3" style="background-color: #181818;">
+    <div class="container py-4">
+        <!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
         <h3>Update Info</h3> <!-- Header for Update Info section -->
         <form class="form-inline" action="#" th:action="@{/mvc/person/update}" th:object="${person}" method="POST"
-            onsubmit="validateForm(event)">
+            onsubmit="(function(event){event.submitter.innerHTML='<span class=\'spinner-border spinner-border-sm\' role=\'status\' aria-hidden=\'true\'></span>';})(event)">
 
             <div class="form-group mb-2 mr-sm-2">
-                <input type="text" th:field="*{name}" id="name" placeholder="Display Name">
+                <input class="form-control mb-2 mr-sm-2" type="text" th:field="*{name}" id="name"
+                    placeholder="Display Name">
             </div>
 
             <div class="form-group mb-2 mr-sm-2" style="display: none;">
-                <input type="text" th:field="*{uid}" id="uid" placeholder="Uid Address" required>
+                <input class="form-control mb-2 mr-sm-2" type="text" th:field="*{uid}" id="uid"
+                    placeholder="Uid Address" required>
             </div>
 
             <!-- Email input field -->
             <div class="form-group mb-2 mr-sm-2">
-                <input type="email" th:field="*{email}" id="email" placeholder="Email Address" required>
+                <input class="form-control mb-2 mr-sm-2" type="email" th:field="*{email}" id="email"
+                    placeholder="Email Address" required>
             </div>
 
             <div class="form-group mb-2 mr-sm-2">
-                <input type="password" th:field="*{password}" id="password" placeholder="Password">
+                <input class="form-control mb-2 mr-sm-2" type="password" th:field="*{password}" id="password"
+                    placeholder="Password">
             </div>
 
             <div class="form-group mb-2 mr-sm-2">
-                <input type="password" id="confirm_password" placeholder="Confirm Password">
+                <input class="form-control mb-2 mr-sm-2" type="text" th:field="*{sid}" id="sid"
+                    placeholder="Student ID#">
             </div>
 
             <div class="form-group mb-2 mr-sm-2">
-                <input type="text" th:field="*{sid}" id="sid" placeholder="Student ID#">
+                <input class="form-control mb-2 mr-sm-2" type="text" th:field="*{balance}" id="balance"
+                    placeholder="Balance">
             </div>
 
             <div class="form-group mb-2 mr-sm-2">
-                <input type="text" th:field="*{balance}" id="balance" placeholder="Balance">
-            </div>
-
-            <div class="input-group mb-2 mr-sm-2">
                 <label for="kasmServerNeeded">Request Kasm Server:</label>
-                <input type="checkbox" th:field="*{kasmServerNeeded}" id="kasmServerNeeded">
+                <input class="form-check-input mb-2 mr-sm-2" type="checkbox" th:field="*{kasmServerNeeded}"
+                    id="kasmServerNeeded">
             </div>
 
-            <button type="submit" class="btn-custom">Update Account</button>
+            <button class="btn btn-secondary btn-sm" type="submit">Update Account</button>
         </form>
-    </div>
-
-    <!-- Roles Input Section -->
-    <div class="p-5 mb-4 rounded-3" style="background-color: #181818;">
-        <h3>Add Roles</h3> <!-- Header for Roles section -->
-        <table>
-            <tbody>
-                <tr>
-                    <td>User</td>
-                    <td><input type="checkbox" id="addRole1"></td>
-                </tr>
-                <tr>
-                    <td>Admin</td>
-                    <td><input type="checkbox" id="addRole2"></td>
-                </tr>
-                <tr>
-                    <td>Tester</td>
-                    <td><input type="checkbox" id="addRole3"></td>
-                </tr>
-                <tr>
-                    <td>Teacher</td>
-                    <td><input type="checkbox" id="addRole4"></td>
-                </tr>
-                <tr>
-                    <td>Student</td>
-                    <td><input type="checkbox" id="addRole5"></td>
-                </tr>
-            </tbody>
-        </table>
-        <button class="btn-custom" type="button" id="addRoleButton">Add Roles</button>
-        <div id="footerInfo"></div>
     </div>
 </th:block>
 

@@ -1,4 +1,4 @@
-class Verifcation{
+class Verification{
     
     static typeOfVerification = Object.freeze({
         none: -1,
@@ -9,7 +9,7 @@ class Verifcation{
 
     uid;
     code;
-    state = Verifcation.typeOfVerification.none;
+    state = Verification.typeOfVerification.none;
 
     async attemptToVerifyWithOnlyUid(){
         let body = {
@@ -24,7 +24,7 @@ class Verifcation{
                 })
         }).then((response) => response.json()).then((data) => {
             if(!data.state){
-                this.state = Verifcation.typeOfVerification.failed;
+                this.state = Verification.typeOfVerification.failed;
             } else {
                 this.state = data.state;
             }
@@ -45,7 +45,7 @@ class Verifcation{
                 })
         }).then((response) => response.json()).then((data) => {
             if(!data.state){
-                this.state = Verifcation.typeOfVerification.failed;
+                this.state = Verification.typeOfVerification.failed;
             } else {
                 this.state = data.state;
             }
@@ -77,7 +77,7 @@ class Verifcation{
     }
 }
 //other code starts here
-let verification = new Verifcation();
+let verification = new Verification();
 
 
 //handle updating uid
@@ -85,7 +85,7 @@ function handleTyping(event){
     //update uid
     verification.setUid(document.getElementById("uid").value);
     //set state to unverified
-    verification.setState(Verifcation.typeOfVerification.none);
+    verification.setState(Verification.typeOfVerification.none);
 }
 
 //handle updating code (email verification)
@@ -95,9 +95,9 @@ function handleTyping2(event){
 }
 
 async function attemptVerify(){
-    if(verification.getState() == Verifcation.typeOfVerification.none){
+    if(verification.getState() == Verification.typeOfVerification.none){
         await verification.attemptToVerifyWithOnlyUid();
-        if(verification.getState() == Verifcation.typeOfVerification.success){
+        if(verification.getState() == Verification.typeOfVerification.success){
             // show other parts of person create and hide uid input feild
             document.getElementById("feild0").style.display = "none"; //hide uid
             document.getElementById("feild1").style.display = "block";
@@ -111,21 +111,21 @@ async function attemptVerify(){
 
             document.getElementById("verifyButton").style.display = "none"; //hide verify button
         }
-        else if(verification.getState() == Verifcation.typeOfVerification.email){
+        else if(verification.getState() == Verification.typeOfVerification.email){
             //show code input feild, and hide uid input feild
             document.getElementById("feild0").style.display = "none";
             document.getElementById("feild0.5").style.display = "block";
         }
-        else if(verification.getState() == Verifcation.typeOfVerification.failed){
+        else if(verification.getState() == Verification.typeOfVerification.failed){
             //something went wrong, display error message and try again
-            verification.setState(Verifcation.typeOfVerification.none);
+            verification.setState(Verification.typeOfVerification.none);
 
             alert("verification of account failed");
         }
     }
-    else if(verification.getState() == Verifcation.typeOfVerification.email){
+    else if(verification.getState() == Verification.typeOfVerification.email){
         await verification.attemptToVerifyEmailWithCode();
-        if(verification.getState() == Verifcation.typeOfVerification.success){
+        if(verification.getState() == Verification.typeOfVerification.success){
             // show other parts of person create and hide uid input feild
 
             document.getElementById("email").value = document.getElementById("uid").value; //set email feild
@@ -142,9 +142,9 @@ async function attemptVerify(){
 
             document.getElementById("verifyButton").style.display = "none"; //hide verify button
         }
-        else if(verification.getState() == Verifcation.typeOfVerification.failed){
+        else if(verification.getState() == Verification.typeOfVerification.failed){
             //something went wrong, display error message and try again
-            verification.setState(Verifcation.typeOfVerification.email);
+            verification.setState(Verification.typeOfVerification.email);
 
             alert("verification of email failed");
         }
@@ -153,7 +153,7 @@ async function attemptVerify(){
 
 function validateForm(event) {
     // Check if the GitHub username is validated
-    if(verification.getState() != Verifcation.typeOfVerification.success) {
+    if(verification.getState() != Verification.typeOfVerification.success) {
         alert("You must validate your Account!");
         event.preventDefault();  // Prevent form submission if GitHub validation fails
         return;

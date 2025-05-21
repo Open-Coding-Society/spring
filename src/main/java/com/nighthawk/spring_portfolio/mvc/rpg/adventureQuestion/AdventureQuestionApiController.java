@@ -41,8 +41,8 @@ public class AdventureQuestionApiController {
         private Map<String, Object> stats; 
     }
 
-    @GetMapping("transitionToRetro/{personid}")
-    public ResponseEntity<Integer> transitionToSiliconValley(@PathVariable Integer personid) {
+    @GetMapping("transitionToWallstreet/{personid}")
+    public ResponseEntity<Integer> transitionToWallstreet(@PathVariable Integer personid) {
         List<AdventureAnswer> useranswers = answerJpaRepository.findByPersonId(personid);
 
         // count the total answers

@@ -8,21 +8,22 @@ import org.springframework.stereotype.Component;
 public class DataInitializer implements CommandLineRunner {
     @Autowired
     private GPURepository gpuRepository;
-
+    
     @Autowired
-    private CryptocurrencyRepository cryptocurrencyRepository;
+    private EnergyRepository energyRepository;
 
     @Override
     public void run(String... args) {
-        // Only initialize if no GPUs exist
+        // Initialize GPUs if none exist
         if (gpuRepository.count() == 0) {
             initializeGPUs();
         }
-
-        // Only initialize if no cryptocurrencies exist
-        if (cryptocurrencyRepository.count() == 0) {
-            initializeCryptocurrencies();
-        }
+        
+        // Always initialize Energy Plans
+        System.out.println("Initializing energy plans...");
+        energyRepository.deleteAll(); // Clear existing plans
+        initializeEnergyPlans();
+        System.out.println("Energy plans initialized successfully");
     }
 
     private void initializeGPUs() {
@@ -62,62 +63,16 @@ public class DataInitializer implements CommandLineRunner {
         gpuRepository.save(gpu);
     }
 
-    private void initializeCryptocurrencies() {
-        // Bitcoin - the original cryptocurrency
-        createCryptocurrency(
-            "Bitcoin", 
-            "BTC", 
-            45000.0, 
-            "https://cryptologos.cc/logos/bitcoin-btc-logo.png",
-            "SHA-256", 
-            6.25, 
-            "Very High", 
-            0.001
-        );
-
-        // Ethereum - smart contract platform
-        createCryptocurrency(
-            "Ethereum", 
-            "ETH", 
-            3000.0, 
-            "https://cryptologos.cc/logos/ethereum-eth-logo.png",
-            "Ethash", 
-            2.0, 
-            "High", 
-            0.01
-        );
-
-        // Litecoin - faster alternative to Bitcoin
-        createCryptocurrency(
-            "Litecoin", 
-            "LTC", 
-            80.0, 
-            "https://cryptologos.cc/logos/litecoin-ltc-logo.png",
-            "Scrypt", 
-            12.5, 
-            "Medium", 
-            0.02
-        );
-
-        // Monero - privacy-focused cryptocurrency
-        createCryptocurrency(
-            "Monero", 
-            "XMR", 
-            170.0, 
-            "https://cryptologos.cc/logos/monero-xmr-logo.png",
-            "RandomX", 
-            0.6, 
-            "Medium", 
-            0.01
-        );
+    private void initializeEnergyPlans() {
+        createEnergyPlan("Tesla Energy", 0.12);
+        createEnergyPlan("Duke Energy", 0.15);
+        createEnergyPlan("Pacific Gas and Electric", 0.18);
+        createEnergyPlan("NextEra Energy", 0.21);
+        createEnergyPlan("Southern Company", 0.24);
     }
 
-    private void createCryptocurrency(String name, String symbol, double price, String logoUrl, 
-                                    String miningAlgorithm, double blockReward, 
-                                    String difficulty, double minPayout) {
-        Cryptocurrency crypto = new Cryptocurrency(name, symbol, price, logoUrl, 
-                                                 miningAlgorithm, blockReward, 
-                                                 difficulty, minPayout);
-        cryptocurrencyRepository.save(crypto);
+    private void createEnergyPlan(String supplierName, double EEM) {
+        Energy energy = new Energy(supplierName, EEM);
+        energyRepository.save(energy);
     }
 }

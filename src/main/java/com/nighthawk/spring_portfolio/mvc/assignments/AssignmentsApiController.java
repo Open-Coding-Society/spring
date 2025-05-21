@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
 import com.nighthawk.spring_portfolio.mvc.person.Person;
+import com.nighthawk.spring_portfolio.mvc.person.PersonApiController.PersonDto;
 import com.nighthawk.spring_portfolio.mvc.person.PersonJpaRepository;
 
 import jakarta.transaction.Transactional;
@@ -134,11 +135,20 @@ public class AssignmentsApiController {
         error.put("error", "Assignment not found: " + name);
         return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
     }
-
+    // add at transactional to make it work
     @GetMapping("/submissions/student/{studentId}")
+    @Transactional
     public ResponseEntity<?> getStudentSubmissions(@PathVariable Long studentId) {
         List<AssignmentSubmission> submissions = submissionRepo.findByStudentId(studentId);
-        return new ResponseEntity<>(submissions, HttpStatus.OK);
+        
+        // Convert to dtos to avoid some bugs
+        List<AssignmentSubmissionReturnDto> submissionDtos = submissions.stream()
+            .map(AssignmentSubmissionReturnDto::new)
+            .collect(Collectors.toList());
+        
+        System.out.println("Number of responses: " + submissionDtos.size());
+
+        return new ResponseEntity<>(submissionDtos, HttpStatus.OK);
     }
 
     @GetMapping("/{id}")
@@ -425,6 +435,71 @@ public class AssignmentsApiController {
         return ResponseEntity.ok(formattedAssignments);
     }
 
+    @GetMapping("/bulk/extract")
+    public ResponseEntity<List<AssignmentDto>> bulkExtractAssignments() {
+        // Fetch all Assignment entities from the database
+        List<Assignment> assignment = assignmentRepo.findAll();
+
+        // Map Assignment entities to Assignment objects
+        List<AssignmentDto> assignmentDtos = new ArrayList<>();
+        for (Assignment assignment2 : assignment) {
+            AssignmentDto assignmentDto = new AssignmentDto(assignment2);
+            
+            assignmentDtos.add(assignmentDto);
+        }
+        // Return the list of Assignment objects
+        return new ResponseEntity<>(assignmentDtos, HttpStatus.OK);
+    }
+
+    /**
+     * Bulk create Assignment entities from a list of AssignmentDto objects.
+     * 
+     * @param assignmentDtos A list of AssignmentDto objects to be created.
+     * @return A ResponseEntity containing the result of the bulk creation.
+     */
+    @PostMapping("/bulk/create")
+    public ResponseEntity<Object> bulkCreateAssignments(@RequestBody List<AssignmentDto> assignmentDtos) {
+        List<String> createdAssignments = new ArrayList<>();
+        List<String> duplicateAssignments = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+        
+        for (AssignmentDto assignmentDto : assignmentDtos) {
+            try {
+                // Check if assignment with the same name already exists
+                Assignment existingAssignment = assignmentRepo.findByName(assignmentDto.name);
+                if (existingAssignment != null) {
+                    duplicateAssignments.add(assignmentDto.name);
+                    continue;
+                }
+                
+                // Create a new Assignment entity from the DTO
+                Assignment newAssignment = new Assignment(
+                    assignmentDto.name, 
+                    assignmentDto.type, 
+                    assignmentDto.description, 
+                    assignmentDto.points, 
+                    assignmentDto.dueDate
+                );
+                
+                // Save the new assignment
+                Assignment savedAssignment = assignmentRepo.save(newAssignment);
+                createdAssignments.add(savedAssignment.getName());
+                
+            } catch (Exception e) {
+                // Handle exceptions
+                errors.add("Exception occurred for assignment: " + assignmentDto.name + " - " + e.getMessage());
+            }
+        }
+        
+        // Prepare the response
+        Map<String, Object> response = new HashMap<>();
+        response.put("created", createdAssignments);
+        response.put("duplicates", duplicateAssignments);
+        response.put("errors", errors);
+        
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
+    
     @PostMapping("/randomizeGraders/{id}")
     @Transactional
     public ResponseEntity<?> randomizePeerGraders(@PathVariable Long id) {

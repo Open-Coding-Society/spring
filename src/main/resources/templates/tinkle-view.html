@@ -7,177 +7,328 @@
 
 <head>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="https://cdn.datatables.net/2.1.8/css/dataTables.dataTables.css" />
+    <link rel="stylesheet" th:href="@{/assets/css/bathroom.css}" />
 </head>
+<body>
+    <!-- page title -->
+    <th:block layout:fragment="title" th:remove="tag">Bathroom Statistics</th:block>
+    <th:block layout:fragment="body" th:remove="tag">
+        <div class="container py-4 bg-primary rounded">
+            <!-- Main page content -->
+            <header class="pb-3 mb-4 border-bottom">
+                <a href="#" class="d-flex align-items-center text-light text-decoration-none">
+                    <span class="fs-4">Tinkle View</span>
+                </a>
+            </header>
 
-<!-- page title -->
-<th:block layout:fragment="title" th:remove="tag">Tinkle View</th:block>
+            <!-- Daily User Entries Section with Weekday Tabs -->
+            <div class="container py-4 text-light bg-success rounded">
+                <h2>User Entries by Day</h2>
+                
+                <!-- Current Week Indicator -->
+                <div class="current-week-indicator" th:text="${'Current Week: ' + currentWeekStart + ' to ' + currentWeekEnd}"></div>
+                
+                <!-- Weekday Tabs (Monday-Friday only) -->
+                <div class="weekday-tabs">
+                    <div class="weekday-tab" th:each="weekday : ${weekdays}" 
+                         th:text="${weekday.name}" 
+                         th:classappend="${weekday.isToday} ? 'active' : ''" 
+                         th:data-day="${weekday.date}"></div>
+                </div>
+                
+                <!-- Weekday Content Sections -->
+                <div id="weekdayContent">
+                    <div th:each="weekday : ${weekdays}" class="weekday-content" 
+                         th:classappend="${weekday.isToday} ? 'active' : ''" 
+                         th:id="${'content-' + weekday.date}">
+                        
+                        <div th:if="${weekday.entries != null and !weekday.entries.isEmpty()}">
+                            <div class="table-responsive">
+                                <table class="table dailyTable">
+                                    <thead>
+                                        <tr>
+                                            <th class="sortable-header">Person Name</th>
+                                            <th class="sortable-header">Time In</th>
+                                            <th class="sortable-header">Duration (HH:MM:SS)</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr th:each="entry : ${weekday.entries}">
+                                            <td th:text="${entry.person_name}"></td>
+                                            <td th:text="${entry.timeIn}"></td>
+                                            <td th:text="${entry.duration}"></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div th:if="${weekday.entries == null or weekday.entries.isEmpty()}" class="text-center py-3">
+                            <p>No entries for this day</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Existing Duration by week section and Data Visualization remain the same -->
+            <div class="container py-4 bg-primary rounded mt-4">
+                <header class="pb-3 mb-4 border-bottom">
+                    <a href="#" class="d-flex align-items-center text-light text-decoration-none">
+                        <span class="fs-4">Duration by week</span>
+                    </a>
+                </header>
 
-<!-- The 'body' section is defined using Thymeleaf's layout fragment. It will replace the 'body' content in the base layout -->
-<th:block layout:fragment="body" th:remove="tag">
-    <div class="navbar">Tinkle View Navbar</div>
-    <h2>User Entries</h2>
-    <table id="userEntriesTable" class="display">
-        <thead>
-            <tr>
-                <th class="sortable-header">Person Name <span class="sort-arrow">↓</span></th>
-                <th class="sortable-header">Day <span class="sort-arrow">↓</span></th>
-                <th class="sortable-header">Time In <span class="sort-arrow">↓</span></th>
-                <th class="sortable-header">Duration (HH:MM:SS) <span class="sort-arrow">↓</span></th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr th:each="entry : ${tinkleList}">
-                <td th:text="${entry.person_name}"></td>
-                <td class="day-column" th:text="${entry.day}"></td>
-                <td class="time-in-cell" th:utext="${entry.timeIn}"></td>
-                <td th:text="${entry.duration}"></td>
-            </tr>
-        </tbody>
-    </table>
+                <div class="container py-4 text-light bg-success rounded">
+                    <h2>Average Weekly Duration per User</h2>
 
-    <h2>Average Weekly Duration per User</h2>
-    <table id="weeklyDurationTable" class="display">
-        <thead>
-            <tr>
-                <th class="sortable-header">Person Name <span class="sort-arrow">↓</span></th>
-                <th class="sortable-header">Average weekly duration <span class="sort-arrow">↓</span></th>
-            </tr>
-        </thead>
-        <tbody>
-            <tr th:each="entry : ${averageWeeklyDurations}">
-                <td th:text="${entry.key}"></td>
-                <td th:text="${entry.value}"></td>
-            </tr>
-        </tbody>
-    </table>
+                    <div class="row align-items-md-stretch">
+                        <div class="table-responsive">
+                            <table id="weeklyDurationTable" class="table">
+                                <thead>
+                                    <tr>
+                                        <th class="sortable-header">Person Name</th>
+                                        <th class="sortable-header">Average weekly duration</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="entry : ${averageWeeklyDurations}">
+                                        <td th:text="${entry.key}"></td>
+                                        <td th:text="${entry.value}"></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
 
-    <h2>Average Weekly Duration Visualization</h2>
-    <div class="chart-container">
-        <canvas id="weeklyDurationChart"></canvas>
-    </div>
+            <div class="container py-4 bg-primary rounded mt-4">
+                <header class="pb-3 mb-4 border-bottom">
+                    <a href="#" class="d-flex align-items-center text-light text-decoration-none">
+                        <span class="fs-4">Data Visualization</span>
+                    </a>
+                </header>
 
-    <!-- DataTables CSS -->
-    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/jquery.dataTables.min.css">
-    <!-- DataTables JS -->
-    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+                <div class="container py-4 text-light bg-success rounded">
+                    <h2>Average Weekly Duration Visualization</h2>
 
-    <script th:inline="javascript">
-        $(document).ready(function () {
-            // Prepare bar chart data.
-            const labels = /*[[${chartLabels}]]*/[];
-            const data = /*[[${chartData}]]*/[];
-            const formattedData = data.map(seconds => (seconds / 60).toFixed(2));
+                    <div class="row align-items-md-stretch">
+                        <div class="chart-container">
+                            <canvas id="weeklyDurationChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+        <script src="https://cdn.datatables.net/2.1.8/js/dataTables.js"></script>
 
-            const ctx = $('#weeklyDurationChart')[0].getContext('2d');
-            new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: labels,
-                    datasets: [{
-                        label: 'Average Weekly Duration (Minutes)',
-                        data: formattedData,
-                        backgroundColor: 'rgba(75, 192, 192, 0.2)',
-                        borderColor: 'rgba(75, 192, 192, 1)',
-                        borderWidth: 1
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    scales: {
-                        y: {
-                            beginAtZero: true,
-                            title: { display: true, text: 'Duration (Minutes)' }
-                        },
-                        x: { title: { display: true, text: 'Users' } }
+        <script th:inline="javascript">
+            $(document).ready(function () {
+                // Check if tables exist and have rows before initializing
+                if ($('.dailyTable').length > 0) {
+                    try {
+                        $('.dailyTable').DataTable({
+                            paging: true,
+                            searching: true,
+                            ordering: true,
+                            // Start with no initial ordering to avoid potential issues
+                            order: [], 
+                            lengthMenu: [5, 10, 25, 50],
+                            pageLength: 10,
+                            responsive: true,
+                            autoWidth: false,
+                            language: {
+                                search: "🔍 Search:",
+                                lengthMenu: "Show _MENU_ entries per page",
+                                zeroRecords: "No matching records found",
+                                info: "Showing _START_ to _END_ of _TOTAL_ entries",
+                                infoFiltered: "(filtered from _MAX_ total entries)",
+                                paginate: {
+                                    first: '<i class="bi bi-chevron-double-left"></i>',
+                                    last: '<i class="bi bi-chevron-double-right"></i>',
+                                    next: '<i class="bi bi-chevron-right"></i>',
+                                    previous: '<i class="bi bi-chevron-left"></i>'
+                                }
+                            }
+                        });
+                        
+                        // Only apply ordering after DataTable is initialized successfully
+                        // This separates initialization from ordering application
+                        setTimeout(function() {
+                            try {
+                                $('.dailyTable').DataTable().order([1, 'desc']).draw();
+                            } catch(e) {
+                                console.error("Error applying order to dailyTable:", e);
+                            }
+                        }, 200);
+                    } catch(e) {
+                        console.error("Error initializing dailyTable:", e);
                     }
                 }
-            });
 
-            // Initialize DataTables with pagination, sorting, and searching
-            $('#userEntriesTable').DataTable({
-                paging: true,           // Enable pagination
-                searching: true,        // Enable search box
-                ordering: true,         // Enable column sorting
-                lengthMenu: [5, 10, 25, 50], // Number of rows per page options
-                pageLength: 5,          // Default rows per page
-                responsive: true,       // Responsive table
-                autoWidth: false,
-                language: {
-                    search: "🔍 Search:",
-                    lengthMenu: "Show _MENU_ entries per page",
-                    zeroRecords: "No matching records found",
-                    info: "Showing _START_ to _END_ of _TOTAL_ entries",
-                    infoFiltered: "(filtered from _MAX_ total entries)",
-                    paginate: {
-                        first: "<<",
-                        last: ">>",
-                        next: ">",
-                        previous: "<"
+                // Similar defensive approach for weekly duration table
+                if ($('#weeklyDurationTable').length > 0) {
+                    try {
+                        $('#weeklyDurationTable').DataTable({
+                            paging: true,
+                            searching: true,
+                            ordering: true,
+                            order: [], // Start with no ordering
+                            lengthMenu: [5, 10, 25, 50],
+                            pageLength: 10,
+                            responsive: true,
+                            autoWidth: false,
+                            language: {
+                                search: "🔍 Search:",
+                                lengthMenu: "Show _MENU_ entries per page",
+                                zeroRecords: "No matching records found",
+                                info: "Showing _START_ to _END_ of _TOTAL_ entries",
+                                infoFiltered: "(filtered from _MAX_ total entries)",
+                                paginate: {
+                                    first: '<i class="bi bi-chevron-double-left"></i>',
+                                    last: '<i class="bi bi-chevron-double-right"></i>',
+                                    next: '<i class="bi bi-chevron-right"></i>',
+                                    previous: '<i class="bi bi-chevron-left"></i>'
+                                }
+                            }
+                        });
+                        
+                        // Apply ordering after initialization
+                        setTimeout(function() {
+                            try {
+                                $('#weeklyDurationTable').DataTable().order([1, 'desc']).draw();
+                            } catch(e) {
+                                console.error("Error applying order to weeklyDurationTable:", e);
+                            }
+                        }, 200);
+                    } catch(e) {
+                        console.error("Error initializing weeklyDurationTable:", e);
                     }
-                },
-                columnDefs: [
-                    { targets: 1, type: 'date' }, // Day column
-                    { targets: 2, type: 'string' }, // Time In column
-                    { targets: 3, type: 'num' }   // Duration column
-                ]
-            });
+                }
 
-            // Initialize DataTables for the average duration table
-            $('#weeklyDurationTable').DataTable({
-                paging: true,
-                searching: true,
-                ordering: true,
-                lengthMenu: [5, 10, 25, 50],
-                pageLength: 5,
-                responsive: true,
-                autoWidth: false,
-                language: {
-                    search: "🔍 Search:",
-                    lengthMenu: "Show _MENU_ entries per page",
-                    zeroRecords: "No matching records found",
-                    info: "Showing _START_ to _END_ of _TOTAL_ entries",
-                    infoFiltered: "(filtered from _MAX_ total entries)",
-                    paginate: {
-                        first: "<<",
-                        last: ">>",
-                        next: ">",
-                        previous: "<"
-                    }
-                },
-            });
 
-            // Highlight excessive duration pairs
-            const thresholdMinutes = 15;
-            $('.time-in-cell').each(function () {
-                const cellText = $(this).text().trim();
-                if (!cellText) return;
+                const labels = /*[[${chartLabels}]]*/ [];
+                const data = /*[[${chartData}]]*/ [];
+                const formattedData = data.map(seconds => (seconds / 60).toFixed(2));
 
-                const pairs = cellText.split(',');
-                const newHTML = pairs.map(pair => {
-                    let trimmed = pair.trim();
-                    let times = trimmed.split("--");
+                // Sort the data from greatest to least
+                const sortedEntries = labels
+                    .map((label, index) => ({ label, value: parseFloat(formattedData[index]) }))
+                    .sort((a, b) => b.value - a.value);
 
-                    if (times.length === 2) {
-                        // Convert HH:MM to minutes for comparison
-                        const startParts = times[0].split(':');
-                        const endParts = times[1].split(':');
+                // Pagination variables
+                const pageSize = 15;
+                let currentPage = 0;
 
-                        const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
-                        const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
+                const totalPages = Math.ceil(sortedEntries.length / pageSize);
 
-                        const diffMinutes = endMinutes - startMinutes;
-
-                        if (diffMinutes > thresholdMinutes) {
-                            return `<span class="highlight-long">${trimmed}</span>`;
+                // Create Chart instance
+                const ctx = $('#weeklyDurationChart')[0].getContext('2d');
+                const chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: [],
+                        datasets: [{
+                            label: 'Average Weekly Duration (Minutes)',
+                            data: [],
+                            backgroundColor: 'rgba(40, 167, 69, 0.2)',
+                            borderColor: 'rgba(40, 167, 69, 1)',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Duration (Minutes)' }
+                            },
+                            x: { title: { display: true, text: 'Users' } }
                         }
                     }
-                    return trimmed;
-                }).join(", ");
+                });
 
-                $(this).html(newHTML);
+                function updateChartPage(page) {
+                    const start = page * pageSize;
+                    const end = start + pageSize;
+                    const pageData = sortedEntries.slice(start, end);
+
+                    chart.data.labels = pageData.map(entry => entry.label);
+                    chart.data.datasets[0].data = pageData.map(entry => entry.value);
+                    chart.update();
+
+                    $('#chartPagination').text(`Page ${page + 1} of ${totalPages}`);
+                }
+
+                // Add pagination controls
+                const paginationControls = `
+                    <div class="text-center mt-3">
+                        <button id="prevPage" class="btn btn-light btn-sm me-2">Prev</button>
+                        <span id="chartPagination"></span>
+                        <button id="nextPage" class="btn btn-light btn-sm ms-2">Next</button>
+                    </div>
+                `;
+                $('.chart-container').after(paginationControls);
+
+                $('#prevPage').click(() => {
+                    if (currentPage > 0) {
+                        currentPage--;
+                        updateChartPage(currentPage);
+                    }
+                });
+
+                $('#nextPage').click(() => {
+                    if (currentPage < totalPages - 1) {
+                        currentPage++;
+                        updateChartPage(currentPage);
+                    }
+                });
+
+                // Initialize first page
+                updateChartPage(currentPage);
+
+                // Weekday tabs functionality
+                $('.weekday-tab').click(function() {
+                    // Remove active class from all tabs and content
+                    $('.weekday-tab').removeClass('active');
+                    $('.weekday-content').removeClass('active');
+                    
+                    // Add active class to clicked tab
+                    $(this).addClass('active');
+                    
+                    // Show corresponding content
+                    const dayDate = $(this).data('day');
+                    $('#content-' + dayDate).addClass('active');
+                });
+
+                // (Optional) Highlight excessive duration pairs similar to your current code
+                const thresholdMinutes = 15;
+                $('.time-in-cell').each(function () {
+                    const cellText = $(this).text().trim();
+                    if (!cellText) return;
+                    const pairs = cellText.split(',');
+                    const newHTML = pairs.map(pair => {
+                        let trimmed = pair.trim();
+                        let times = trimmed.split("--");
+                        if (times.length === 2) {
+                            const startParts = times[0].split(':');
+                            const endParts = times[1].split(':');
+                            const startMinutes = parseInt(startParts[0]) * 60 + parseInt(startParts[1]);
+                            const endMinutes = parseInt(endParts[0]) * 60 + parseInt(endParts[1]);
+                            const diffMinutes = endMinutes - startMinutes;
+                            if (diffMinutes > thresholdMinutes) {
+                                return `<span class="highlight-long">${trimmed}</span>`;
+                            }
+                        }
+                        return trimmed;
+                    }).join(", ");
+                    $(this).html(newHTML);
+                });
             });
-        });
-    </script>
-</th:block>
-
+        </script>
+    </th:block>
+</body>
 </html>

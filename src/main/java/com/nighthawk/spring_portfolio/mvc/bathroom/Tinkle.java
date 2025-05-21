@@ -33,7 +33,7 @@ public class Tinkle {
     private Long id;
 
     @OneToOne
-    @JoinColumn(name = "person_id")
+    @JoinColumn(name = "uid")
     @OnDelete(action = OnDeleteAction.CASCADE)
     @JsonBackReference
     private Person person;
@@ -148,26 +148,49 @@ public class Tinkle {
 
     public static Tinkle[] init(Person[] persons) {
         ArrayList<Tinkle> tinkles = new ArrayList<>();
-
-        String[] timeInOutSamples = {
-            "2025-02-17 08:45:00--2025-02-17 09:10:00,2025-02-17 10:15:00--2025-02-17 10:50:00",
-            "2025-02-18 09:05:00--2025-02-18 09:25:00,2025-02-18 11:40:00--2025-02-18 12:10:00",
-            "2025-02-19 11:35:00--2025-02-19 12:00:00,2025-02-19 13:10:00--2025-02-19 13:55:00",
-            "2025-02-20 08:50:00--2025-02-20 09:05:00,2025-02-20 14:15:00--2025-02-20 14:45:00",
-            "2025-02-21 12:10:00--2025-02-21 12:50:00,2025-02-21 15:20:00--2025-02-21 15:35:00",
-            "2025-02-17 10:35:00--2025-02-17 11:10:00",
-            "2025-02-18 08:55:00--2025-02-18 09:40:00,2025-02-18 14:25:00--2025-02-18 14:50:00",
-            "2025-02-19 09:45:00--2025-02-19 10:05:00,2025-02-19 12:30:00--2025-02-19 13:05:00",
-            "2025-02-20 13:05:00--2025-02-20 13:50:00,2025-02-20 15:10:00--2025-02-20 15:35:00",
-            "2025-02-21 08:35:00--2025-02-21 09:05:00,2025-02-21 12:45:00--2025-02-21 13:20:00"
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    
+        java.util.Random random = new java.util.Random();
+    
+        String[] baseDates = {
+            "2025-04-07", "2025-04-08", "2025-04-09", "2025-04-10", "2025-04-11",
+            "2025-04-14", "2025-04-15", "2025-04-16", "2025-04-17", "2025-04-18"
         };
-        
-
+    
+        String[] timeInOutSamples = new String[10];
+    
+        for (int i = 0; i < 10; i++) {
+            StringBuilder sampleBuilder = new StringBuilder();
+            String date = baseDates[i % baseDates.length];
+    
+            // Assign a "base" average trip duration for this person (10-20 min)
+            int baseDuration = 10 + random.nextInt(11); // 10 to 20 minutes
+    
+            for (int j = 0; j < 20; j++) {
+                int hour = 8 + (j % 10); // 8 AM to 5 PM
+                int minute = (j * 3) % 60;
+    
+                // Add a random adjustment of ±3 minutes around base duration
+                int durationAdjustment = random.nextInt(7) - 3;  // -3 to +3 minutes
+                int tripDuration = Math.max(5, baseDuration + durationAdjustment); // Ensure at least 5 min trips
+    
+                String timeIn = String.format("%s %02d:%02d:00", date, hour, minute);
+                String timeOut = LocalDateTime.parse(timeIn, formatter).plusMinutes(tripDuration).format(formatter);
+    
+                sampleBuilder.append(timeIn).append("--").append(timeOut);
+                if (j != 19) sampleBuilder.append(","); // comma between entries
+            }
+    
+            timeInOutSamples[i] = sampleBuilder.toString();
+        }
+    
         for (int i = 0; i < persons.length; i++) {
             String timeInOut = timeInOutSamples[i % timeInOutSamples.length];
             tinkles.add(new Tinkle(persons[i], timeInOut));
         }
-
+    
         return tinkles.toArray(new Tinkle[0]);
     }
+    
+    
 }

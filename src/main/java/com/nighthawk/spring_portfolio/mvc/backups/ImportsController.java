@@ -272,63 +272,68 @@ public class ImportsController {
     }
 
     private void sanitizeAndProcessData(Map<String, List<Map<String, Object>>> data, boolean removeExcessData) throws SQLException {
-        // First establish a connection and set WAL mode
-        try (Connection setupConnection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
-            enableWalMode(setupConnection);
-            setBusyTimeout(setupConnection, 30000); // 30 seconds
+    // First establish a connection and set WAL mode
+    try (Connection setupConnection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
+        enableWalMode(setupConnection);
+        setBusyTimeout(setupConnection, 30000); // 30 seconds
+    }
+    
+    // Now create a new connection for the data operations
+    try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
+        connection.setAutoCommit(false); // Start transaction
+        
+        // Get a list of all existing tables in the database
+        Set<String> allTables = getAllTables(connection);
+        Set<String> tablesInJson = new HashSet<>(data.keySet());
+        
+        // Update sequence tables first
+        updateSequenceTables(connection, data);
+        
+        // Insert data into other tables
+        for (Map.Entry<String, List<Map<String, Object>>> entry : data.entrySet()) {
+            String tableName = sanitizeTableName(entry.getKey());
+            List<Map<String, Object>> tableData = entry.getValue();
+            
+            if (!tableName.endsWith("_seq")) { // Skip sequence tables
+                // First make sure the table exists with all necessary columns
+                try {
+                    ensureTableExists(connection, tableName, tableData, removeExcessData);
+                    
+                    if (removeExcessData) {
+                        // Delete all existing data and replace with the JSON data
+                        clearTableData(connection, tableName);
+                    }
+                    
+                    // Only attempt to insert data if we have any
+                    if (!tableData.isEmpty()) {
+                        insertTableData(connection, tableName, tableData);
+                    }
+                } catch (SQLException e) {
+                    System.err.println("Error processing table " + tableName + ": " + e.getMessage());
+                    throw e; // Rethrow to roll back the transaction
+                }
+            }
         }
         
-        // Now create a new connection for the data operations
-        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
-            connection.setAutoCommit(false); // Start transaction
+        // Handle tables that exist in DB but not in JSON
+        if (removeExcessData) {
+            // MODIFIED: Don't drop tables that aren't in the JSON, only update existing ones
+            System.out.println("Preserving all existing tables not in import data");
             
-            // Get a list of all existing tables in the database
-            Set<String> allTables = getAllTables(connection);
-            Set<String> tablesInJson = new HashSet<>(data.keySet());
-            
-            // Update sequence tables first
-            updateSequenceTables(connection, data);
-            
-            // Insert data into other tables
-            for (Map.Entry<String, List<Map<String, Object>>> entry : data.entrySet()) {
-                String tableName = sanitizeTableName(entry.getKey());
-                List<Map<String, Object>> tableData = entry.getValue();
-                
-                if (!tableName.endsWith("_seq")) { // Skip sequence tables
-                    // First make sure the table exists with all necessary columns
-                    try {
-                        ensureTableExists(connection, tableName, tableData, removeExcessData);
-                        
-                        if (removeExcessData) {
-                            // Delete all existing data and replace with the JSON data
-                            clearTableData(connection, tableName);
-                        }
-                        
-                        // Only attempt to insert data if we have any
-                        if (!tableData.isEmpty()) {
-                            insertTableData(connection, tableName, tableData);
-                        }
-                    } catch (SQLException e) {
-                        System.err.println("Error processing table " + tableName + ": " + e.getMessage());
-                        throw e; // Rethrow to roll back the transaction
-                    }
+            // We could either comment out the old code completely, or keep the loop
+            // and just use it for logging which tables are being preserved
+            for (String tableName : allTables) {
+                if (!tableName.startsWith("sqlite_") && 
+                    !tablesInJson.contains(tableName) && 
+                    !tableName.endsWith("_seq")) {
+                    System.out.println("Preserving existing table not in import: " + tableName);
                 }
             }
-            
-            // Handle tables that exist in DB but not in JSON
-            if (removeExcessData) {
-                for (String tableName : allTables) {
-                    // Skip system tables and sequence tables for deletion
-                    if (!tableName.startsWith("sqlite_") && !tablesInJson.contains(tableName) && !tableName.endsWith("_seq")) {
-                        System.out.println("Dropping table not in import: " + tableName);
-                        dropTable(connection, tableName);
-                    }
-                }
-            }
-            
-            connection.commit(); // Commit transaction
         }
+        
+        connection.commit(); // Commit transaction
     }
+}
 
     private Set<String> getAllTables(Connection connection) throws SQLException {
         Set<String> tables = new HashSet<>();
@@ -494,89 +499,48 @@ public class ImportsController {
         return columns;
     }
 
-    private void ensureTableExists(Connection connection, String tableName, List<Map<String, Object>> tableData, boolean removeExcessColumns) throws SQLException {
-        // If the data is empty, create a basic table structure instead of skipping
-        if (tableData.isEmpty()) {
-            System.out.println("No data provided for table: " + tableName + ". Creating with basic structure.");
-            if (!tableExists(connection, tableName)) {
-                // Create a basic table if it doesn't exist
-                String sql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
-                             "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                             "name TEXT, " +
-                             "description TEXT, " +
-                             "created_date TEXT" +
-                             ")";
-                try (Statement stmt = connection.createStatement()) {
-                    stmt.execute(sql);
-                    System.out.println("Created basic table structure for: " + tableName);
-                }
-            }
-            return;
-        }
-    
-        Set<String> columnsInJson = tableData.get(0).keySet();
-        
-        // Check if the table exists
-        boolean tableExists = tableExists(connection, tableName);
-        
-        if (!tableExists) {
-            // Create a new table with exactly the columns in the JSON
-            System.out.println("Creating new table: " + tableName + " with columns: " + columnsInJson);
-            createTable(connection, tableName, columnsInJson);
-        } else if (removeExcessColumns) {
-            // Get existing columns in the database
-            Set<String> existingColumns = getExistingColumns(connection, tableName);
-            
-            // Identify columns to remove and add
-            Set<String> columnsToRemove = new HashSet<>(existingColumns);
-            columnsToRemove.removeAll(columnsInJson);
-            
-            // If we have columns to remove, recreate the table
-            if (!columnsToRemove.isEmpty()) {
-                System.out.println("Recreating table: " + tableName + " to remove columns: " + columnsToRemove);
-                // Need to recreate the table to remove columns
-                recreateTableWithNewSchema(connection, tableName, columnsInJson);
-            } else {
-                // Just add any missing columns
-                for (String column : columnsInJson) {
-                    if (!existingColumns.contains(column)) {
-                        System.out.println("Adding column: " + column + " to table: " + tableName);
-                        addColumn(connection, tableName, column);
-                    }
-                }
-            }
-        } else {
-            // Just ensure all columns from JSON exist in the table
-            Set<String> existingColumns = getExistingColumns(connection, tableName);
-            for (String column : columnsInJson) {
-                if (!existingColumns.contains(column)) {
-                    System.out.println("Adding column: " + column + " to table: " + tableName);
-                    addColumn(connection, tableName, column);
-                }
+    private void ensureTableExists(Connection connection, String tableName, List<Map<String, Object>> tableData, boolean removeExcessData) throws SQLException {
+    // If the data is empty, create a basic table structure instead of skipping
+    if (tableData.isEmpty()) {
+        System.out.println("No data provided for table: " + tableName + ". Creating with basic structure.");
+        if (!tableExists(connection, tableName)) {
+            // Create a basic table if it doesn't exist
+            String sql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
+                         "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                         "name TEXT, " +
+                         "description TEXT, " +
+                         "created_date TEXT" +
+                         ")";
+            try (Statement stmt = connection.createStatement()) {
+                stmt.execute(sql);
+                System.out.println("Created basic table structure for: " + tableName);
             }
         }
+        return;
     }
 
-    private void recreateTableWithNewSchema(Connection connection, String tableName, Set<String> newColumns) throws SQLException {
-        // Create the new table with a temporary name
-        String tempTableName = tableName + "_temp";
+    Set<String> columnsInJson = tableData.get(0).keySet();
+    
+    // Check if the table exists
+    boolean tableExists = tableExists(connection, tableName);
+    
+    if (!tableExists) {
+        // Create a new table with exactly the columns in the JSON
+        System.out.println("Creating new table: " + tableName + " with columns: " + columnsInJson);
+        createTable(connection, tableName, columnsInJson);
+    } else {
+        // Get existing columns in the database
+        Set<String> existingColumns = getExistingColumns(connection, tableName);
         
-        // Drop temp table if it exists from a previous failed attempt
-        dropTable(connection, tempTableName);
-        
-        // Create new table with the exact columns we want
-        createTable(connection, tempTableName, newColumns);
-        
-        // Since we'll be clearing all the data anyway, we can just drop the original table
-        dropTable(connection, tableName);
-        
-        // Rename the temp table to the original name
-        String sql = "ALTER TABLE " + tempTableName + " RENAME TO " + tableName;
-        try (Statement statement = connection.createStatement()) {
-            statement.execute(sql);
-            System.out.println("Recreated table " + tableName + " with new schema");
+        // MODIFIED: Never remove existing columns, only add new ones from JSON
+        for (String column : columnsInJson) {
+            if (!existingColumns.contains(column)) {
+                System.out.println("Adding column: " + column + " to table: " + tableName);
+                addColumn(connection, tableName, column);
+            }
         }
     }
+}
 
     private void createTable(Connection connection, String tableName, Set<String> columns) throws SQLException {
         StringBuilder sqlBuilder = new StringBuilder("CREATE TABLE IF NOT EXISTS " + tableName + " (");

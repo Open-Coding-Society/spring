@@ -25,23 +25,17 @@ import jakarta.persistence.ManyToMany;
 import jakarta.persistence.OneToMany;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
-import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.Getter;
-import lombok.NoArgsConstructor;
 import lombok.Setter;
+import lombok.NoArgsConstructor;
 
 @Data
-@NoArgsConstructor
-@AllArgsConstructor
 @Entity
-@JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 @Getter
 @Setter
+@NoArgsConstructor
 public class Assignment {
-    // @JsonInclude(JsonInclude.Include.NON_NULL)
-    @NotNull
-    @JsonPropertyOrder({"id", "name", "type", "description", "dueDate", "timestamp", "submissions"})
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;

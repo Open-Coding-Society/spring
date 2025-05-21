@@ -2,6 +2,7 @@
 package com.nighthawk.spring_portfolio.mvc.rpg.adventureAnswer;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -47,8 +48,7 @@ public class AdventureAnswerApiController {
     private final Dotenv dotenv = Dotenv.load();
     private final String apiUrl = dotenv.get("GAMIFY_API_URL"); // store api url
     private final String apiKey = dotenv.get("GAMIFY_API_KEY"); // store api key
-    @Autowired
-    private PersonJpaRepository repository;
+
     // autowire jpa repositories for database interactions
     @Autowired
     private AdventureAnswerJpaRepository answerJpaRepository;
@@ -77,7 +77,7 @@ public class AdventureAnswerApiController {
     // added endpoint to match python user to java user
     @GetMapping("/person/{uid}")
     public ResponseEntity<Person> getPersonByUid(@PathVariable String uid) {
-        Person person = repository.findByUid(uid);
+        Person person = personJpaRepository.findByUid(uid);
         if (person != null) { // Good ID
             return new ResponseEntity<>(person, HttpStatus.OK); // OK HTTP response: status code, headers, and body
         }
@@ -140,7 +140,9 @@ public class AdventureAnswerApiController {
         if (isAnswerCorrect) {
             double questionPoints = question.getPoints();
             double updatedBalance = person.getBalanceDouble() + questionPoints;
-            person.setBalanceString(updatedBalance);
+            
+            person.setBalanceString(updatedBalance, "adventuregame");
+            personJpaRepository.save(person);
         }
     
         return ResponseEntity.ok(true);
@@ -168,7 +170,9 @@ public class AdventureAnswerApiController {
                 choiceDTO.setIs_correct(choice.getIs_correct());
                 choiceDTOs.add(choiceDTO);
             }
-    
+            // Shuffle choices to avoid always putting the correct one first
+            Collections.shuffle(choiceDTOs);
+  
             Map<String, Object> questionEntry = new HashMap<>();
             questionEntry.put("question", question);
             questionEntry.put("choices", choiceDTOs);
@@ -260,7 +264,7 @@ public class AdventureAnswerApiController {
 
         double questionPoints = question.getPoints();
         double updatedBalance = person.getBalanceDouble() + questionPoints;
-        person.setBalanceString(updatedBalance);
+        person.setBalanceString(updatedBalance, "adventure");
         
         personJpaRepository.save(person); // save the updated person object
 

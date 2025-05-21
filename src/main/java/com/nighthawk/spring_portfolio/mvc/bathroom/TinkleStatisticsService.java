@@ -23,6 +23,7 @@ public class TinkleStatisticsService {
     public Map<String, Long> calculateAverageWeeklyDurations(List<Tinkle> tinkleList) {
         // Group durations by person name
         Map<String, List<Long>> userWeeklyDurations = tinkleList.stream()
+            .filter(tinkle -> tinkle.getPersonName() != null) 
             .collect(Collectors.groupingBy(
                 Tinkle::getPersonName,
                 Collectors.mapping(

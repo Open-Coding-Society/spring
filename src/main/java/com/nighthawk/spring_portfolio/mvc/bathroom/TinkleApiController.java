@@ -1,11 +1,17 @@
 package com.nighthawk.spring_portfolio.mvc.bathroom;
 
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.List;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -16,7 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 import com.nighthawk.spring_portfolio.mvc.person.Person;
 import com.nighthawk.spring_portfolio.mvc.person.PersonJpaRepository;
 
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.Getter;
+import lombok.Setter;
 
 @RestController
 @RequestMapping("/api/tinkle")
@@ -30,6 +38,7 @@ public class TinkleApiController {
 
 
     @Getter
+    @Setter
     public static class TinkleDto {
         private String studentEmail;
         private String timeIn;
@@ -99,5 +108,94 @@ public class TinkleApiController {
             System.out.println("Student not found in memory: " + studentName);
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Student not found");
         }
+    }
+
+    @DeleteMapping("/bulk/clear")
+    public ResponseEntity<?> clearTable(HttpServletRequest request) {
+        // Check for admin authentication
+        String role = (String) request.getAttribute("role");
+        if (role == null || !role.equals("ADMIN")) {
+            return new ResponseEntity<>("Unauthorized - Admin access required", HttpStatus.UNAUTHORIZED);
+        }
+
+        try {
+            // Delete all records
+            repository.deleteAll();
+            
+            Map<String, String> response = new HashMap<>();
+            response.put("status", "success");
+            response.put("message", "All bathroom records have been cleared");
+            
+            return new ResponseEntity<>(response, HttpStatus.OK);
+        } catch (Exception e) {
+            Map<String, String> errorResponse = new HashMap<>();
+            errorResponse.put("status", "error");
+            errorResponse.put("message", "Failed to clear table: " + e.getMessage());
+            
+            return new ResponseEntity<>(errorResponse, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    @GetMapping("/bulk/extract")
+    public ResponseEntity<List<TinkleDto>> bulkExtract() {
+        // Fetch all Tinkle entries from the database
+        List<Tinkle> tinkleList = repository.findAll();
+        
+        // Map Tinkle entities to TinkleDto objects
+        List<TinkleDto> tinkleDtos = new ArrayList<>();
+        for (Tinkle tinkle : tinkleList) {
+            TinkleDto tinkleDto = new TinkleDto();
+            tinkleDto.setStudentEmail(tinkle.getPersonName());
+            tinkleDto.setTimeIn(tinkle.getTimeIn());
+            // You can add more fields here if needed
+            tinkleDtos.add(tinkleDto);
+        }
+        
+        // Return the list of TinkleDto objects
+        return new ResponseEntity<>(tinkleDtos, HttpStatus.OK);
+    }
+
+    @PostMapping("/bulk/create")
+    public ResponseEntity<Object> bulkCreateTinkles(@RequestBody List<TinkleDto> tinkleDtos) {
+        List<String> createdTinkles = new ArrayList<>();
+        List<String> duplicateTinkles = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+
+        for (TinkleDto tinkleDto : tinkleDtos) {
+            try {
+                // Check if student already exists
+                Optional<Tinkle> existingTinkle = repository.findByPersonName(tinkleDto.getStudentEmail());
+                
+                if (existingTinkle.isPresent()) {
+                    // Update existing tinkle with new timeIn data
+                    Tinkle tinkle = existingTinkle.get();
+                    tinkle.addTimeIn(tinkleDto.getTimeIn());
+                    repository.save(tinkle);
+                    createdTinkles.add(tinkleDto.getStudentEmail() + " (updated)");
+                } else {
+                    // Find the person first
+                    Person person = personRepository.findByName(tinkleDto.getStudentEmail());
+                    
+                    if (person != null) {
+                        // Create new tinkle entry
+                        Tinkle newTinkle = new Tinkle(person, tinkleDto.getTimeIn());
+                        repository.save(newTinkle);
+                        createdTinkles.add(tinkleDto.getStudentEmail());
+                    } else {
+                        errors.add("Person not found with name: " + tinkleDto.getStudentEmail());
+                    }
+                }
+            } catch (Exception e) {
+                errors.add("Exception occurred for student: " + tinkleDto.getStudentEmail() + " - " + e.getMessage());
+            }
+        }
+
+        // Prepare the response
+        Map<String, Object> response = new HashMap<>();
+        response.put("created", createdTinkles);
+        response.put("duplicates", duplicateTinkles);
+        response.put("errors", errors);
+
+        return new ResponseEntity<>(response, HttpStatus.OK);
     }
 }

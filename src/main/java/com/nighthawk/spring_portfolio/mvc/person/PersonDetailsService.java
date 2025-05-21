@@ -20,6 +20,7 @@ This class has an instance of Java Persistence API (JPA)
 -- Spring Data JPA will generate a proxy instance
 -- Below are some CRUD methods that we can use with our database
 */
+
 @Service
 @Transactional
 public class PersonDetailsService implements UserDetailsService {  // "implements" ties ModelRepo to Spring Security

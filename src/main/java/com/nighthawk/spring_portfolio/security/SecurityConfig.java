@@ -61,7 +61,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/calendar/edit/{id}").permitAll()
                         .requestMatchers(HttpMethod.DELETE, "/api/calendar/delete/{id}").permitAll()
                     
-
+                        .requestMatchers(HttpMethod.GET,"/api/train/**").authenticated()
 
                 )
                 .cors(Customizer.withDefaults())
@@ -101,6 +101,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/mvc/synergy/view-grade-requests").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
                         .requestMatchers(HttpMethod.GET, "/mvc/assignments/tracker").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
                         .requestMatchers(HttpMethod.GET, "/mvc/teamteach/teachergrading").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
+                        .requestMatchers(HttpMethod.GET,"/mvc/train/**").authenticated()
+                        .requestMatchers(HttpMethod.GET,"/mvc/extract/**").hasAuthority("ROLE_ADMIN")
                         .requestMatchers("/**").permitAll()
                 )
                 .formLogin(form -> form

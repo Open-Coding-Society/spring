@@ -5,6 +5,8 @@ target/
 !**/src/test/**/target/
 .env
 volumes/sqlite.db
+volumes/sqlite.db-shm
+volumes/sqlite.db-wal
 
 ### STS ###
 .apt_generated

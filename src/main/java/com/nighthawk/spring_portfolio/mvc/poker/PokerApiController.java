@@ -87,7 +87,7 @@ public class PokerApiController {
         double updatedBalance = currentBalance + winnings;
 
         // Update the person's balance in the database
-        person.setBalanceString(updatedBalance);
+        person.setBalanceString(updatedBalance, "poker");
         personJpaRepository.save(person);
 
         // Create and return the response object with game results and updated balance

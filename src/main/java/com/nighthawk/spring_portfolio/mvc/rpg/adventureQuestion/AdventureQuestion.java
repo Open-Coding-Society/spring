@@ -70,32 +70,12 @@ public class AdventureQuestion {
     public static String[][] init() {
         // Create SynergyGrade objects
         return new String[][] {
-            {"Finance Quiz", "Trade-offs should be based on", "Finance", "10000", "null"}, 
-            {"Finance Quiz", "A business might conduct a compliance audit to", "Finance", "10000", "null"}, 
-            {"Finance Quiz", "What is an advantage of using technology in compliance?", "Finance", "10000", "null"}, 
-
             {"Fidelity Quiz", "What is the purpose of Artificial Intelligence in FinTech?", "Fidelity", "10000", "null"},
             {"Fidelity Quiz", "Which tool is essential for version control in software projects?", "Fidelity", "10000", "null"},
             {"Fidelity Quiz", "Which of the following is a common cybersecurity threat?", "Fidelity", "10000", "null"},
             {"Tech Quiz", "What is a benefit of using cloud computing in business?", "Schwab", "10000", "null"},
             {"Tech Quiz", "Why do developers use debugging tools?", "Schwab", "10000", "null"},
             {"Tech Quiz", "What does encryption do?", "Schwab", "10000", "null"},
-            {"Tech Quiz", "What is the core idea behind Agile development?", "Schwab", "10000", "null"},
-            {"Tech Quiz", "What does an API enable?", "Schwab", "10000", "null"},
-            {"Tech Quiz", "What is the role of cybersecurity in business?", "Schwab", "10000", "null"},
-            
-
-            {"Finance Basics", "What is compound interest?", "Meteor", "10000", "null"},
-            {"Finance Basics", "Which investment typically has the highest risk?", "Meteor", "10000", "null"},
-            {"Finance Basics", "What is diversification in investing?", "Meteor", "10000", "null"},
-            {"Finance Basics", "What is a bear market?", "Meteor", "10000", "null"},
-            {"Finance Basics", "What is an ETF?", "Meteor", "10000", "null"},
-            {"Finance Basics", "What is the most common retirement account type in the US?", "Meteor", "10000", "null"},
-            {"Finance Basics", "What is the name for money you initially put into an investment?", "Meteor", "10000", "null"},
-            {"Finance Basics", "What type of investment pays regular fixed payments?", "Meteor", "10000", "null"},
-            {"Finance Basics", "What's the term for the upward movement of market prices?", "Meteor", "10000", "null"},
-            {"Finance Basics", "What's the three-letter acronym for a tax-advantaged retirement account?", "Meteor", "10000", "null"},
-            
         };
     }
 }
