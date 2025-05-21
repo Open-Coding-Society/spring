@@ -94,7 +94,7 @@
         }
 
         .modal-content {
-            background-color: #1b1c1a;
+            background-color: #fff;
             margin: 15% auto;
             padding: 20px;
             border-radius: 8px;
@@ -273,20 +273,21 @@
                     { title: "Actions", orderable: false }
                 ]
             });
-        
+
             const submissionsTable = $('#submissionsTable').DataTable({
                 paging: true,
                 searching: true,
                 info: true,
                 autoWidth: false,
                 columns: [
-                    { title: "Assignment/Student" }, // Placeholder, updated dynamically
+                    { title: "Assignment" },
                     { title: "Content" },
                     { title: "Comments" },
                     { title: "Grade" },
                     { title: "Actions", orderable: false }
                 ]
             });
+
             fetchAssignments();
             fetchStudents();
 
@@ -577,6 +578,34 @@
                         method: 'POST'
                     }).then(fetchAssignments);
                 }
+            };
+
+            window.viewSubmissions = function (id) {
+                fetch(`/api/submissions/assignment/${id}`)
+                    .then(response => response.json())
+                    .then(submissions => {
+                        submissionsTable.clear();
+                        if (submissions.length === 0) {
+                            submissionsTable.row.add(['No submissions found', '', '', '', '']);
+                        } else {
+                            submissions.forEach(submission => {
+                                const studentNames = submission.students.map(student => student.name).join(', ') || 'Unknown Student';
+                                submissionsTable.row.add([
+                                    studentNames,
+                                    submission.content || 'No content',
+                                    submission.comment || 'No comments',
+                                    submission.grade || 'Not graded',
+                                    `<button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Grade</button>`
+                                ]);
+                            });
+                        }
+                        submissionsTable.draw();
+                        document.getElementById('submissionsModal').style.display = 'block';
+                    })
+                    .catch(error => {
+                        console.error('Error fetching submissions:', error);
+                        alert('Failed to fetch submissions.');
+                    });
             };
 
             window.closeAddAssignmentModal = function () {
