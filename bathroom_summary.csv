@@ -1,8 +1,8 @@
 Name,MeanDuration,MaxDuration,StdDevDuration,TotalVisits,PercentAbnormal,AbnormalPerson
-Thomas Edison,1.0,1.0,0.8,1.0,1.0,true
-Alexander Graham Bell,0.2,0.0,0.4,1.0,1.0,true
-John Mortensen,0.0,0.0,0.6,1.0,0.0,true
-Alan Turing,0.6,0.3333333333333333,0.4,1.0,1.0,true
-Nikola Tesla,1.0,0.3333333333333333,0.0,0.0,1.0,true
-Madam Curie,0.4,0.6666666666666666,1.0,1.0,0.0,true
-Grace Hopper,1.0,1.0,0.8,1.0,1.0,true
+Thomas Edison,1.0,0.8333333333333334,1.0,,0.8125,true
+Alexander Graham Bell,0.6826923076923076,0.5,0.7718432829997053,,0.7499999999999999,true
+John Mortensen,0.3846153846153847,0.3333333333333333,0.6872030939075423,,0.37499999999999994,false
+Alan Turing,0.7788461538461541,0.5,0.0,,1.0,true
+Nikola Tesla,0.5,0.5,0.4182758666735637,,0.5625,true
+Madam Curie,0.9326923076923074,1.0,0.46111250887575733,,1.0,true
+Grace Hopper,0.0,0.0,0.5750774473787821,,0.0,false
