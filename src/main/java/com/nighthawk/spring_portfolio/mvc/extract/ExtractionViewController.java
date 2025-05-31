@@ -1,6 +1,7 @@
 package com.nighthawk.spring_portfolio.mvc.extract;
 
 import java.util.*;
+import java.time.LocalDate;
 
 import lombok.*;
 
@@ -16,10 +17,15 @@ import com.vladmihalcea.hibernate.type.json.JsonType;
 
 ///// entity classes
 import com.nighthawk.spring_portfolio.mvc.person.Person;
+import com.nighthawk.spring_portfolio.mvc.assignments.Assignment;
+import com.nighthawk.spring_portfolio.mvc.assignments.AssignmentQueue;
+import com.nighthawk.spring_portfolio.mvc.Slack.CalendarEvent;
 
 ///// repositories
 import com.nighthawk.spring_portfolio.mvc.person.PersonJpaRepository;
 import com.nighthawk.spring_portfolio.mvc.groups.GroupsJpaRepository;
+import com.nighthawk.spring_portfolio.mvc.assignments.AssignmentJpaRepository;
+import com.nighthawk.spring_portfolio.mvc.Slack.CalendarEventRepository;
 
 
 
@@ -34,6 +40,12 @@ private PersonJpaRepository personJpaRepository;
 
 @Autowired
 private GroupsJpaRepository groupsJpaRepository;
+
+@Autowired
+private AssignmentJpaRepository assignmentJpaRepository;
+
+@Autowired
+private CalendarEventRepository calendarEventRepository;
 
 /////////////////////////////////////////
 /// Export Objects
@@ -63,6 +75,56 @@ private GroupsJpaRepository groupsJpaRepository;
         private Long id;
         private String name;
         private String period;
+    }
+
+//assignment class based on assignment table schema (no relationships)
+    @Data
+    @NoArgsConstructor
+    @Convert(attributeName = "assignment", converter = JsonType.class)
+    public class AssignmentEmpty {
+        private Long id;
+        private String name;
+        private String type;
+        private String description;
+        private String dueDate;
+        private String timestamp;
+        private Double points;
+        private Long presentationLength;
+        private AssignmentQueue assignmentQueue;
+
+        public AssignmentEmpty(Long id, String name, String type, String description, String dueDate, String timestamp, Double points, Long presentationLength, AssignmentQueue assignmentQueue) {
+            this.id = id;
+            this.name = name;
+            this.type = type;
+            this.description = description;
+            this.dueDate = dueDate;
+            this.timestamp = timestamp;
+            this.points = points;
+            this.presentationLength = presentationLength;
+            this.assignmentQueue = assignmentQueue;
+        }
+    }
+
+//calendar event class based on calendar event table schema (no relationships)
+    @Data
+    @NoArgsConstructor
+    @Convert(attributeName = "calendarEvent", converter = JsonType.class)
+    public class CalendarEventEmpty {
+        private Long id;
+        private LocalDate date;
+        private String title;
+        private String description;
+        private String type;
+        private String period;
+
+        public CalendarEventEmpty(Long id, LocalDate date, String title, String description, String type, String period) {
+            this.id = id;
+            this.date = date;
+            this.title = title;
+            this.description = description;
+            this.type = type;
+            this.period = period;
+        }
     }
 
 
@@ -129,5 +191,79 @@ private GroupsJpaRepository groupsJpaRepository;
             person.getStats()));
         });
         return new ResponseEntity<List<PersonEmpty>>(personEmpties,HttpStatus.OK);
+    }
+
+    @GetMapping("/assignment/{id}")
+    public ResponseEntity<AssignmentEmpty> extractAssignmentById(@PathVariable("id") long id){
+        if(!assignmentJpaRepository.existsById(id)){
+            return new ResponseEntity<AssignmentEmpty>(HttpStatus.NOT_FOUND);
+        }
+        Assignment assignment = assignmentJpaRepository.findById(id).get();
+        AssignmentEmpty assignmentEmpty = new AssignmentEmpty(
+            assignment.getId(),
+            assignment.getName(),
+            assignment.getType(),
+            assignment.getDescription(),
+            assignment.getDueDate(),
+            assignment.getTimestamp(),
+            assignment.getPoints(),
+            assignment.getPresentationLength(),
+            assignment.getAssignmentQueue()
+        );
+        return new ResponseEntity<AssignmentEmpty>(assignmentEmpty, HttpStatus.OK);
+    }
+
+    @GetMapping("all/assignment")
+    public ResponseEntity<List<AssignmentEmpty>> extractAllAssignment(){
+        List<Assignment> assignmentList = assignmentJpaRepository.findAll();
+        ArrayList<AssignmentEmpty> assignmentEmpties = new ArrayList<AssignmentEmpty>(0);
+        assignmentList.stream().forEach(assignment -> {
+            assignmentEmpties.add(new AssignmentEmpty(
+                assignment.getId(),
+                assignment.getName(),
+                assignment.getType(),
+                assignment.getDescription(),
+                assignment.getDueDate(),
+                assignment.getTimestamp(),
+                assignment.getPoints(),
+                assignment.getPresentationLength(),
+                assignment.getAssignmentQueue()
+            ));
+        });
+        return new ResponseEntity<List<AssignmentEmpty>>(assignmentEmpties, HttpStatus.OK);
+    }
+
+    @GetMapping("/calendar-event/{id}")
+    public ResponseEntity<CalendarEventEmpty> extractCalendarEventById(@PathVariable("id") long id){
+        if(!calendarEventRepository.existsById(id)){
+            return new ResponseEntity<CalendarEventEmpty>(HttpStatus.NOT_FOUND);
+        }
+        CalendarEvent calendarEvent = calendarEventRepository.findById(id).get();
+        CalendarEventEmpty calendarEventEmpty = new CalendarEventEmpty(
+            calendarEvent.getId(),
+            calendarEvent.getDate(),
+            calendarEvent.getTitle(),
+            calendarEvent.getDescription(),
+            calendarEvent.getType(),
+            calendarEvent.getPeriod()
+        );
+        return new ResponseEntity<CalendarEventEmpty>(calendarEventEmpty, HttpStatus.OK);
+    }
+
+    @GetMapping("all/calendar-event")
+    public ResponseEntity<List<CalendarEventEmpty>> extractAllCalendarEvent(){
+        List<CalendarEvent> calendarEventList = calendarEventRepository.findAll();
+        ArrayList<CalendarEventEmpty> calendarEventEmpties = new ArrayList<CalendarEventEmpty>(0);
+        calendarEventList.stream().forEach(calendarEvent -> {
+            calendarEventEmpties.add(new CalendarEventEmpty(
+                calendarEvent.getId(),
+                calendarEvent.getDate(),
+                calendarEvent.getTitle(),
+                calendarEvent.getDescription(),
+                calendarEvent.getType(),
+                calendarEvent.getPeriod()
+            ));
+        });
+        return new ResponseEntity<List<CalendarEventEmpty>>(calendarEventEmpties, HttpStatus.OK);
     }
 }

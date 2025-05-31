@@ -67,6 +67,7 @@
     <div class="container">
         <h1>📅 Calendar Events</h1>
         <button class="btn" onclick="showAddEventModal()">+ Add Event</button>
+        <button sec:authorize="hasRole('ROLE_ADMIN')" id="export-calendar" class="btn btn-info btn-sm">Export all Events</button>
 
         <!-- Add Event Modal -->
         <div id="addEventModal" class="modal">
@@ -256,6 +257,27 @@
                 const year = date.getFullYear();
                 return `${month}/${day}/${year}`;
             }
+
+            // Add this to your existing JavaScript
+            document.getElementById('export-calendar')?.addEventListener('click', function() {
+                fetch('/mvc/extract/all/calendar-event')
+                    .then(response => response.json())
+                    .then(data => {
+                        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.href = url;
+                        a.download = 'calendar_events.json';
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                    })
+                    .catch(error => {
+                        console.error('Error downloading calendar events:', error);
+                        alert('Failed to download calendar events');
+                    });
+            });
         });
     </script>
 </th:block>

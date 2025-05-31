@@ -156,6 +156,7 @@
         <div id="assignmentView">
             <h1>Assignment Tracker</h1>
             <button class="btn" onclick="showAddAssignmentModal()">Add Assignment</button>
+            <button sec:authorize="hasRole('ROLE_ADMIN')" id="export-assignment" class="btn btn-info btn-sm">Export all Assingments</button>
 
             <!-- Add Assignment Modal -->
             <div id="addAssignmentModal" class="modal">
@@ -543,6 +544,25 @@
                     });
             };
 
+        });
+        document.getElementById('export-assignment')?.addEventListener('click', function() {
+            fetch('/mvc/extract/all/assignment')
+                .then(response => response.json())
+                .then(data => {
+                    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    a.download = 'assignments.json';
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                })
+                .catch(error => {
+                    console.error('Error downloading assignments:', error);
+                    alert('Failed to download assignments');
+                });
         });
 
 
