@@ -40,6 +40,7 @@ import com.open.spring.mvc.person.PersonDetailsService;
 import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.person.PersonRole;
 import com.open.spring.mvc.person.PersonRoleJpaRepository;
+import com.open.spring.mvc.quiz.QuizScoreRepository;
 import com.open.spring.mvc.rpg.adventureChoice.AdventureChoice;
 import com.open.spring.mvc.rpg.adventureChoice.AdventureChoiceJpaRepository;
 import com.open.spring.mvc.rpg.adventureQuestion.AdventureQuestion;
@@ -53,6 +54,8 @@ import com.open.spring.mvc.student.StudentQueueJPARepository;
 import com.open.spring.mvc.synergy.SynergyGrade;
 import com.open.spring.mvc.synergy.SynergyGradeJpaRepository;
 import com.open.spring.mvc.user.UserJpaRepository;
+import com.open.spring.mvc.quiz.QuizScore;
+import com.open.spring.mvc.quiz.QuizScoreRepository;
 
 
 @Component
@@ -81,6 +84,7 @@ public class ModelInit {
     @Autowired AdventureChoiceJpaRepository choiceJpaRepository;
     @Autowired GameJpaRepository gameJpaRepository;
     @Autowired MediaJpaRepository mediaJpaRepository;
+    @Autowired QuizScoreRepository quizScoreRepository;
 
     @Bean
     @Transactional
@@ -278,6 +282,20 @@ public class ModelInit {
 
                 if (existingPlayers.isEmpty()) {
                     mediaJpaRepository.save(score);
+                }
+            }
+
+            // Quiz Score initialization
+            QuizScore[] quizScoreArray = QuizScore.init();
+            for (QuizScore quizScore : quizScoreArray) {
+                List<QuizScore> existingScores = quizScoreRepository.findByUsernameIgnoreCaseOrderByScoreDesc(quizScore.getUsername());
+                
+                // Only add if this exact score doesn't exist for this user
+                boolean scoreExists = existingScores.stream()
+                    .anyMatch(s -> s.getScore() == quizScore.getScore());
+                
+                if (!scoreExists) {
+                    quizScoreRepository.save(quizScore);
                 }
             }
         };
