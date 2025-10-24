@@ -68,6 +68,7 @@ socket.port=8589
 ## Run Project
 
 - Play or click entry point is Main.java, look for Run option in code.  This eanbles Springboot to build and load.
+    - If you do not see the `Run | Debug` option in code, install the **Java Extension Pack** (by Microsoft) and **Spring Boot Extension Pack** (by VMware)
 - Load loopback:port in browser (http://127.0.0.1:8585/)
 - Login to ADMIN (toby) user using ADMIN_PASSWORD, examing menus and data
 - Try API endpoint: http://127.0.0.1:8585/api/jokes/
