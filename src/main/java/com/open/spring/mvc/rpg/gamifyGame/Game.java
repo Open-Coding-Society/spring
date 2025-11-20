@@ -1,5 +1,5 @@
+// Legacy GamifyGame removed — replaced by unified Adventure/Game APIs.
 package com.open.spring.mvc.rpg.gamifyGame;
-
 import com.open.spring.mvc.person.Person;
 
 import jakarta.persistence.Column;
