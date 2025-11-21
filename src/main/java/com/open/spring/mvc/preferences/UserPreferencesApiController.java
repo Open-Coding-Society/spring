@@ -17,34 +17,80 @@ public class StylesPreference {
     @Autowired
     private StylePreferenceJpaRepository repository;
 
-    /* GET List of Styles
+    /* GET List of ALL Styles
      * @GetMapping annotation is used for mapping HTTP GET requests onto specific handler methods.
+     * Endpoint: GET /api/styles/
      */
     @GetMapping("/")
-    public ResponseEntity<List<Styles>> getStylePreference() {
-        // ResponseEntity returns List of Jokes provide by JPA findAll()
-        return new ResponseEntity<>( repository.findAll(), HttpStatus.OK);
+    public ResponseEntity<List<Styles>> getStyles() {
+        // ResponseEntity returns List of Styles provided by JPA findAll()
+        return new ResponseEntity<>(repository.findAll(), HttpStatus.OK);
     }
 
-    /* Update Like
-     * @PutMapping annotation is used for mapping HTTP PUT requests onto specific handler methods.
-     * @PathVariable annotation extracts the templated part {id}, from the URI
+    /* GET Single Style by ID
+     * Endpoint: GET /api/styles/{id}
+     * @PathVariable extracts the {id} from the URI
      */
-    @PostMapping("/styles/{id}")
-    public ResponseEntity<Styles> setStyle(@PathVariable long id) {
-        /* 
-        * Optional (below) is a container object which helps determine if a result is present. 
-        * If a value is present, isPresent() will return true
-        * get() will return the value.
-        */
+    @GetMapping("/{id}")
+    public ResponseEntity<Styles> getStyleById(@PathVariable long id) {
         Optional<Styles> optional = repository.findById(id);
-        if (optional.isPresent()) {  // Good ID
-            Styles style = optional.get();  // value from findByID
-            Style.setStyle(style.getStyle()+1); // increment value
-            repository.save(style);  // save entity
-            return new ResponseEntity<>(style, HttpStatus.OK);  // OK HTTP response: status code, headers, and body
+        if (optional.isPresent()) {
+            Styles style = optional.get();
+            return new ResponseEntity<>(style, HttpStatus.OK);
         }
-        // Bad ID
-        return new ResponseEntity<>(HttpStatus.BAD_REQUEST);  // Failed HTTP response: status code, headers, and body
+        // Style not found
+        return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+    }
+
+    /* POST Create New Style
+     * Endpoint: POST /api/styles/
+     * @RequestBody receives the new style data as JSON
+     */
+    @PostMapping("/")
+    public ResponseEntity<Styles> createStyle(@RequestBody Styles newStyle) {
+        // Save the new style to database
+        Styles savedStyle = repository.save(newStyle);
+        // Return the saved style with generated ID and CREATED status
+        return new ResponseEntity<>(savedStyle, HttpStatus.CREATED);
+    }
+
+    /* PUT Update Existing Style
+     * Endpoint: PUT /api/styles/{id}
+     * @PathVariable extracts the {id} from URI
+     * @RequestBody receives the updated style data as JSON
+     */
+    @PutMapping("/{id}")
+    public ResponseEntity<Styles> updateStyle(@PathVariable long id, @RequestBody Styles updatedStyle) {
+        Optional<Styles> optional = repository.findById(id);
+        if (optional.isPresent()) {
+            Styles style = optional.get();
+            
+            // Update the fields with new values
+            style.setName(updatedStyle.getName());
+            style.setSassCode(updatedStyle.getSassCode());
+            style.setDescription(updatedStyle.getDescription());
+            
+            // Save updated style to database
+            repository.save(style);
+            return new ResponseEntity<>(style, HttpStatus.OK);
+        }
+        // Style not found
+        return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+    }
+
+    /* DELETE Remove Style
+     * Endpoint: DELETE /api/styles/{id}
+     * @PathVariable extracts the {id} from URI
+     */
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> deleteStyle(@PathVariable long id) {
+        Optional<Styles> optional = repository.findById(id);
+        if (optional.isPresent()) {
+            // Delete the style from database
+            repository.deleteById(id);
+            return new ResponseEntity<>(HttpStatus.OK);
+        }
+        // Style not found
+        return new ResponseEntity<>(HttpStatus.NOT_FOUND);
     }
 }
