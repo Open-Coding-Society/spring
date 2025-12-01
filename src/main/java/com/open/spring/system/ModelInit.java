@@ -2,11 +2,14 @@ package com.open.spring.system;
 
 import java.io.File;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -42,16 +45,8 @@ import com.open.spring.mvc.person.PersonDetailsService;
 import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.person.PersonRole;
 import com.open.spring.mvc.person.PersonRoleJpaRepository;
-import com.open.spring.mvc.quiz.QuizScore;
-import com.open.spring.mvc.quiz.QuizScoreRepository;
-import com.open.spring.mvc.rpg.adventureChoice.AdventureChoice;
-import com.open.spring.mvc.rpg.adventureChoice.AdventureChoiceJpaRepository;
-import com.open.spring.mvc.rpg.adventureQuestion.AdventureQuestion;
-import com.open.spring.mvc.rpg.adventureQuestion.AdventureQuestionJpaRepository;
-import com.open.spring.mvc.rpg.adventureRubric.AdventureRubric;
-import com.open.spring.mvc.rpg.adventureRubric.AdventureRubricJpaRepository;
-import com.open.spring.mvc.rpg.gamifyGame.Game;
-import com.open.spring.mvc.rpg.gamifyGame.GameJpaRepository;
+
+// Adventure sub-APIs have been unified into a single Adventure entity
 import com.open.spring.mvc.student.StudentQueue;
 import com.open.spring.mvc.student.StudentQueueJPARepository;
 import com.open.spring.mvc.synergy.SynergyGrade;
@@ -63,6 +58,8 @@ import com.open.spring.mvc.resume.Resume;
 import com.open.spring.mvc.resume.ResumeJpaRepository;
 import com.open.spring.mvc.stats.Stats; // curators - stats api
 import com.open.spring.mvc.stats.StatsRepository;
+import com.open.spring.mvc.rpg.adventure.Adventure;
+import com.open.spring.mvc.rpg.adventure.AdventureJpaRepository;
 
 
 @Component
@@ -80,7 +77,11 @@ public class ModelInit {
     @Autowired BathroomQueueJPARepository queueJPA;
     @Autowired TeacherJpaRepository teacherJPARepository;
     @Autowired IssueJPARepository issueJPARepository;
-    @Autowired AdventureQuestionJpaRepository questionJpaRepository;
+    @Autowired
+    DataSource dataSource;
+    @Autowired
+    AdventureJpaRepository adventureJpaRepository;
+    
     @Autowired UserJpaRepository userJpaRepository;
     @Autowired AssignmentJpaRepository assignmentJpaRepository;
     @Autowired AssignmentSubmissionJPA submissionJPA;
@@ -88,9 +89,7 @@ public class ModelInit {
     @Autowired StudentQueueJPARepository studentQueueJPA;
     @Autowired BankJpaRepository bankJpaRepository;
     @Autowired BankService bankService;
-    @Autowired AdventureRubricJpaRepository rubricJpaRepository;
-    @Autowired AdventureChoiceJpaRepository choiceJpaRepository;
-    @Autowired GameJpaRepository gameJpaRepository;
+    
     @Autowired MediaJpaRepository mediaJpaRepository;
     @Autowired QuizScoreRepository quizScoreRepository;
     @Autowired ResumeJpaRepository resumeJpaRepository;
@@ -100,6 +99,52 @@ public class ModelInit {
     @Transactional
     CommandLineRunner run() {
         return args -> {
+            // Ensure unified `adventure` table exists before any seeding
+            try {
+                if (dataSource != null) {
+                    try (Connection conn = dataSource.getConnection(); Statement st = conn.createStatement()) {
+                        String create = "CREATE TABLE IF NOT EXISTS adventure ("
+                                + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                + "person_id INTEGER,"
+                                + "person_uid TEXT,"
+                                + "question_id INTEGER,"
+                                + "question_title TEXT,"
+                                + "question_content TEXT,"
+                                + "question_category TEXT,"
+                                + "question_points INTEGER,"
+                                + "choice_id INTEGER,"
+                                + "choice_text TEXT,"
+                                + "choice_is_correct INTEGER,"
+                                + "answer_is_correct INTEGER,"
+                                + "answer_content TEXT,"
+                                + "chat_score INTEGER,"
+                                + "rubric_ruid TEXT,"
+                                + "rubric_criteria TEXT,"
+                                + "balance REAL,"
+                                + "created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))"
+                                + ");";
+                        st.execute(create);
+                        System.out.println("Ensured 'adventure' table exists");
+                        // Seed default adventure rows if none exist (instantiate in code)
+                        try {
+                            long advCount = 0L;
+                            try { advCount = adventureJpaRepository.count(); } catch (Exception ignore) { advCount = 0L; }
+                            if (advCount == 0L) {
+                                Adventure[] defaults = Adventure.init();
+                                for (Adventure a : defaults) {
+                                    try { adventureJpaRepository.save(a); } catch (Exception ignored) {}
+                                }
+                                System.out.println("Seeded default Adventure rows via Adventure.init()");
+                            }
+                        } catch (Throwable t) {
+                            // don't fail startup for seeding issues
+                        }
+                    }
+                }
+            } catch (SQLException e) {
+                System.err.println("Failed to ensure 'adventure' table: " + e.getMessage());
+            }
+
             if (new File("volumes/.skip-modelinit").exists()) {
                 System.out.println("Skip flag detected, ModelInit will not run");
                 return;
@@ -147,56 +192,7 @@ public class ModelInit {
                     announcementJPA.save(new Announcement(announcement.getAuthor(), announcement.getTitle(), announcement.getBody(), announcement.getTags())); // JPA save
                 }
             }
-            AdventureRubric[] rubricArray = AdventureRubric.init();
-            for(AdventureRubric rubric: rubricArray) {
-                AdventureRubric rubricFound = rubricJpaRepository.findByRuid(rubric.getRuid());
-                if(rubricFound == null) {
-                    rubricJpaRepository.save(rubric);
-                }
-            }    
-
-            String[][] gameArray = Game.init();
-            for (String[] gameInfo : gameArray) {
-                String name = gameInfo[0];
-                Person person = personJpaRepository.findByUid(gameInfo[1]);
-                
-                Game gameFound = gameJpaRepository.findByName(name);
-                if (gameFound == null) {
-                    gameJpaRepository.save(new Game(name, person));
-                }
-            }   
-
-            String[][] questionArray = AdventureQuestion.init();
-            for (String[] questionInfo : questionArray) {
-                String title = questionInfo[0];
-                String content = questionInfo[1];
-                String category = questionInfo[2];
-                Integer points = Integer.parseInt(questionInfo[3]);
-                
-            
-                AdventureQuestion questionFound = questionJpaRepository.findByContent(content);
-                if (questionFound == null) {
-                    if (questionInfo[4] != "null") {
-                        AdventureRubric rubric = rubricJpaRepository.findByRuid(questionInfo[4]);
-                        // rubricJpaRepository.save(rubric);
-                        questionJpaRepository.save(new AdventureQuestion(title, content, category, points, rubric));
-                    } else {
-                        questionJpaRepository.save(new AdventureQuestion(title, content, category, points));
-                    }
-                    
-                }
-            }
-            String[][] choiceArray = AdventureChoice.init();
-            for (String[] choiceInfo : choiceArray) {
-                AdventureQuestion question = questionJpaRepository.findById(Integer.parseInt(choiceInfo[0]));
-                String choice = choiceInfo[1];
-                Boolean is_correct = Boolean.parseBoolean(choiceInfo[2]);
-                
-                AdventureChoice choiceFound = choiceJpaRepository.findByQuestionAndChoice(question, choice);
-                if (choiceFound == null) {
-                    choiceJpaRepository.save(new AdventureChoice(question, choice, is_correct));
-                }
-            }        
+            // Adventure sub-APIs have been merged into a single Adventure table/entity.
 
 
 
