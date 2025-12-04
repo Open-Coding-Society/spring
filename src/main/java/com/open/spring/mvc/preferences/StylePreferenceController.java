@@ -1,17 +1,18 @@
-package com.open.spring.mvc.userpreference;
+package com.open.spring.mvc.preferences;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.text.NumberFormat.Style;
 import java.util.List;
 import java.util.Optional;
 
 
 @RestController // annotation to simplify the creation of RESTful web services
 @RequestMapping("/api/styles")  // all requests in file begin with this URI
-public class StylesPreference {
+public class StylePreferenceController {
 
     // Autowired enables Control to connect URI request and POJO Object to easily for Database CRUD operations
     @Autowired
@@ -22,7 +23,7 @@ public class StylesPreference {
      * Endpoint: GET /api/styles/
      */
     @GetMapping("/")
-    public ResponseEntity<List<Styles>> getStyles() {
+    public ResponseEntity<List<StylePreference>> getStyles() {
         // ResponseEntity returns List of Styles provided by JPA findAll()
         return new ResponseEntity<>(repository.findAll(), HttpStatus.OK);
     }
@@ -32,10 +33,10 @@ public class StylesPreference {
      * @PathVariable extracts the {id} from the URI
      */
     @GetMapping("/{id}")
-    public ResponseEntity<Styles> getStyleById(@PathVariable long id) {
-        Optional<Styles> optional = repository.findById(id);
+    public ResponseEntity<StylePreference> getStyleById(@PathVariable long id) {
+        Optional<StylePreference> optional = repository.findById(id);
         if (optional.isPresent()) {
-            Styles style = optional.get();
+            StylePreference style = optional.get();
             return new ResponseEntity<>(style, HttpStatus.OK);
         }
         // Style not found
@@ -47,9 +48,9 @@ public class StylesPreference {
      * @RequestBody receives the new style data as JSON
      */
     @PostMapping("/")
-    public ResponseEntity<Styles> createStyle(@RequestBody Styles newStyle) {
+    public ResponseEntity<StylePreference> createStyle(@RequestBody StylePreference newStyle) {
         // Save the new style to database
-        Styles savedStyle = repository.save(newStyle);
+        StylePreference savedStyle = repository.save(newStyle);
         // Return the saved style with generated ID and CREATED status
         return new ResponseEntity<>(savedStyle, HttpStatus.CREATED);
     }
@@ -60,10 +61,10 @@ public class StylesPreference {
      * @RequestBody receives the updated style data as JSON
      */
     @PutMapping("/{id}")
-    public ResponseEntity<Styles> updateStyle(@PathVariable long id, @RequestBody Styles updatedStyle) {
-        Optional<Styles> optional = repository.findById(id);
+    public ResponseEntity<StylePreference> updateStyle(@PathVariable long id, @RequestBody StylePreference updatedStyle) {
+        Optional<StylePreference> optional = repository.findById(id);
         if (optional.isPresent()) {
-            Styles style = optional.get();
+            StylePreference style = optional.get();
             
             // Update the fields with new values
             style.setName(updatedStyle.getName());
@@ -84,7 +85,7 @@ public class StylesPreference {
      */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> deleteStyle(@PathVariable long id) {
-        Optional<Styles> optional = repository.findById(id);
+        Optional<StylePreference> optional = repository.findById(id);
         if (optional.isPresent()) {
             // Delete the style from database
             repository.deleteById(id);
