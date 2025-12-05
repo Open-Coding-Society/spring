@@ -76,7 +76,8 @@ socket.port=8589
 
 ## IDE management
 
-- Extension Pack for Java from the Marketplace, you may need to close are restart VSCode
+- Extension Pack for Java from the Marketplace, Spring Initializr Java Support from the Marketplace, you may need to close are restart VSCode
+    - This allows the Developer to run Java.Main and other files
 - A ".gitignore" can teach a Developer a lot about Java runtime.  A target directory is created when you press play button, byte code is generated and files are moved into this location.
 - "pom.xml" file can teach you a lot about Java dependencies.  This is similar to "requirements.txt" file in Python.  It manages packages and dependencies.
 
