@@ -21,8 +21,6 @@ import com.open.spring.mvc.userStocks.UserStocksRepository;
 import com.open.spring.mvc.userStocks.userStocksTable;
 
 @RestController
-
-
 @RequestMapping("/api/crypto")
 public class CryptoController {
 
@@ -38,8 +36,7 @@ public class CryptoController {
     @Autowired
     private UserStocksRepository userStocksRepo;
 
-    @Autowired
-    private CryptoJPArepo cryptoJPArepo;
+    // REMOVED: CryptoJPArepo dependency - no longer needed since we use live API data only
 
     @GetMapping("/balance")
     public ResponseEntity<?> getUserBalance(@RequestParam String email) {
@@ -196,8 +193,6 @@ public class CryptoController {
         return ResponseEntity.ok("{ \"email\": \"" + email + "\", \"holdings\": \"" + userStocks.getCrypto().replace("\n", "\\n") + "\" }");
     }
 
-    
-
     @PostMapping("/sell")
     public ResponseEntity<?> sellCrypto(@RequestBody SellRequest sellRequest) {
         String email = sellRequest.getEmail();
@@ -263,24 +258,37 @@ public class CryptoController {
         bankRepository.save(bank);
         return ResponseEntity.ok("Successfully sold " + cryptoAmount + " of " + selectedCrypto.getSymbol() + " for $" + totalValueSold);
     }
+    
     @GetMapping("/history")
     public ResponseEntity<?> getCryptoTransactionHistory(@RequestParam String email) {
-    userStocksTable userStocks = userStocksRepo.findByEmail(email);
-    
-    if (userStocks == null || userStocks.getCryptoHistory() == null || userStocks.getCryptoHistory().isEmpty()) {
-        return ResponseEntity.status(404).body("No transaction history found for email: " + email);
-    }
-    
-    return ResponseEntity.ok("{ \"email\": \"" + email + "\", \"cryptoHistory\": \"" + userStocks.getCryptoHistory().replace("\n", "\\n") + "\" }");
-}
-
-    // Utility method to resolve crypto ID to ticker symbol
-    private String resolveCryptoId(String cryptoId) {
-        Crypto crypto = cryptoJPArepo.findBySymbol(cryptoId);
-        if (crypto == null) {
-            crypto = cryptoJPArepo.findByNameIgnoreCase(cryptoId);
+        userStocksTable userStocks = userStocksRepo.findByEmail(email);
+        
+        if (userStocks == null || userStocks.getCryptoHistory() == null || userStocks.getCryptoHistory().isEmpty()) {
+            return ResponseEntity.status(404).body("No transaction history found for email: " + email);
         }
-        return crypto != null ? crypto.getSymbol() : null;
+        
+        return ResponseEntity.ok("{ \"email\": \"" + email + "\", \"cryptoHistory\": \"" + userStocks.getCryptoHistory().replace("\n", "\\n") + "\" }");
+    }
+
+    // UPDATED: Utility method to resolve crypto ID to ticker symbol using live API data
+    // Previously used database (CryptoJPArepo), now uses live API only
+    private String resolveCryptoId(String cryptoId) {
+        // Fetch live data from API
+        Crypto[] liveData = cryptoService.getCryptoData();
+        
+        if (liveData == null || liveData.length == 0) {
+            return null; // API failure
+        }
+        
+        // Search for matching symbol or name
+        for (Crypto crypto : liveData) {
+            if (crypto.getSymbol().equalsIgnoreCase(cryptoId) || 
+                crypto.getName().equalsIgnoreCase(cryptoId)) {
+                return crypto.getSymbol();
+            }
+        }
+        
+        return null; // Not found
     }
 
     private String addOrUpdateCryptoHoldings(String currentCrypto, String cryptoId, double cryptoAmount) {

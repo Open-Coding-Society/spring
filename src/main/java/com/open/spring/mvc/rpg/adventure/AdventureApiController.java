@@ -100,6 +100,13 @@ public class AdventureApiController {
         return new ResponseEntity<>(dto, HttpStatus.OK);
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<Adventure> getById(@PathVariable Long id) {
+        Optional<Adventure> a = adventureJpaRepository.findById(id);
+        return a.map(adventure -> new ResponseEntity<>(adventure, HttpStatus.OK))
+                .orElseGet(() -> new ResponseEntity<>(HttpStatus.NOT_FOUND));
+    }
+
     // Create a new Adventure row via POST /adventure
     @PostMapping
     public ResponseEntity<Adventure> createAdventure(@RequestBody Adventure adventure) {

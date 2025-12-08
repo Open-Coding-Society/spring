@@ -1,14 +1,9 @@
 package com.open.spring.mvc.slack;
 
-import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
@@ -34,8 +29,9 @@ public class SlackController {
     @Autowired
     private final RestTemplate restTemplate;
 
+    // UPDATED: Now using consolidated SlackService instead of MessageService
     @Autowired
-    private MessageService messageService;
+    private SlackService slackService;
 
     @Autowired
     private SlackMessageRepository messageRepository;
@@ -64,8 +60,9 @@ public class SlackController {
                 // Mapping the message's content to key-value pairs
                 Map<String, String> messageData = objectMapper.readValue(messageContent, Map.class);
     
+                // UPDATED: Using slackService instead of messageService
                 // Saving message to DB
-                messageService.saveMessage(messageContent);
+                slackService.saveMessage(messageContent);
                 System.out.println("Message saved to database: " + messageContent);
     
                 // Direct call to the CalendarEventController method
@@ -79,6 +76,4 @@ public class SlackController {
     
         return ResponseEntity.ok("OK");
     }
-
-
 }

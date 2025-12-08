@@ -13,7 +13,7 @@ public class DataLoader implements CommandLineRunner {
 
     @Autowired
     private GradeRepository gradeRepository;
-    
+
     @Autowired
     private ProgressRepository progressRepository;
 
@@ -25,14 +25,14 @@ public class DataLoader implements CommandLineRunner {
         gradeRepository.save(new Grade("STU002", "Mathematics", 78.0, "B+"));
         gradeRepository.save(new Grade("STU002", "English", 88.5, "A-"));
         gradeRepository.save(new Grade("STU003", "Science", 95.0, "A+"));
-        
+
         // Sample Progress
         progressRepository.save(new Progress("STU001", "Mathematics", 75.0, "In Progress"));
         progressRepository.save(new Progress("STU001", "Science", 100.0, "Completed"));
         progressRepository.save(new Progress("STU002", "Mathematics", 60.0, "In Progress"));
         progressRepository.save(new Progress("STU002", "English", 90.0, "Completed"));
         progressRepository.save(new Progress("STU003", "Science", 45.0, "In Progress"));
-        
+
         System.out.println("Sample data loaded successfully!");
     }
 }

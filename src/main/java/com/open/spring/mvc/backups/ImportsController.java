@@ -29,36 +29,78 @@ import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
+import org.springframework.http.HttpEntity;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Component;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 import org.sqlite.SQLiteException;
 
 import com.fasterxml.jackson.annotation.JsonAnySetter;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+/**
+ * Consolidated controller for all import operations.
+ * Handles both full database imports and specific API endpoint imports.
+ */
 @Component
 @Controller
-@RequestMapping("/api/imports/")
+@RequestMapping("/api/imports")
 public class ImportsController {
 
+    // ========== FULL DATABASE IMPORT CONFIGURATION ==========
     private static final String DB_PATH = "./volumes/sqlite.db";
     private static final String BACKUP_DIR = "./volumes/backups/";
+    private static final String LOG_FILE_PATH = "./volumes/logs/restore_operations.log";
+
+    // ========== SPECIFIC ENDPOINT IMPORT CONFIGURATION ==========
+    @Value("${backup.base.path:./backups}")
+    private String backupBasePath;
+
+    @Value("${server.port:8585}")
+    private String serverPort;
+
+    private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
     private final ObjectMapper objectMapper = new ObjectMapper().setSerializationInclusion(JsonInclude.Include.NON_NULL);
     private final Object lock = new Object();
 
-    
+    @Autowired
+    private RestTemplate restTemplate;
 
+    // Configuration for import endpoints and their corresponding directories
+    private final List<ImportEndpoint> endpoints = Arrays.asList(
+        new ImportEndpoint("/api/people/bulk/import", "person"),
+        new ImportEndpoint("/api/groups/bulk/create", "groups"),
+        new ImportEndpoint("/api/tinkle/bulk/create", "tinkle"),
+        new ImportEndpoint("/api/calendar/add_bulk", "calendar"),
+        new ImportEndpoint("/bank/bulk/create", "bank")
+    );
+
+    // ========== INITIALIZATION ==========
+
+    /**
+     * Initialize database on application startup
+     */
     @EventListener(ApplicationReadyEvent.class)
     public synchronized void initializeOnStartup() {
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
@@ -81,6 +123,11 @@ public class ImportsController {
         }
     }
 
+    // ========== FULL DATABASE IMPORT ENDPOINTS ==========
+
+    /**
+     * Manual import endpoint for full database restoration
+     */
     @PostMapping("/manual")
     public String manualImport(@RequestParam("file") MultipartFile file, Model model) {
         synchronized (lock) {
@@ -102,6 +149,282 @@ public class ImportsController {
         }
     }
 
+    /**
+     * Get list of available backups for full database
+     */
+    @GetMapping("/backups")
+    public String getBackupsList(Model model) {
+        try {
+            List<BackupFileInfo> backups = getAllBackupFiles();
+            model.addAttribute("backups", backups);
+            return "db_management/backups";
+        } catch (Exception e) {
+            model.addAttribute("message", "Error fetching backups: " + e.getMessage());
+            return "db_management/db_error";
+        }
+    }
+
+    /**
+     * Revert to a specific full database backup
+     */
+    @PostMapping("/revert")
+    public String revertToBackup(@RequestParam("filename") String filename, Model model) {
+        synchronized (lock) {
+            try {
+                File backupFile = new File(BACKUP_DIR + filename);
+                if (!backupFile.exists()) {
+                    model.addAttribute("message", "Backup file not found.");
+                    return "db_management/db_error";
+                }
+                
+                // Log the restore operation
+                logRestoreOperation(filename);
+                
+                String result = importFromFile(backupFile);
+                model.addAttribute("message", result);
+                return "db_management/db_success";
+            } catch (Exception e) {
+                e.printStackTrace();
+                // Log the error too
+                logRestoreOperation(filename + " (FAILED: " + e.getMessage() + ")");
+                model.addAttribute("message", "Failed to revert to backup: " + e.getMessage());
+                return "db_management/db_error";
+            }
+        }
+    }
+
+    /**
+     * View details of a specific full database backup
+     */
+    @GetMapping("/view")
+    public String viewBackupDetails(@RequestParam("filename") String filename, Model model) {
+        try {
+            File backupFile = new File(BACKUP_DIR + filename);
+            if (!backupFile.exists()) {
+                model.addAttribute("message", "Backup file not found.");
+                return "db_management/db_error";
+            }
+            
+            String rawJson = new String(Files.readAllBytes(backupFile.toPath()));
+            BackupData backupData = objectMapper.readValue(rawJson, BackupData.class);
+            
+            model.addAttribute("filename", filename);
+            model.addAttribute("tables", backupData.getTables());
+            model.addAttribute("creationDate", new java.util.Date(backupFile.lastModified()));
+            model.addAttribute("fileSize", backupFile.length() / 1024); // Size in KB
+            
+            return "db_management/backup-details";
+        } catch (Exception e) {
+            e.printStackTrace();
+            model.addAttribute("message", "Failed to read backup: " + e.getMessage());
+            return "db_management/db_error";
+        }
+    }
+
+    /**
+     * View restore operation logs
+     */
+    @GetMapping("/logs")
+    public String viewRestoreLogs(Model model) {
+        try {
+            List<String> logs = readLogFile();
+            model.addAttribute("logs", logs);
+            return "db_management/restore_logs";
+        } catch (IOException e) {
+            model.addAttribute("message", "Failed to read log file: " + e.getMessage());
+            return "db_management/db_error";
+        }
+    }
+
+    // ========== SPECIFIC ENDPOINT IMPORT ENDPOINTS ==========
+
+    /**
+     * Import data from the most recent backup file for all endpoints
+     */
+    @PostMapping("/specific/import-all-latest")
+    public ResponseEntity<Map<String, Object>> importAllFromLatestBackups() {
+        System.out.println("Starting import process from latest backups...");
+        
+        Map<String, Object> results = new HashMap<>();
+        List<String> successes = new ArrayList<>();
+        List<String> failures = new ArrayList<>();
+        
+        for (ImportEndpoint endpoint : endpoints) {
+            try {
+                importFromLatestBackup(endpoint);
+                successes.add(endpoint.getDirectoryName());
+            } catch (Exception e) {
+                System.err.println("Failed to import to endpoint " + endpoint.getPath() + ": " + e.getMessage());
+                failures.add(endpoint.getDirectoryName() + ": " + e.getMessage());
+            }
+        }
+        
+        results.put("successes", successes);
+        results.put("failures", failures);
+        results.put("message", "Import process completed");
+        
+        System.out.println("Import process completed.");
+        return ResponseEntity.ok(results);
+    }
+
+    /**
+     * Import data from a specific backup file
+     */
+    @PostMapping("/specific/import-specific")
+    public ResponseEntity<Map<String, Object>> importFromSpecificFile(
+            @RequestParam String directoryName, 
+            @RequestParam String filename) {
+        
+        Map<String, Object> result = new HashMap<>();
+        
+        try {
+            ImportEndpoint endpoint = findEndpointByDirectory(directoryName);
+            if (endpoint == null) {
+                result.put("error", "No endpoint configured for directory: " + directoryName);
+                return ResponseEntity.badRequest().body(result);
+            }
+
+            Path filePath = Paths.get(backupBasePath, directoryName, filename);
+            if (!Files.exists(filePath)) {
+                result.put("error", "Backup file not found: " + filePath);
+                return ResponseEntity.badRequest().body(result);
+            }
+
+            importFromSpecificFile(endpoint, filePath);
+            result.put("success", true);
+            result.put("message", "Successfully imported from " + filename);
+            result.put("directory", directoryName);
+            result.put("filename", filename);
+            
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            result.put("error", "Import failed: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(result);
+        }
+    }
+
+    /**
+     * List available backup files for a specific directory
+     */
+    @GetMapping("/specific/list-backups/{directoryName}")
+    public ResponseEntity<Map<String, Object>> listBackupFiles(@PathVariable String directoryName) {
+        try {
+            List<SpecificBackupFileInfo> backupFiles = getBackupFilesWithInfo(directoryName);
+            
+            Map<String, Object> result = new HashMap<>();
+            result.put("directory", directoryName);
+            result.put("files", backupFiles);
+            result.put("count", backupFiles.size());
+            
+            return ResponseEntity.ok(result);
+            
+        } catch (Exception e) {
+            Map<String, Object> result = new HashMap<>();
+            result.put("error", "Failed to list backup files: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(result);
+        }
+    }
+
+    /**
+     * List all available backup directories and their file counts
+     */
+    @GetMapping("/specific/list-all-backups")
+    public ResponseEntity<Map<String, Object>> listAllBackups() {
+        Map<String, Object> result = new HashMap<>();
+        Map<String, Object> directories = new HashMap<>();
+        
+        for (ImportEndpoint endpoint : endpoints) {
+            try {
+                List<SpecificBackupFileInfo> files = getBackupFilesWithInfo(endpoint.getDirectoryName());
+                Map<String, Object> dirInfo = new HashMap<>();
+                dirInfo.put("fileCount", files.size());
+                dirInfo.put("endpoint", endpoint.getPath());
+                dirInfo.put("files", files);
+                directories.put(endpoint.getDirectoryName(), dirInfo);
+            } catch (Exception e) {
+                Map<String, Object> dirInfo = new HashMap<>();
+                dirInfo.put("error", e.getMessage());
+                dirInfo.put("endpoint", endpoint.getPath());
+                directories.put(endpoint.getDirectoryName(), dirInfo);
+            }
+        }
+        
+        result.put("directories", directories);
+        result.put("totalDirectories", endpoints.size());
+        
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Get all configured import endpoints
+     */
+    @GetMapping("/specific/endpoints")
+    public ResponseEntity<List<ImportEndpoint>> getConfiguredEndpoints() {
+        return ResponseEntity.ok(endpoints);
+    }
+
+    /**
+     * Validate that all import endpoints are accessible
+     */
+    @GetMapping("/specific/validate-endpoints")
+    public ResponseEntity<Map<String, Object>> validateEndpoints() {
+        System.out.println("Validating import endpoints...");
+        
+        Map<String, Object> result = new HashMap<>();
+        List<Map<String, Object>> endpointStatuses = new ArrayList<>();
+        
+        for (ImportEndpoint endpoint : endpoints) {
+            String url = "http://localhost:" + serverPort + endpoint.getPath();
+            Map<String, Object> status = new HashMap<>();
+            status.put("endpoint", endpoint.getPath());
+            status.put("directory", endpoint.getDirectoryName());
+            
+            try {
+                // Try to make a HEAD request to check if endpoint exists
+                HttpHeaders headers = new HttpHeaders();
+                headers.add("X-Validation", "endpoint-check");
+                HttpEntity<String> entity = new HttpEntity<>(headers);
+                
+                ResponseEntity<String> response = restTemplate.exchange(
+                    url, 
+                    HttpMethod.HEAD, 
+                    entity, 
+                    String.class
+                );
+                
+                status.put("accessible", true);
+                status.put("statusCode", response.getStatusCodeValue());
+                System.out.println("✓ Endpoint " + endpoint.getPath() + " is accessible");
+                
+            } catch (Exception e) {
+                status.put("accessible", false);
+                status.put("error", e.getMessage());
+                System.err.println("✗ Endpoint " + endpoint.getPath() + " is not accessible: " + e.getMessage());
+            }
+            
+            endpointStatuses.add(status);
+        }
+        
+        result.put("endpoints", endpointStatuses);
+        result.put("totalEndpoints", endpoints.size());
+        
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * UI page for backup management
+     */
+    @GetMapping("/management")
+    public String backupManagementPage() {
+        return "db_management/specific_backups";
+    }
+
+    // ========== FULL DATABASE IMPORT HELPER METHODS ==========
+
+    /**
+     * Import data from a MultipartFile
+     */
     public String importFromMultipartFile(MultipartFile file) {
         try {
             InputStream inputStream = file.getInputStream();
@@ -142,26 +465,24 @@ public class ImportsController {
         }
     }
 
+    /**
+     * Import from a File object
+     */
     private String importFromFile(File jsonFile) {
         int retries = 3;
         while (retries > 0) {
             try {
                 // First establish a connection and set WAL mode BEFORE starting any transaction
                 try (Connection setupConnection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
-                    // Enable WAL mode for better concurrency
                     enableWalMode(setupConnection);
-                    setBusyTimeout(setupConnection, 30000); // 30 seconds
-                    
-                    // Check SQLite version for debugging
+                    setBusyTimeout(setupConnection, 30000);
                     checkSqliteVersion(setupConnection);
-                    
-                    // Verify database integrity
                     verifyDatabaseIntegrity(setupConnection);
                 }
                 
                 // Now create a new connection for the transaction
                 try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
-                    connection.setAutoCommit(false); // Start transaction
+                    connection.setAutoCommit(false);
                     
                     // Read and parse JSON file
                     String rawJson = new String(Files.readAllBytes(jsonFile.toPath()));
@@ -172,17 +493,16 @@ public class ImportsController {
                     BackupData backupData = objectMapper.readValue(rawJson, BackupData.class);
                     Map<String, List<Map<String, Object>>> data = backupData.getTables();
                     
-                    // Sanitize and process data with removeExcessData flag set to true
                     sanitizeAndProcessData(data, true);
                     
-                    connection.commit(); // Commit transaction
+                    connection.commit();
                     return "Data imported successfully from JSON file: " + jsonFile.getAbsolutePath();
                 }
             } catch (SQLiteException e) {
                 if (e.getMessage().contains("database is locked")) {
                     retries--;
                     try {
-                        Thread.sleep(100); // Wait before retrying
+                        Thread.sleep(100);
                     } catch (InterruptedException ie) {
                         Thread.currentThread().interrupt();
                         return "Thread interrupted while waiting to retry.";
@@ -199,47 +519,181 @@ public class ImportsController {
         return "Failed to acquire database lock after retries.";
     }
 
-    public static class BackupData {
-        private Map<String, List<Map<String, Object>>> tables = new HashMap<>();
-
-        @JsonAnySetter
-        public void set(String key, Object value) {
-            if (value instanceof List) {
-                tables.put(key, (List<Map<String, Object>>) value);
-            } else {
-                throw new IllegalArgumentException("Expected a List<Map<String, Object>> for key: " + key);
-            }
+    /**
+     * Sanitize and process the data for full database import
+     */
+    private void sanitizeAndProcessData(Map<String, List<Map<String, Object>>> data, boolean removeExcessData) throws SQLException {
+        try (Connection setupConnection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
+            enableWalMode(setupConnection);
+            setBusyTimeout(setupConnection, 30000);
         }
-
-        public Map<String, List<Map<String, Object>>> getTables() {
-            return tables;
-        }
-
-        public void setTables(Map<String, List<Map<String, Object>>> tables) {
-            this.tables = tables;
-        }
-    }
-
-    private void initializeDatabase() {
+        
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
-            // Enable WAL mode for better concurrency
-            enableWalMode(connection);
-
-            // Set a busy timeout to wait for locks
-            setBusyTimeout(connection, 30000); // 30 seconds
-
-            // Check SQLite version for debugging
-            checkSqliteVersion(connection);
-
-            // Verify database integrity
-            verifyDatabaseIntegrity(connection);
-
-            System.out.println("Database initialized successfully.");
-        } catch (SQLException e) {
-            e.printStackTrace();
-            System.err.println("Failed to initialize database: " + e.getMessage());
+            connection.setAutoCommit(false);
+            
+            Set<String> allTables = getAllTables(connection);
+            Set<String> tablesInJson = new HashSet<>(data.keySet());
+            
+            // Update sequence tables first
+            updateSequenceTables(connection, data);
+            
+            // Insert data into other tables
+            for (Map.Entry<String, List<Map<String, Object>>> entry : data.entrySet()) {
+                String tableName = sanitizeTableName(entry.getKey());
+                List<Map<String, Object>> tableData = entry.getValue();
+                
+                if (!tableName.endsWith("_seq")) {
+                    try {
+                        ensureTableExists(connection, tableName, tableData, removeExcessData);
+                        
+                        if (removeExcessData) {
+                            clearTableData(connection, tableName);
+                        }
+                        
+                        if (!tableData.isEmpty()) {
+                            insertTableData(connection, tableName, tableData);
+                        }
+                    } catch (SQLException e) {
+                        System.err.println("Error processing table " + tableName + ": " + e.getMessage());
+                        throw e;
+                    }
+                }
+            }
+            
+            if (removeExcessData) {
+                System.out.println("Preserving all existing tables not in import data");
+                
+                for (String tableName : allTables) {
+                    if (!tableName.startsWith("sqlite_") && 
+                        !tablesInJson.contains(tableName) && 
+                        !tableName.endsWith("_seq")) {
+                        System.out.println("Preserving existing table not in import: " + tableName);
+                    }
+                }
+            }
+            
+            connection.commit();
         }
     }
+
+    // ========== SPECIFIC ENDPOINT IMPORT HELPER METHODS ==========
+
+    /**
+     * Get backup files with info for specific directory
+     */
+    private List<SpecificBackupFileInfo> getBackupFilesWithInfo(String directoryName) throws IOException {
+        Path backupDir = Paths.get(backupBasePath, directoryName);
+        
+        if (!Files.exists(backupDir)) {
+            throw new IllegalArgumentException("Backup directory not found: " + backupDir);
+        }
+
+        File[] files = backupDir.toFile().listFiles((dir, name) -> 
+            name.startsWith(directoryName + "_backup_") && name.endsWith(".json"));
+        
+        if (files == null || files.length == 0) {
+            return new ArrayList<>();
+        }
+
+        Arrays.sort(files, Comparator.comparingLong(File::lastModified).reversed());
+        
+        return Arrays.stream(files)
+                .map(file -> new SpecificBackupFileInfo(
+                    file.getName(),
+                    file.lastModified(),
+                    file.length(),
+                    directoryName
+                ))
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Import from the latest backup for a specific endpoint
+     */
+    private void importFromLatestBackup(ImportEndpoint endpoint) throws IOException {
+        Path backupDir = Paths.get(backupBasePath, endpoint.getDirectoryName());
+        
+        if (!Files.exists(backupDir)) {
+            System.out.println("No backup directory found for " + endpoint.getDirectoryName() + ", skipping import");
+            return;
+        }
+
+        File[] files = backupDir.toFile().listFiles((dir, name) -> 
+            name.startsWith(endpoint.getDirectoryName() + "_backup_") && name.endsWith(".json"));
+        
+        if (files == null || files.length == 0) {
+            System.out.println("No backup files found for " + endpoint.getDirectoryName() + ", skipping import");
+            return;
+        }
+
+        Arrays.sort(files, Comparator.comparingLong(File::lastModified).reversed());
+        
+        Path latestFile = files[0].toPath();
+        importFromSpecificFile(endpoint, latestFile);
+    }
+
+    /**
+     * Import from a specific file path for a specific endpoint
+     */
+    private void importFromSpecificFile(ImportEndpoint endpoint, Path filePath) throws IOException {
+        String url = "http://localhost:" + serverPort + endpoint.getPath();
+        
+        try {
+            System.out.println("Reading backup file: " + filePath.toString());
+            String jsonContent = Files.readString(filePath);
+            
+            if (jsonContent == null || jsonContent.trim().isEmpty()) {
+                System.out.println("Empty backup file " + filePath + ", skipping import");
+                return;
+            }
+
+            // Validate JSON
+            JsonNode jsonNode = objectMapper.readTree(jsonContent);
+            
+            // Prepare HTTP headers
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            headers.add("X-Import-Source", "backup-restore");
+            headers.add("X-Import-Timestamp", LocalDateTime.now().format(TIMESTAMP_FORMAT));
+            
+            // Create HTTP entity
+            HttpEntity<String> requestEntity = new HttpEntity<>(jsonContent, headers);
+            
+            // Make API call
+            System.out.println("Importing to API: " + url);
+            ResponseEntity<String> response = restTemplate.exchange(
+                url, 
+                HttpMethod.POST, 
+                requestEntity, 
+                String.class
+            );
+            
+            if (response.getStatusCode().is2xxSuccessful()) {
+                System.out.println("Successfully imported data from " + filePath.getFileName() + 
+                                 " to " + endpoint.getPath());
+                System.out.println("Response: " + response.getBody());
+            } else {
+                System.err.println("Import failed with status: " + response.getStatusCode());
+                System.err.println("Response: " + response.getBody());
+            }
+            
+        } catch (Exception e) {
+            System.err.println("Error during import from " + filePath + " to " + endpoint.getPath() + ": " + e.getMessage());
+            throw new RuntimeException("Import failed for " + endpoint.getPath(), e);
+        }
+    }
+
+    /**
+     * Find endpoint by directory name
+     */
+    private ImportEndpoint findEndpointByDirectory(String directoryName) {
+        return endpoints.stream()
+                .filter(endpoint -> endpoint.getDirectoryName().equals(directoryName))
+                .findFirst()
+                .orElse(null);
+    }
+
+    // ========== DATABASE UTILITY METHODS ==========
 
     private void enableWalMode(Connection connection) throws SQLException {
         try (Statement statement = connection.createStatement()) {
@@ -271,70 +725,6 @@ public class ImportsController {
         }
     }
 
-    private void sanitizeAndProcessData(Map<String, List<Map<String, Object>>> data, boolean removeExcessData) throws SQLException {
-    // First establish a connection and set WAL mode
-    try (Connection setupConnection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
-        enableWalMode(setupConnection);
-        setBusyTimeout(setupConnection, 30000); // 30 seconds
-    }
-    
-    // Now create a new connection for the data operations
-    try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + DB_PATH)) {
-        connection.setAutoCommit(false); // Start transaction
-        
-        // Get a list of all existing tables in the database
-        Set<String> allTables = getAllTables(connection);
-        Set<String> tablesInJson = new HashSet<>(data.keySet());
-        
-        // Update sequence tables first
-        updateSequenceTables(connection, data);
-        
-        // Insert data into other tables
-        for (Map.Entry<String, List<Map<String, Object>>> entry : data.entrySet()) {
-            String tableName = sanitizeTableName(entry.getKey());
-            List<Map<String, Object>> tableData = entry.getValue();
-            
-            if (!tableName.endsWith("_seq")) { // Skip sequence tables
-                // First make sure the table exists with all necessary columns
-                try {
-                    ensureTableExists(connection, tableName, tableData, removeExcessData);
-                    
-                    if (removeExcessData) {
-                        // Delete all existing data and replace with the JSON data
-                        clearTableData(connection, tableName);
-                    }
-                    
-                    // Only attempt to insert data if we have any
-                    if (!tableData.isEmpty()) {
-                        insertTableData(connection, tableName, tableData);
-                    }
-                } catch (SQLException e) {
-                    System.err.println("Error processing table " + tableName + ": " + e.getMessage());
-                    throw e; // Rethrow to roll back the transaction
-                }
-            }
-        }
-        
-        // Handle tables that exist in DB but not in JSON
-        if (removeExcessData) {
-            // MODIFIED: Don't drop tables that aren't in the JSON, only update existing ones
-            System.out.println("Preserving all existing tables not in import data");
-            
-            // We could either comment out the old code completely, or keep the loop
-            // and just use it for logging which tables are being preserved
-            for (String tableName : allTables) {
-                if (!tableName.startsWith("sqlite_") && 
-                    !tablesInJson.contains(tableName) && 
-                    !tableName.endsWith("_seq")) {
-                    System.out.println("Preserving existing table not in import: " + tableName);
-                }
-            }
-        }
-        
-        connection.commit(); // Commit transaction
-    }
-}
-
     private Set<String> getAllTables(Connection connection) throws SQLException {
         Set<String> tables = new HashSet<>();
         DatabaseMetaData metaData = connection.getMetaData();
@@ -347,15 +737,7 @@ public class ImportsController {
         
         return tables;
     }
-    
-    private void dropTable(Connection connection, String tableName) throws SQLException {
-        String sql = "DROP TABLE IF EXISTS " + tableName;
-        try (Statement statement = connection.createStatement()) {
-            statement.execute(sql);
-            System.out.println("Dropped table: " + tableName);
-        }
-    }
-    
+
     private void clearTableData(Connection connection, String tableName) throws SQLException {
         String sql = "DELETE FROM " + tableName;
         try (Statement statement = connection.createStatement()) {
@@ -367,8 +749,7 @@ public class ImportsController {
     private void updateSequenceTables(Connection connection, Map<String, List<Map<String, Object>>> data) throws SQLException {
         for (Map.Entry<String, List<Map<String, Object>>> entry : data.entrySet()) {
             String tableName = entry.getKey();
-            if (tableName.endsWith("_seq")) { // Check if it's a sequence table
-                // Create the sequence table if it doesn't exist
+            if (tableName.endsWith("_seq")) {
                 createSequenceTableIfNotExists(connection, tableName);
 
                 List<Map<String, Object>> tableData = entry.getValue();
@@ -376,7 +757,6 @@ public class ImportsController {
                     Object nextValObj = tableData.get(0).get("next_val");
                     long nextValFromJson = 0;
 
-                    // Safely handle Integer or Long values
                     if (nextValObj instanceof Number) {
                         nextValFromJson = ((Number) nextValObj).longValue();
                     } else {
@@ -394,7 +774,6 @@ public class ImportsController {
             String sql = "CREATE TABLE " + tableName + " (next_val BIGINT NOT NULL)";
             try (Statement statement = connection.createStatement()) {
                 statement.execute(sql);
-                // Initialize the sequence value to 0 or 1
                 String initSql = "INSERT INTO " + tableName + " (next_val) VALUES (0)";
                 statement.execute(initSql);
                 System.out.println("Created table: " + tableName);
@@ -430,13 +809,11 @@ public class ImportsController {
     
         Set<String> columns = tableData.get(0).keySet();
         
-        // Verify table exists before attempting insert
         if (!tableExists(connection, tableName)) {
             System.out.println("Table " + tableName + " doesn't exist. Creating it now...");
             createTable(connection, tableName, columns);
         }
         
-        // Verify all columns exist
         Set<String> existingColumns = getExistingColumns(connection, tableName);
         for (String column : columns) {
             if (!existingColumns.contains(column)) {
@@ -445,7 +822,6 @@ public class ImportsController {
             }
         }
         
-        // Now build the insert query based on the actual columns in the database
         String sql = buildInsertQuery(tableName, columns);
     
         try (PreparedStatement preparedStatement = connection.prepareStatement(sql)) {
@@ -458,14 +834,12 @@ public class ImportsController {
                 preparedStatement.addBatch();
                 batchSize++;
                 
-                // Execute in batches of 100 to avoid memory issues
                 if (batchSize >= 100) {
                     preparedStatement.executeBatch();
                     batchSize = 0;
                 }
             }
     
-            // Execute any remaining items in the batch
             if (batchSize > 0) {
                 preparedStatement.executeBatch();
             }
@@ -480,8 +854,6 @@ public class ImportsController {
     private String buildInsertQuery(String tableName, Set<String> columns) {
         String columnList = String.join(", ", columns);
         String valuePlaceholders = String.join(", ", Collections.nCopies(columns.size(), "?"));
-
-        // Using INSERT instead of INSERT OR REPLACE since we're now deleting all data first
         return "INSERT INTO " + tableName + " (" + columnList + ") VALUES (" + valuePlaceholders + ")";
     }
 
@@ -500,47 +872,41 @@ public class ImportsController {
     }
 
     private void ensureTableExists(Connection connection, String tableName, List<Map<String, Object>> tableData, boolean removeExcessData) throws SQLException {
-    // If the data is empty, create a basic table structure instead of skipping
-    if (tableData.isEmpty()) {
-        System.out.println("No data provided for table: " + tableName + ". Creating with basic structure.");
-        if (!tableExists(connection, tableName)) {
-            // Create a basic table if it doesn't exist
-            String sql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
-                         "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                         "name TEXT, " +
-                         "description TEXT, " +
-                         "created_date TEXT" +
-                         ")";
-            try (Statement stmt = connection.createStatement()) {
-                stmt.execute(sql);
-                System.out.println("Created basic table structure for: " + tableName);
+        if (tableData.isEmpty()) {
+            System.out.println("No data provided for table: " + tableName + ". Creating with basic structure.");
+            if (!tableExists(connection, tableName)) {
+                String sql = "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
+                             "id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                             "name TEXT, " +
+                             "description TEXT, " +
+                             "created_date TEXT" +
+                             ")";
+                try (Statement stmt = connection.createStatement()) {
+                    stmt.execute(sql);
+                    System.out.println("Created basic table structure for: " + tableName);
+                }
             }
+            return;
         }
-        return;
-    }
 
-    Set<String> columnsInJson = tableData.get(0).keySet();
-    
-    // Check if the table exists
-    boolean tableExists = tableExists(connection, tableName);
-    
-    if (!tableExists) {
-        // Create a new table with exactly the columns in the JSON
-        System.out.println("Creating new table: " + tableName + " with columns: " + columnsInJson);
-        createTable(connection, tableName, columnsInJson);
-    } else {
-        // Get existing columns in the database
-        Set<String> existingColumns = getExistingColumns(connection, tableName);
+        Set<String> columnsInJson = tableData.get(0).keySet();
         
-        // MODIFIED: Never remove existing columns, only add new ones from JSON
-        for (String column : columnsInJson) {
-            if (!existingColumns.contains(column)) {
-                System.out.println("Adding column: " + column + " to table: " + tableName);
-                addColumn(connection, tableName, column);
+        boolean tableExists = tableExists(connection, tableName);
+        
+        if (!tableExists) {
+            System.out.println("Creating new table: " + tableName + " with columns: " + columnsInJson);
+            createTable(connection, tableName, columnsInJson);
+        } else {
+            Set<String> existingColumns = getExistingColumns(connection, tableName);
+            
+            for (String column : columnsInJson) {
+                if (!existingColumns.contains(column)) {
+                    System.out.println("Adding column: " + column + " to table: " + tableName);
+                    addColumn(connection, tableName, column);
+                }
             }
         }
     }
-}
 
     private void createTable(Connection connection, String tableName, Set<String> columns) throws SQLException {
         StringBuilder sqlBuilder = new StringBuilder("CREATE TABLE IF NOT EXISTS " + tableName + " (");
@@ -551,30 +917,23 @@ public class ImportsController {
             if (column.equalsIgnoreCase("id") && hasIdColumn) {
                 sqlBuilder.append(column).append(" INTEGER PRIMARY KEY AUTOINCREMENT,");
             } else if (column.toLowerCase().endsWith("_id") || column.toLowerCase().equals("id")) {
-                // Foreign keys or other ID fields are usually integers
                 sqlBuilder.append(column).append(" INTEGER,");
             } else if (column.toLowerCase().contains("date") || column.toLowerCase().contains("time")) {
-                // Date/time fields
                 sqlBuilder.append(column).append(" TEXT,");
             } else if (column.toLowerCase().contains("is_") || column.toLowerCase().startsWith("has_") || 
                       column.toLowerCase().equals("active") || column.toLowerCase().equals("enabled")) {
-                // Boolean fields
                 sqlBuilder.append(column).append(" BOOLEAN,");
             } else if (column.toLowerCase().contains("count") || column.toLowerCase().contains("number") || 
                       column.toLowerCase().contains("amount") || column.toLowerCase().contains("quantity")) {
-                // Numeric fields
                 sqlBuilder.append(column).append(" INTEGER,");
             } else if (column.toLowerCase().contains("price") || column.toLowerCase().contains("cost") || 
                       column.toLowerCase().contains("rate")) {
-                // Decimal fields
                 sqlBuilder.append(column).append(" REAL,");
             } else {
-                // Default to TEXT for everything else
                 sqlBuilder.append(column).append(" TEXT,");
             }
         }
         
-        // Remove the trailing comma
         if (columns.size() > 0) {
             sqlBuilder.deleteCharAt(sqlBuilder.length() - 1);
         }
@@ -590,9 +949,6 @@ public class ImportsController {
         } catch (SQLException e) {
             System.err.println("Error creating table " + tableName + ": " + e.getMessage());
             throw e;
-
- 
-
         }
     }
 
@@ -626,59 +982,16 @@ public class ImportsController {
         }
     }
 
-    @GetMapping("/backups")
-    public String getBackupsList(Model model) {
-        try {
-            List<BackupFileInfo> backups = getAllBackupFiles();
-            model.addAttribute("backups", backups);
-            return "db_management/backups";
-        } catch (Exception e) {
-            model.addAttribute("message", "Error fetching backups: " + e.getMessage());
-            return "db_management/db_error";
-        }
-    }
-
-    private static final String LOG_FILE_PATH = "./volumes/logs/restore_operations.log";
-
-    @PostMapping("/revert")
-    public String revertToBackup(@RequestParam("filename") String filename, Model model) {
-        synchronized (lock) {
-            try {
-                File backupFile = new File(BACKUP_DIR + filename);
-                if (!backupFile.exists()) {
-                    model.addAttribute("message", "Backup file not found.");
-                    return "db_management/db_error";
-                }
-                
-                // Log the restore operation
-                logRestoreOperation(filename);
-                
-                String result = importFromFile(backupFile);
-                model.addAttribute("message", result);
-                return "db_management/db_success";
-            } catch (Exception e) {
-                e.printStackTrace();
-                // Log the error too
-                logRestoreOperation(filename + " (FAILED: " + e.getMessage() + ")");
-                model.addAttribute("message", "Failed to revert to backup: " + e.getMessage());
-                return "db_management/db_error";
-            }
-        }
-    }
-
     private void logRestoreOperation(String filename) {
         try {
-            // Create logs directory if it doesn't exist
             File logDir = new File("./volumes/logs/");
             if (!logDir.exists()) {
                 logDir.mkdirs();
             }
             
-            // Get current timestamp
             LocalDateTime now = LocalDateTime.now();
             String timestamp = now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss"));
             
-            // Append to log file
             Path logPath = Paths.get(LOG_FILE_PATH);
             String logEntry = timestamp + " - Restore operation performed: " + filename + "\n";
             
@@ -687,18 +1000,6 @@ public class ImportsController {
                         java.nio.file.StandardOpenOption.APPEND);
         } catch (IOException e) {
             System.err.println("Failed to log restore operation: " + e.getMessage());
-        }
-    }
-
-    @GetMapping("/logs")
-    public String viewRestoreLogs(Model model) {
-        try {
-            List<String> logs = readLogFile();
-            model.addAttribute("logs", logs);
-            return "db_management/restore_logs";
-        } catch (IOException e) {
-            model.addAttribute("message", "Failed to read log file: " + e.getMessage());
-            return "db_management/db_error";
         }
     }
 
@@ -721,31 +1022,6 @@ public class ImportsController {
         return logs;
     }
 
-    @GetMapping("/view")
-    public String viewBackupDetails(@RequestParam("filename") String filename, Model model) {
-        try {
-            File backupFile = new File(BACKUP_DIR + filename);
-            if (!backupFile.exists()) {
-                model.addAttribute("message", "Backup file not found.");
-                return "db_management/db_error";
-            }
-            
-            String rawJson = new String(Files.readAllBytes(backupFile.toPath()));
-            BackupData backupData = objectMapper.readValue(rawJson, BackupData.class);
-            
-            model.addAttribute("filename", filename);
-            model.addAttribute("tables", backupData.getTables());
-            model.addAttribute("creationDate", new java.util.Date(backupFile.lastModified()));
-            model.addAttribute("fileSize", backupFile.length() / 1024); // Size in KB
-            
-            return "db_management/backup-details";
-        } catch (Exception e) {
-            e.printStackTrace();
-            model.addAttribute("message", "Failed to read backup: " + e.getMessage());
-            return "db_management/db_error";
-        }
-    }
-
     private List<BackupFileInfo> getAllBackupFiles() {
         File backupsDir = new File(BACKUP_DIR);
         if (!backupsDir.exists() || !backupsDir.isDirectory()) {
@@ -761,7 +1037,7 @@ public class ImportsController {
             .map(file -> new BackupFileInfo(
                 file.getName(),
                 new java.util.Date(file.lastModified()),
-                file.length() / 1024, // Size in KB
+                file.length() / 1024,
                 getTableCountFromBackup(file)
             ))
             .sorted(Comparator.comparing(BackupFileInfo::getCreationDate).reversed())
@@ -779,7 +1055,29 @@ public class ImportsController {
         }
     }
 
-    // Class to hold backup file information for display
+    // ========== INNER CLASSES AND DTOS ==========
+
+    public static class BackupData {
+        private Map<String, List<Map<String, Object>>> tables = new HashMap<>();
+
+        @JsonAnySetter
+        public void set(String key, Object value) {
+            if (value instanceof List) {
+                tables.put(key, (List<Map<String, Object>>) value);
+            } else {
+                throw new IllegalArgumentException("Expected a List<Map<String, Object>> for key: " + key);
+            }
+        }
+
+        public Map<String, List<Map<String, Object>>> getTables() {
+            return tables;
+        }
+
+        public void setTables(Map<String, List<Map<String, Object>>> tables) {
+            this.tables = tables;
+        }
+    }
+
     public static class BackupFileInfo {
         private final String filename;
         private final java.util.Date creationDate;
@@ -808,5 +1106,50 @@ public class ImportsController {
         public int getTableCount() {
             return tableCount;
         }
+    }
+
+    public static class ImportEndpoint {
+        private final String path;
+        private final String directoryName;
+
+        public ImportEndpoint(String path, String directoryName) {
+            this.path = path;
+            this.directoryName = directoryName;
+        }
+
+        public String getPath() {
+            return path;
+        }
+
+        public String getDirectoryName() {
+            return directoryName;
+        }
+
+        @Override
+        public String toString() {
+            return "ImportEndpoint{" +
+                    "path='" + path + '\'' +
+                    ", directoryName='" + directoryName + '\'' +
+                    '}';
+        }
+    }
+
+    public static class SpecificBackupFileInfo {
+        private String filename;
+        private long lastModified;
+        private long size;
+        private String directory;
+        
+        public SpecificBackupFileInfo(String filename, long lastModified, long size, String directory) {
+            this.filename = filename;
+            this.lastModified = lastModified;
+            this.size = size;
+            this.directory = directory;
+        }
+        
+        public String getFilename() { return filename; }
+        public long getLastModified() { return lastModified; }
+        public long getSize() { return size; }
+        public String getDirectory() { return directory; }
     }
 }

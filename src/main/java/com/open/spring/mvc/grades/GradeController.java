@@ -25,14 +25,14 @@ public class GradeController {
         return grade.map(ResponseEntity::ok).orElse(ResponseEntity.notFound().build());
     }
 
-    @GetMapping("/student/{studentId}")
-    public List<Grade> getGradesByStudent(@PathVariable String studentId) {
-        return gradeRepository.findByStudentId(studentId);
+    @GetMapping("/student/{uid}")
+    public List<Grade> getGradesByStudent(@PathVariable String uid) {
+        return gradeRepository.findByUid(uid);
     }
 
-    @GetMapping("/subject/{subject}")
-    public List<Grade> getGradesBySubject(@PathVariable String subject) {
-        return gradeRepository.findBySubject(subject);
+    @GetMapping("/assignment/{assignment}")
+    public List<Grade> getGradesByAssignment(@PathVariable String assignment) {
+        return gradeRepository.findByAssignment(assignment);
     }
 
     @PostMapping
@@ -45,10 +45,11 @@ public class GradeController {
         Optional<Grade> optionalGrade = gradeRepository.findById(id);
         if (optionalGrade.isPresent()) {
             Grade grade = optionalGrade.get();
-            grade.setStudentId(gradeDetails.getStudentId());
-            grade.setSubject(gradeDetails.getSubject());
+            grade.setUid(gradeDetails.getUid());
+            grade.setAssignment(gradeDetails.getAssignment());
             grade.setScore(gradeDetails.getScore());
-            grade.setGradeLevel(gradeDetails.getGradeLevel());
+            grade.setCourse(gradeDetails.getCourse());
+            // grade.setGradeLevel(gradeDetails.getGradeLevel());
             return ResponseEntity.ok(gradeRepository.save(grade));
         }
         return ResponseEntity.notFound().build();

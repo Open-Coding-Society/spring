@@ -46,6 +46,9 @@ public class Adventure {
     @Lob
     private String rubricCriteria;
 
+    @Lob
+    private String details; // JSON blob combining choice/answer/rubric/chat fields
+
     private Double balance;
 
     private LocalDateTime createdAt;

@@ -3,19 +3,46 @@ package com.open.spring.mvc.slack;
 import java.time.*;
 import java.util.regex.*;
 
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
+/**
+ * Consolidated service for Slack integration.
+ * Handles both message persistence and date parsing from Slack messages.
+ */
 @Service
 public class SlackService {
 
-    // Slack Incoming Webhook URL (replace this with your actual webhook URL)
-    //private static final String SLACK_WEBHOOK_URL = "https://hooks.slack.com/services/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";
+    @Autowired
+    private SlackMessageRepository messageRepository;
 
+    // ========== MESSAGE PERSISTENCE (from MessageService) ==========
+
+    /**
+     * Save a Slack message to the database.
+     * Creates a new SlackMessage entity with the current timestamp and message content.
+     * 
+     * @param messageContent The content of the Slack message to save
+     */
+    public void saveMessage(String messageContent) {
+        // Create a new SlackMessage entity with the current timestamp and the message content as a blob
+        SlackMessage message = new SlackMessage(LocalDateTime.now(), messageContent);
+        // Save to the database
+        messageRepository.save(message);
+    }
+
+    // ========== DATE PARSING UTILITIES ==========
+
+    /**
+     * Extract the week start date from a Slack message.
+     * Supports multiple date formats:
+     * - "Week of MM/DD/YYYY" (full date)
+     * - "Week of MM/DD" (assumes current year)
+     * - "Week of the Nth" (assumes current month and year)
+     * 
+     * @param message The Slack message text containing date information
+     * @return The parsed week start date, or current week's Sunday if no date found
+     */
     private LocalDate getWeekStartDateFromMessage(String message) {
         LocalDate today = LocalDate.now();
         Pattern fullDatePattern = Pattern.compile("Week of (\\d{1,2})/(\\d{1,2})/(\\d{4})");

@@ -60,6 +60,8 @@ import com.open.spring.mvc.stats.Stats; // curators - stats api
 import com.open.spring.mvc.stats.StatsRepository;
 import com.open.spring.mvc.rpg.adventure.Adventure;
 import com.open.spring.mvc.rpg.adventure.AdventureJpaRepository;
+import com.open.spring.mvc.rpg.games.Game;
+import com.open.spring.mvc.rpg.games.UnifiedGameRepository;
 
 
 @Component
@@ -81,6 +83,8 @@ public class ModelInit {
     DataSource dataSource;
     @Autowired
     AdventureJpaRepository adventureJpaRepository;
+    @Autowired
+    UnifiedGameRepository gameJpaRepository;
     
     @Autowired UserJpaRepository userJpaRepository;
     @Autowired AssignmentJpaRepository assignmentJpaRepository;
@@ -136,6 +140,44 @@ public class ModelInit {
                                 }
                                 System.out.println("Seeded default Adventure rows via Adventure.init()");
                             }
+                            // Ensure 'details' column exists and migrate existing columns into JSON 'details'
+                            try {
+                                try {
+                                    st.execute("ALTER TABLE adventure ADD COLUMN details TEXT;");
+                                    System.out.println("Added 'details' column to 'adventure' table");
+                                } catch (SQLException ignore) {
+                                    // column may already exist; ignore
+                                }
+                                try {
+                                    // Migrate existing Adventure rows into details JSON if empty
+                                    Iterable<Adventure> all = adventureJpaRepository.findAll();
+                                    for (Adventure adv : all) {
+                                        if (adv.getDetails() == null || adv.getDetails().trim().isEmpty()) {
+                                            String choiceText = adv.getChoiceText();
+                                            String answerContent = adv.getAnswerContent();
+                                            String rubricCriteria = adv.getRubricCriteria();
+                                            String rubricRuid = adv.getRubricRuid();
+                                            StringBuilder sb = new StringBuilder();
+                                            sb.append('{');
+                                            sb.append("\"choiceId\":").append(adv.getChoiceId() == null ? "null" : adv.getChoiceId()).append(',');
+                                            sb.append("\"choiceText\":").append(choiceText == null ? "null" : ("\"" + choiceText.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" )).append(',');
+                                            sb.append("\"choiceIsCorrect\":").append(adv.getChoiceIsCorrect() == null ? "null" : adv.getChoiceIsCorrect()).append(',');
+                                            sb.append("\"answerIsCorrect\":").append(adv.getAnswerIsCorrect() == null ? "null" : adv.getAnswerIsCorrect()).append(',');
+                                            sb.append("\"answerContent\":").append(answerContent == null ? "null" : ("\"" + answerContent.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" )).append(',');
+                                            sb.append("\"chatScore\":").append(adv.getChatScore() == null ? "null" : adv.getChatScore()).append(',');
+                                            sb.append("\"rubricRuid\":").append(rubricRuid == null ? "null" : ("\"" + rubricRuid.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" )).append(',');
+                                            sb.append("\"rubricCriteria\":").append(rubricCriteria == null ? "null" : ("\"" + rubricCriteria.replace("\\", "\\\\").replace("\"", "\\\"") + "\"" ));
+                                            sb.append('}');
+                                            adv.setDetails(sb.toString());
+                                            try { adventureJpaRepository.save(adv); } catch (Exception ignored) {}
+                                        }
+                                    }
+                                    System.out.println("Migrated Adventure rows into 'details' JSON where missing");
+                                } catch (Exception ignore) {
+                                }
+                            } catch (Throwable t) {
+                                // ignore migration failures
+                            }
                         } catch (Throwable t) {
                             // don't fail startup for seeding issues
                         }
@@ -144,6 +186,44 @@ public class ModelInit {
             } catch (SQLException e) {
                 System.err.println("Failed to ensure 'adventure' table: " + e.getMessage());
             }
+
+                // Ensure unified `games` table exists before any seeding
+                try {
+                    if (dataSource != null) {
+                        try (Connection conn = dataSource.getConnection(); Statement st = conn.createStatement()) {
+                            String createGames = "CREATE TABLE IF NOT EXISTS games ("
+                                    + "id INTEGER PRIMARY KEY AUTOINCREMENT,"
+                                    + "person_id INTEGER,"
+                                    + "person_uid TEXT,"
+                                    + "type TEXT,"
+                                    + "tx_id TEXT,"
+                                    + "bet_amount REAL,"
+                                    + "amount REAL,"
+                                    + "balance REAL,"
+                                    + "result TEXT,"
+                                    + "success INTEGER,"
+                                    + "details TEXT,"
+                                    + "created_at DATETIME DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now'))"
+                                    + ");";
+                            st.execute(createGames);
+                            System.out.println("Ensured 'games' table exists");
+                            try {
+                                long gameCount = 0L;
+                                try { gameCount = gameJpaRepository.count(); } catch (Exception ignore) { gameCount = 0L; }
+                                if (gameCount == 0L) {
+                                    Game[] defaults = Game.init();
+                                    for (Game g : defaults) {
+                                        try { gameJpaRepository.save(g); } catch (Exception ignored) {}
+                                    }
+                                    System.out.println("Seeded default Game rows via Game.init()");
+                                }
+                            } catch (Throwable t) {
+                            }
+                        }
+                    }
+                } catch (SQLException e) {
+                    System.err.println("Failed to ensure 'games' table: " + e.getMessage());
+                }
 
             if (new File("volumes/.skip-modelinit").exists()) {
                 System.out.println("Skip flag detected, ModelInit will not run");

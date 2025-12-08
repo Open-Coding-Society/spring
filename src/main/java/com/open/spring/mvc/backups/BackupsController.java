@@ -10,6 +10,11 @@ import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.text.SimpleDateFormat;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -18,28 +23,67 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.event.ContextClosedEvent;
+import org.springframework.context.event.EventListener;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
+import org.springframework.stereotype.Component;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.context.annotation.Bean;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.servlet.http.HttpServletResponse;
 
+/**
+ * Consolidated controller for all backup operations.
+ * Handles both full database exports and specific API endpoint backups.
+ */
 @RestController
-@RequestMapping("/api/exports/")
+@RequestMapping("/api/exports")
+@Component
 public class BackupsController {
 
-    // Hardcoded database path
+    // ========== FULL DATABASE BACKUP CONFIGURATION ==========
     private static final String DB_PATH = "./volumes/sqlite.db";
-
-    // Hardcoded JSON file directory
     private static final String BACKUP_DIR = "./volumes/backups/";
+    
+    // ========== SPECIFIC ENDPOINT BACKUP CONFIGURATION ==========
+    @Value("${backup.base.path:./backups}")
+    private String backupBasePath;
+
+    @Value("${backup.max.files:3}")
+    private int maxBackupFiles;
+
+    @Value("${server.port:8080}")
+    private String serverPort;
+
+    private static final DateTimeFormatter TIMESTAMP_FORMAT = DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss");
 
     // ObjectMapper for JSON serialization
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    // Endpoint to retrieve data from all tables in the database
+    @Autowired
+    private RestTemplate restTemplate;
+
+    // Configuration for API endpoints and their corresponding directories
+    private final List<BackupEndpoint> endpoints = Arrays.asList(
+        new BackupEndpoint("/api/people/bulk/extract", "person"),
+        new BackupEndpoint("/api/groups/bulk/extract", "groups"),
+        new BackupEndpoint("/api/tinkle/bulk/extract", "tinkle"),
+        new BackupEndpoint("/api/calendar/events", "calendar"),
+        new BackupEndpoint("/bank/bulk/extract", "bank")
+    );
+
+    // ========== FULL DATABASE BACKUP ENDPOINTS ==========
+
+    /**
+     * Endpoint to retrieve data from all tables in the database
+     */
     @GetMapping("/getAll")
     public void getAllTablesData(HttpServletResponse response) {
         // Export data from the database
@@ -58,7 +102,9 @@ public class BackupsController {
         }
     }
 
-    // Method to export data from the database
+    /**
+     * Method to export data from the database
+     */
     private Map<String, List<Map<String, Object>>> exportData() {
         Map<String, List<Map<String, Object>>> result = new HashMap<>();
 
@@ -82,7 +128,9 @@ public class BackupsController {
         return result;
     }
 
-    // Helper method to get the list of table names in the database
+    /**
+     * Helper method to get the list of table names in the database
+     */
     private List<String> getTableNames(Connection connection) throws SQLException {
         List<String> tableNames = new ArrayList<>();
 
@@ -96,7 +144,9 @@ public class BackupsController {
         return tableNames;
     }
 
-    // Helper method to retrieve data from a specific table
+    /**
+     * Helper method to retrieve data from a specific table
+     */
     private List<Map<String, Object>> getTableData(Statement statement, String tableName) throws SQLException {
         List<Map<String, Object>> tableData = new ArrayList<>();
 
@@ -131,25 +181,65 @@ public class BackupsController {
         return tableData;
     }
 
-    // This method will be called just before the server stops
-    @jakarta.annotation.PreDestroy
-    public void onShutdown() {
-        System.out.println("Server is stopping. Exporting data...");
+    // ========== SHUTDOWN BACKUP OPERATIONS ==========
+
+    /**
+     * This method will be called just before the server stops.
+     * Performs both full database backup and specific endpoint backups.
+     */
+    @EventListener
+    public void handleContextClose(ContextClosedEvent event) {
+        System.out.println("Server is stopping. Starting backup process...");
+        
+        // Perform full database backup
+        performFullDatabaseBackup();
+        
+        // Perform specific endpoint backups
+        performSpecificEndpointBackups();
+        
+        System.out.println("All backup operations completed.");
+    }
+
+    /**
+     * Perform full database backup on shutdown
+     */
+    private void performFullDatabaseBackup() {
+        System.out.println("Exporting full database...");
 
         // Export data
         Map<String, List<Map<String, Object>>> data = exportData();
 
         // Save the data to a JSON file with a timestamp
-        saveJsonToFile(data);
+        saveFullDatabaseBackup(data);
 
         // Manage backups to keep only the three most recent ones
-        manageBackups();
+        manageFullDatabaseBackups();
 
-        System.out.println("Data export completed.");
+        System.out.println("Full database backup completed.");
     }
 
-    // Helper method to save the JSON data to a file with a timestamp
-    private void saveJsonToFile(Map<String, List<Map<String, Object>>> data) {
+    /**
+     * Perform specific endpoint backups on shutdown
+     */
+    private void performSpecificEndpointBackups() {
+        System.out.println("Backing up specific endpoints...");
+        
+        for (BackupEndpoint endpoint : endpoints) {
+            try {
+                backupEndpoint(endpoint);
+            } catch (Exception e) {
+                System.err.println("Failed to backup endpoint " + endpoint.getPath() + ": " + e.getMessage());
+                e.printStackTrace();
+            }
+        }
+        
+        System.out.println("Specific endpoint backups completed.");
+    }
+
+    /**
+     * Helper method to save the full database JSON data to a file with a timestamp
+     */
+    private void saveFullDatabaseBackup(Map<String, List<Map<String, Object>>> data) {
         try {
             // Create the backups directory if it doesn't exist
             File backupsDir = new File(BACKUP_DIR);
@@ -164,7 +254,7 @@ public class BackupsController {
 
             // Write the JSON data to the file
             objectMapper.writerWithDefaultPrettyPrinter().writeValue(jsonFile, data);
-            System.out.println("JSON data saved to: " + jsonFile.getAbsolutePath());
+            System.out.println("Full database backup saved to: " + jsonFile.getAbsolutePath());
 
         } catch (Exception e) {
             e.printStackTrace();
@@ -172,8 +262,10 @@ public class BackupsController {
         }
     }
 
-    // Helper method to manage backups, keeping only the three most recent ones
-    private void manageBackups() {
+    /**
+     * Helper method to manage full database backups, keeping only the three most recent ones
+     */
+    private void manageFullDatabaseBackups() {
         File backupsDir = new File(BACKUP_DIR);
         if (!backupsDir.exists() || !backupsDir.isDirectory()) {
             return;
@@ -192,10 +284,133 @@ public class BackupsController {
         // Delete the oldest files if there are more than three
         for (int i = 0; i < backupFiles.length - 3; i++) {
             if (backupFiles[i].delete()) {
-                System.out.println("Deleted old backup: " + backupFiles[i].getName());
+                System.out.println("Deleted old full database backup: " + backupFiles[i].getName());
             } else {
-                System.out.println("Failed to delete old backup: " + backupFiles[i].getName());
+                System.out.println("Failed to delete old full database backup: " + backupFiles[i].getName());
             }
         }
+    }
+
+    /**
+     * Backup a specific endpoint to a JSON file
+     */
+    private void backupEndpoint(BackupEndpoint endpoint) throws IOException {
+        String url = "http://localhost:" + serverPort + endpoint.getPath();
+        
+        try {
+            // Make API call
+            System.out.println("Calling API: " + url);
+            String jsonResponse = restTemplate.getForObject(url, String.class);
+            
+            if (jsonResponse == null || jsonResponse.trim().isEmpty()) {
+                System.out.println("Empty response from " + url + ", skipping backup");
+                return;
+            }
+
+            // Validate JSON
+            objectMapper.readTree(jsonResponse);
+            
+            // Create directory structure
+            Path backupDir = createBackupDirectory(endpoint.getDirectoryName());
+            
+            // Generate filename with timestamp
+            String timestamp = LocalDateTime.now().format(TIMESTAMP_FORMAT);
+            String filename = endpoint.getDirectoryName() + "_backup_" + timestamp + ".json";
+            Path filePath = backupDir.resolve(filename);
+            
+            // Write JSON to file
+            Files.write(filePath, jsonResponse.getBytes());
+            System.out.println("Backup saved: " + filePath);
+            
+            // Manage file rotation
+            manageFileRotation(backupDir, endpoint.getDirectoryName());
+            
+        } catch (Exception e) {
+            System.err.println("Error during backup of " + endpoint.getPath() + ": " + e.getMessage());
+            throw new RuntimeException("Backup failed for " + endpoint.getPath(), e);
+        }
+    }
+
+    /**
+     * Create backup directory for specific endpoint backups
+     */
+    private Path createBackupDirectory(String subdirectory) throws IOException {
+        Path backupPath = Paths.get(backupBasePath, subdirectory);
+        
+        if (!Files.exists(backupPath)) {
+            Files.createDirectories(backupPath);
+            System.out.println("Created backup directory: " + backupPath.toString());
+        }
+        
+        return backupPath;
+    }
+
+    /**
+     * Manage file rotation for specific endpoint backups
+     */
+    private void manageFileRotation(Path directory, String prefix) throws IOException {
+        File[] files = directory.toFile().listFiles((dir, name) -> 
+            name.startsWith(prefix + "_backup_") && name.endsWith(".json"));
+        
+        if (files == null) return;
+        
+        if (files.length > maxBackupFiles) {
+            // Sort files by last modified time (oldest first)
+            Arrays.sort(files, Comparator.comparingLong(File::lastModified));
+            
+            // Delete oldest files to maintain the limit
+            int filesToDelete = files.length - maxBackupFiles;
+            for (int i = 0; i < filesToDelete; i++) {
+                boolean deleted = files[i].delete();
+                if (deleted) {
+                    System.out.println("Deleted old endpoint backup: " + files[i].getName());
+                } else {
+                    System.err.println("Failed to delete old endpoint backup: " + files[i].getName());
+                }
+            }
+        }
+    }
+
+    // ========== INNER CLASSES ==========
+
+    /**
+     * Inner class to hold endpoint configuration for specific backups
+     */
+    private static class BackupEndpoint {
+        private final String path;
+        private final String directoryName;
+
+        public BackupEndpoint(String path, String directoryName) {
+            this.path = path;
+            this.directoryName = directoryName;
+        }
+
+        public String getPath() {
+            return path;
+        }
+
+        public String getDirectoryName() {
+            return directoryName;
+        }
+    }
+}
+
+/**
+ * Configuration class for RestTemplate bean
+ */
+@Component
+class BackupConfiguration {
+    
+    @Bean
+    public RestTemplate restTemplate() {
+        RestTemplate restTemplate = new RestTemplate();
+        
+        // Add timeout configuration
+        HttpComponentsClientHttpRequestFactory factory = new HttpComponentsClientHttpRequestFactory();
+        factory.setConnectTimeout(5000);
+        factory.setConnectionRequestTimeout(10000);
+        restTemplate.setRequestFactory(factory);
+        
+        return restTemplate;
     }
 }
