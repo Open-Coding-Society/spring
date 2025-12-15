@@ -149,6 +149,25 @@ public class Person extends Submitter implements Comparable<Person> {
     @Column(columnDefinition = "jsonb")
     private Map<String, Map<String, Object>> stats = new HashMap<>();
 
+    /**
+     * styleData is used to store JSON for style preferences
+     * --- @JdbcTypeCode annotation is used to specify the JDBC type code for a
+     * column, in this case json.
+     * --- @Column annotation is used to specify the mapped column for a persistent
+     * property or field, in this case columnDefinition is specified as jsonb.
+     * * * Example of JSON data:
+     * "styleData": {
+     * "fontSize": 14,
+     * "fontFamily": "Arial",
+     * "textColor": "#000000",
+     * "backgroundColor": "#FFFFFF",
+     * "accentColor": "#0066CC"
+     * }
+     */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private Map<String, Object> styleData = new HashMap<>();
+
 
 //////////////////////////////////////////////////////////////////////////////////
 /// Relationships
