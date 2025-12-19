@@ -19,20 +19,23 @@ public class DataLoader implements CommandLineRunner {
 
     @Override
     public void run(String... args) throws Exception {
-        // Sample Grades
-        gradeRepository.save(new Grade("STU001", "Mathematics", 85.5, "A", "submission link"));
-        gradeRepository.save(new Grade("STU001", "Science", 92.0, "A+", "submission link"));
-        gradeRepository.save(new Grade("STU002", "Mathematics", 78.0, "B+", "submission link"));
-        gradeRepository.save(new Grade("STU002", "English", 88.5, "A-", "submission link"));
-        gradeRepository.save(new Grade("STU003", "Science", 95.0, "A+", "submission link"));
+        try {
+              // Sample Grades
+            gradeRepository.save(new Grade("STU001", "Mathematics", 85.5, "A", "submission link"));
+            gradeRepository.save(new Grade("STU001", "Science", 92.0, "A+", "submission link"));
+            gradeRepository.save(new Grade("STU002", "Mathematics", 78.0, "B+", "submission link"));
+            gradeRepository.save(new Grade("STU002", "English", 88.5, "A-", "submission link"));
+            gradeRepository.save(new Grade("STU003", "Science", 95.0, "A+", "submission link"));
+            // Sample Progress
+            progressRepository.save(new Progress("STU001", "Mathematics", 75.0, "In Progress"));
+            progressRepository.save(new Progress("STU001", "Science", 100.0, "Completed"));
+            progressRepository.save(new Progress("STU002", "Mathematics", 60.0, "In Progress"));
+            progressRepository.save(new Progress("STU002", "English", 90.0, "Completed"));
+            progressRepository.save(new Progress("STU003", "Science", 45.0, "In Progress"));
 
-        // Sample Progress
-        progressRepository.save(new Progress("STU001", "Mathematics", 75.0, "In Progress"));
-        progressRepository.save(new Progress("STU001", "Science", 100.0, "Completed"));
-        progressRepository.save(new Progress("STU002", "Mathematics", 60.0, "In Progress"));
-        progressRepository.save(new Progress("STU002", "English", 90.0, "Completed"));
-        progressRepository.save(new Progress("STU003", "Science", 45.0, "In Progress"));
-
-        System.out.println("Sample data loaded successfully!");
+            System.out.println("Sample data loaded successfully!");
+        } catch (Exception e) {
+            System.err.println("Grades DataLoader skipped due to database schema mismatch: " + e.getMessage());
+        }
     }
 }

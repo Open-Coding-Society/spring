@@ -83,6 +83,12 @@ public class SecurityConfig {
                         // ========== PUBLIC API ENDPOINTS ==========
                         // Intentionally public - used for polling and public features
                         .requestMatchers("/api/jokes/**").permitAll()
+                        // Pause Menu APIs should be public
+                        .requestMatchers("/api/pausemenu/**").permitAll()
+                        // Leaderboard should be public - displays scores without authentication
+                        .requestMatchers("/api/leaderboard/**").permitAll()
+                        // Frontend calls gamer score endpoint; make it public
+                        .requestMatchers("/api/gamer/**").permitAll()
                         // ==========================================
                         .requestMatchers("/api/exports/**").hasAuthority("ROLE_ADMIN")
                         .requestMatchers("/api/imports/**").hasAuthority("ROLE_ADMIN")
