@@ -1,15 +1,16 @@
 package com.open.spring.system;
 
 import java.io.File;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.sql.Statement;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -33,6 +34,8 @@ import com.open.spring.mvc.bathroom.TeacherJpaRepository;
 import com.open.spring.mvc.bathroom.TinkleJPARepository;
 import com.open.spring.mvc.comment.Comment;
 import com.open.spring.mvc.comment.CommentJPA;
+import com.open.spring.mvc.groups.Groups;
+import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.hardAssets.HardAssetsRepository;
 import com.open.spring.mvc.jokes.Jokes;
 import com.open.spring.mvc.jokes.JokesJpaRepository;
@@ -45,22 +48,20 @@ import com.open.spring.mvc.person.PersonDetailsService;
 import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.person.PersonRole;
 import com.open.spring.mvc.person.PersonRoleJpaRepository;
-
-// Adventure sub-APIs have been unified into a single Adventure entity
-import com.open.spring.mvc.student.StudentQueue;
-import com.open.spring.mvc.student.StudentQueueJPARepository;
-import com.open.spring.mvc.synergy.SynergyGrade;
-import com.open.spring.mvc.synergy.SynergyGradeJpaRepository;
 import com.open.spring.mvc.quiz.QuizScore;
 import com.open.spring.mvc.quiz.QuizScoreRepository;
 import com.open.spring.mvc.resume.Resume;
 import com.open.spring.mvc.resume.ResumeJpaRepository;
-import com.open.spring.mvc.stats.Stats; // curators - stats api
-import com.open.spring.mvc.stats.StatsRepository;
 import com.open.spring.mvc.rpg.adventure.Adventure;
 import com.open.spring.mvc.rpg.adventure.AdventureJpaRepository;
-import com.open.spring.mvc.rpg.games.Game;
+import com.open.spring.mvc.rpg.games.Game; // curators - stats api
 import com.open.spring.mvc.rpg.games.UnifiedGameRepository;
+import com.open.spring.mvc.stats.Stats;
+import com.open.spring.mvc.stats.StatsRepository;
+import com.open.spring.mvc.student.StudentQueue;
+import com.open.spring.mvc.student.StudentQueueJPARepository;
+import com.open.spring.mvc.synergy.SynergyGrade;
+import com.open.spring.mvc.synergy.SynergyGradeJpaRepository;
 
 
 @Component
@@ -96,6 +97,7 @@ public class ModelInit {
     @Autowired QuizScoreRepository quizScoreRepository;
     @Autowired ResumeJpaRepository resumeJpaRepository;
     @Autowired StatsRepository statsRepository; // curators - stats
+    @Autowired GroupsJpaRepository groupsJpaRepository;
 
     @Bean
     @Transactional
@@ -506,6 +508,39 @@ public class ModelInit {
             } catch (Exception e) {
                 // Handle exception, e.g., log it, but don't stop startup
                 System.err.println("Error initializing Stats data: " + e.getMessage());
+            }
+
+            // Groups initialization with 3 groups, 3 members each (using hardcoded person IDs)
+            try {
+                if (groupsJpaRepository.count() == 0) {
+                    // Group 1: Period 1 CSA - members with IDs 1, 2, 3
+                    Groups group1 = new Groups("Pioneers", "1", "CSA", new ArrayList<>());
+                    groupsJpaRepository.save(group1);
+                    personJpaRepository.findById(1L).ifPresent(p -> group1.getGroupMembers().add(p));
+                    personJpaRepository.findById(2L).ifPresent(p -> group1.getGroupMembers().add(p));
+                    personJpaRepository.findById(3L).ifPresent(p -> group1.getGroupMembers().add(p));
+                    groupsJpaRepository.save(group1);
+
+                    // Group 2: Period 2 CSA - members with IDs 4, 5, 6
+                    Groups group2 = new Groups("Innovators", "2", "CSA", new ArrayList<>());
+                    groupsJpaRepository.save(group2);
+                    personJpaRepository.findById(4L).ifPresent(p -> group2.getGroupMembers().add(p));
+                    personJpaRepository.findById(5L).ifPresent(p -> group2.getGroupMembers().add(p));
+                    personJpaRepository.findById(6L).ifPresent(p -> group2.getGroupMembers().add(p));
+                    groupsJpaRepository.save(group2);
+
+                    // Group 3: Period 5 CSP - members with IDs 1, 4, 7
+                    Groups group3 = new Groups("Explorers", "5", "CSP", new ArrayList<>());
+                    groupsJpaRepository.save(group3);
+                    personJpaRepository.findById(1L).ifPresent(p -> group3.getGroupMembers().add(p));
+                    personJpaRepository.findById(4L).ifPresent(p -> group3.getGroupMembers().add(p));
+                    personJpaRepository.findById(7L).ifPresent(p -> group3.getGroupMembers().add(p));
+                    groupsJpaRepository.save(group3);
+
+                    System.out.println("Initialized sample Groups data");
+                }
+            } catch (Exception e) {
+                System.err.println("Error initializing Groups data: " + e.getMessage());
             }
         };
     }
