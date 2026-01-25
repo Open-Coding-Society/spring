@@ -10,8 +10,8 @@ import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
-import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
 
 /*
@@ -135,8 +135,6 @@ public class SecurityConfig {
                         .requestMatchers("/api/grades/**").permitAll()
                         .requestMatchers("/api/progress/**").permitAll()
                         .requestMatchers("/api/calendar/**").permitAll()
-                        // Item priorities - user-specific but uses uid param for auth
-                        .requestMatchers("/api/user/item-priorities/**").permitAll()
                         // Sprint dates - GET is public, POST/PUT/DELETE require auth
                         .requestMatchers(HttpMethod.GET, "/api/sprint-dates/**").permitAll()
                         // User preferences - requires authentication (handled by default rule)

@@ -8,8 +8,20 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.ManyToMany;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OneToOne;
+import jakarta.persistence.PrimaryKeyJoinColumn;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Size;
+import jakarta.persistence.CascadeType;
+
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.type.SqlTypes;
+import jakarta.persistence.Convert;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -25,18 +37,10 @@ import com.open.spring.mvc.trains.TrainCompany;
 import com.open.spring.mvc.userStocks.userStocksTable;
 
 import io.github.cdimascio.dotenv.Dotenv;
-import jakarta.persistence.CascadeType;
-import jakarta.persistence.Column;
-import jakarta.persistence.Convert;
-import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
-import jakarta.persistence.ManyToMany;
-import jakarta.persistence.OneToMany;
-import jakarta.persistence.OneToOne;
-import jakarta.persistence.PrimaryKeyJoinColumn;
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.Size;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -156,16 +160,6 @@ public class Person extends Submitter implements Comparable<Person> {
     @Convert(converter = GradesJsonConverter.class)
     @Column(name = "gradesJson", columnDefinition = "text")
     private List<Map<String, Object>> gradesJson = new ArrayList<>();
-
-    /**
-     * itemPriorities stores per-item priority levels (P0-P3) as a JSON map.
-     * Key: item URL (e.g., "/csp/big-ideas/p1")
-     * Value: priority level ("P0", "P1", "P2", "P3")
-     * Example: {"/csp/big-ideas/p1": "P0", "/csp/tools/jupyter": "P2"}
-     */
-    @Convert(converter = ItemPrioritiesConverter.class)
-    @Column(name = "item_priorities", columnDefinition = "text")
-    private Map<String, String> itemPriorities = new HashMap<>();
 
 
 //////////////////////////////////////////////////////////////////////////////////
