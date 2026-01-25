@@ -135,6 +135,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/grades/**").permitAll()
                         .requestMatchers("/api/progress/**").permitAll()
                         .requestMatchers("/api/calendar/**").permitAll()
+                        // Item priorities - user-specific but uses uid param for auth
+                        .requestMatchers("/api/user/item-priorities/**").permitAll()
                         // Sprint dates - GET is public, POST/PUT/DELETE require auth
                         .requestMatchers(HttpMethod.GET, "/api/sprint-dates/**").permitAll()
                         // User preferences - requires authentication (handled by default rule)
