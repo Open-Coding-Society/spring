@@ -16,6 +16,13 @@ public class LeaderboardService {
     private LeaderboardRepository leaderboardRepository;
     
     /**
+     * Add a new score entry
+     */
+    public ScoreCounter addScore(ScoreCounter scoreEntry) {
+        return leaderboardRepository.save(scoreEntry);
+    }
+    
+    /**
      * Get top N entries from pausemenu table
      */
     public List<ScoreCounter> getTopScores(int limit) {
