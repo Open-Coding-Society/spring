@@ -3,12 +3,10 @@ package com.open.spring.mvc.leaderboard;
 import com.open.spring.mvc.PauseMenu.ScoreCounter;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PathVariable;
 import java.util.List;
 
@@ -18,7 +16,6 @@ import java.util.List;
  * 
  * Endpoints:
  * - GET /api/leaderboard - Main leaderboard endpoint (all scores)
- * - POST /api/leaderboard - Add new score entry
  * - GET /api/pausemenu/score/leaderboard - Alias for compatibility with PauseMenu
  * - GET /api/leaderboard/top/{limit} - Top N scores
  * - GET /api/leaderboard/game/{gameName} - Scores for specific game
@@ -30,7 +27,6 @@ import java.util.List;
     allowedHeaders = "*",
     methods = {
         org.springframework.web.bind.annotation.RequestMethod.GET,
-        org.springframework.web.bind.annotation.RequestMethod.POST,
         org.springframework.web.bind.annotation.RequestMethod.OPTIONS
     },
     allowCredentials = "false"
@@ -60,43 +56,6 @@ public class LeaderboardController {
             System.err.println("Error fetching leaderboard: " + e.getMessage());
             e.printStackTrace();
             return ResponseEntity.ok(List.of()); // Return empty array on error
-        }
-    }
-    
-    /**
-     * CREATE - Add new score entry
-     * POST /api/leaderboard
-     * Request body: { "user": "playerName", "score": 100, "gameName": "GameName" }
-     */
-    @PostMapping("/api/leaderboard")
-    public ResponseEntity<?> addScore(@RequestBody ScoreCounter scoreEntry) {
-        try {
-            // Validate input
-            if (scoreEntry.getUser() == null || scoreEntry.getUser().trim().isEmpty()) {
-                return ResponseEntity.badRequest().body("User name is required");
-            }
-            if (scoreEntry.getScore() < 0) {
-                return ResponseEntity.badRequest().body("Score must be non-negative");
-            }
-            
-            // Set default game name if not provided
-            if (scoreEntry.getGameName() == null || scoreEntry.getGameName().trim().isEmpty()) {
-                scoreEntry.setGameName("Global");
-            }
-            
-            // Save the score
-            ScoreCounter savedEntry = leaderboardService.addScore(scoreEntry);
-            
-            System.out.println("Leaderboard: Added new score - User: " + 
-                scoreEntry.getUser() + ", Score: " + scoreEntry.getScore() + 
-                ", Game: " + scoreEntry.getGameName());
-            
-            return ResponseEntity.status(HttpStatus.CREATED).body(savedEntry);
-        } catch (Exception e) {
-            System.err.println("Error adding score: " + e.getMessage());
-            e.printStackTrace();
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body("Failed to add score: " + e.getMessage());
         }
     }
     
