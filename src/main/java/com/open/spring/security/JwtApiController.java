@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
@@ -40,11 +41,23 @@ public class JwtApiController {
 	@Autowired
 	private PersonDetailsService personDetailsService;
 
-    // @CrossOrigin(origins = "http://127.0.0.1:4500")
-	@CrossOrigin(origins = "http://localhost:4500")
+	@Value("${jwt.cookie.secure:true}")  // Defaults to production setting if property not found
+	private boolean cookieSecure;
+
+	@Value("${jwt.cookie.same-site:None}")  // Defaults to production setting if property not found
+	private String cookieSameSite;
+
+	@Value("${jwt.cookie.max-age:43200}")  // 12 hours
+	private long cookieMaxAge;
+
 	@PostMapping("/authenticate")
 	public ResponseEntity<?> createAuthenticationToken(@RequestBody Person authenticationRequest) throws Exception {
-		authenticate(authenticationRequest.getUid(), authenticationRequest.getPassword());
+		try {
+			authenticate(authenticationRequest.getUid(), authenticationRequest.getPassword());
+		} catch (Exception e) {
+			return new ResponseEntity<>("Authentication failed: " + e.getMessage(), HttpStatus.UNAUTHORIZED);
+		}
+		
 		final UserDetails userDetails = personDetailsService
 				.loadUserByUsername(authenticationRequest.getUid());
 
@@ -62,10 +75,10 @@ public class JwtApiController {
 
 		final ResponseCookie tokenCookie = ResponseCookie.from("jwt_java_spring", token)
 			.httpOnly(false)
-			.secure(true)
+			.secure(cookieSecure)  // Configured via jwt.cookie.secure in application.properties
 			.path("/")
-			.maxAge(3600)
-			.sameSite("None; Secure")
+			.maxAge(cookieMaxAge)  // Configured via jwt.cookie.max-age in application.properties
+			.sameSite(cookieSameSite)  // Configured via jwt.cookie.same-site in application.properties
 			.build();
 
 		return ResponseEntity.ok().header(HttpHeaders.SET_COOKIE, tokenCookie.toString()).body(authenticationRequest.getUid() + " was authenticated successfully");
@@ -87,7 +100,7 @@ public class JwtApiController {
 
     private final SecurityContextLogoutHandler logoutHandler = new SecurityContextLogoutHandler();
 	
-		@PostMapping("/my/logout")
+		@PostMapping("/api/logout")
 		public String performLogout(Authentication authentication, HttpServletRequest request, HttpServletResponse response) {
 			// Perform logout using SecurityContextLogoutHandler
 			logoutHandler.logout(request, response, authentication);
@@ -95,10 +108,10 @@ public class JwtApiController {
 			// Expire the JWT token immediately by setting a past expiration date
 			ResponseCookie cookie = ResponseCookie.from("jwt_java_spring", "")
 				.httpOnly(false)
-				.secure(true)
+				.secure(cookieSecure)  // Configured via jwt.cookie.secure in application.properties
 				.path("/")
 				.maxAge(0)  // Set maxAge to 0 to expire the cookie immediately
-				.sameSite("None; Secure")
+				.sameSite(cookieSameSite)  // Configured via jwt.cookie.same-site in application.properties
 				.build();
 	
 			// Set the cookie in the response to effectively "remove" the JWT
