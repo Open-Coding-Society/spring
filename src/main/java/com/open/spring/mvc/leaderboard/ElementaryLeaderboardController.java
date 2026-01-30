@@ -1,5 +1,6 @@
 package com.open.spring.mvc.leaderboard;
 
+import com.open.spring.mvc.leaderboard.InputScore;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.HttpStatus;
@@ -11,12 +12,12 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.security.access.prepost.PreAuthorize;
 import java.util.List;
 
 /**
  * API Controller for Elementary Leaderboard
  * CORS configured for public access without authentication
+ * Security is handled in SecurityConfig.java
  * 
  * Endpoints:
  * - GET /api/elementary-leaderboard - Get all elementary scores
@@ -39,7 +40,6 @@ import java.util.List;
     },
     allowCredentials = "false"
 )
-@PreAuthorize("permitAll()") // Allow public access to all methods in this controller
 public class ElementaryLeaderboardController {
     
     @Autowired

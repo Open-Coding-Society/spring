@@ -87,8 +87,12 @@ public class SecurityConfig {
                         .requestMatchers("/api/pausemenu/**").permitAll()
                         // Leaderboard should be public - displays scores without authentication
                         .requestMatchers("/api/leaderboard/**").permitAll()
-                        // Elementary Leaderboard should be public - displays scores without authentication
-                        .requestMatchers("/api/elementary-leaderboard/**").permitAll()
+                        // Elementary Leaderboard should be public - ALL HTTP methods
+                        .requestMatchers(HttpMethod.GET, "/api/elementary-leaderboard/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/elementary-leaderboard/**").permitAll()
+                        .requestMatchers(HttpMethod.DELETE, "/api/elementary-leaderboard/**").permitAll()
+                        .requestMatchers(HttpMethod.PUT, "/api/elementary-leaderboard/**").permitAll()
+                        .requestMatchers(HttpMethod.OPTIONS, "/api/elementary-leaderboard/**").permitAll()
                         // Frontend calls gamer score endpoint; make it public
                         .requestMatchers("/api/gamer/**").permitAll()
                         // ==========================================
