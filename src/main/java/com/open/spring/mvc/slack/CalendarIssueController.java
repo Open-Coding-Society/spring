@@ -25,6 +25,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.open.spring.mvc.comment.CommentJPA;
+
 @RestController
 @RequestMapping("/api/calendar/issues")
 @CrossOrigin(origins = { "http://127.0.0.1:4500", "https://pages.opencodingsociety.com" }, allowCredentials = "true")
@@ -32,6 +34,9 @@ public class CalendarIssueController {
 
     @Autowired
     private CalendarIssueService calendarIssueService;
+
+    @Autowired
+    private CommentJPA commentJPA;
 
     @GetMapping
         public ResponseEntity<List<Map<String, Object>>> getIssues(
@@ -70,7 +75,7 @@ public class CalendarIssueController {
         List<Map<String, Object>> data = calendarIssueService
             .getIssues(status, priority, parsedDueDate, eventId, q, author, tags, startDate, endDate, groupName, requesterUid, privileged)
             .stream()
-            .map(this::toResponse)
+            .map(issue -> toResponse(issue, requesterUid))
             .collect(Collectors.toList());
         return ResponseEntity.ok(data);
     }
@@ -83,7 +88,7 @@ public class CalendarIssueController {
         }
 
         return calendarIssueService.getIssueById(id, userDetails.getUsername(), hasPrivilegedRole(userDetails))
-                .<ResponseEntity<?>>map(issue -> ResponseEntity.ok(toResponse(issue)))
+            .<ResponseEntity<?>>map(issue -> ResponseEntity.ok(toResponse(issue, userDetails.getUsername())))
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
                         .body(Map.of("message", "Issue not found")));
     }
@@ -98,7 +103,7 @@ public class CalendarIssueController {
         try {
             CalendarIssue issue = fromPayload(payload);
             CalendarIssue saved = calendarIssueService.createIssue(issue, userDetails.getUsername());
-            return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(saved));
+            return ResponseEntity.status(HttpStatus.CREATED).body(toResponse(saved, userDetails.getUsername()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
         } catch (Exception e) {
@@ -117,7 +122,7 @@ public class CalendarIssueController {
         try {
             CalendarIssue issue = fromPayload(payload);
             return calendarIssueService.updateIssue(id, issue, userDetails.getUsername(), hasPrivilegedRole(userDetails))
-                    .<ResponseEntity<?>>map(updated -> ResponseEntity.ok(toResponse(updated)))
+                    .<ResponseEntity<?>>map(updated -> ResponseEntity.ok(toResponse(updated, userDetails.getUsername())))
                     .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
                             .body(Map.of("message", "Issue not found")));
         } catch (IllegalArgumentException e) {
@@ -140,7 +145,7 @@ public class CalendarIssueController {
             CalendarIssueStatus status = parseStatus(statusValue);
             return calendarIssueService.updateIssueStatus(id, status, userDetails.getUsername(),
                             hasPrivilegedRole(userDetails))
-                    .<ResponseEntity<?>>map(updated -> ResponseEntity.ok(toResponse(updated)))
+                    .<ResponseEntity<?>>map(updated -> ResponseEntity.ok(toResponse(updated, userDetails.getUsername())))
                     .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
                             .body(Map.of("message", "Issue not found")));
         } catch (IllegalArgumentException e) {
@@ -179,7 +184,7 @@ public class CalendarIssueController {
         return issue;
     }
 
-    private Map<String, Object> toResponse(CalendarIssue issue) {
+    private Map<String, Object> toResponse(CalendarIssue issue, String requesterUid) {
         Map<String, Object> data = new HashMap<>();
         data.put("id", issue.getId());
         data.put("title", issue.getTitle());
@@ -193,6 +198,10 @@ public class CalendarIssueController {
         data.put("tags", parseTags(issue.getTags()));
         data.put("createdAt", issue.getCreatedAt() == null ? null : issue.getCreatedAt().toString());
         data.put("updatedAt", issue.getUpdatedAt() == null ? null : issue.getUpdatedAt().toString());
+        data.put("commentCount", issue.getId() == null ? 0L : commentJPA.countByAssignment(issueAssignmentKey(issue.getId())));
+        data.put("starCount", issue.getId() == null ? 0L : commentJPA.countByAssignment(issueStarAssignmentKey(issue.getId())));
+        data.put("starred", issue.getId() != null && requesterUid != null && !requesterUid.isBlank()
+            && commentJPA.existsByAssignmentAndAuthor(issueStarAssignmentKey(issue.getId()), requesterUid));
         return data;
     }
 
@@ -259,6 +268,14 @@ public class CalendarIssueController {
         }
         String trimmed = value.trim();
         return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String issueAssignmentKey(Long issueId) {
+        return "issue-" + issueId;
+    }
+
+    private String issueStarAssignmentKey(Long issueId) {
+        return issueAssignmentKey(issueId) + "::star";
     }
 
     private boolean hasPrivilegedRole(UserDetails userDetails) {
