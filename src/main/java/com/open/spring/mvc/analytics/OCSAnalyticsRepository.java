@@ -112,4 +112,11 @@ public interface OCSAnalyticsRepository extends JpaRepository<OCSAnalytics, Long
      * Get average scroll depth
      */
     @Query("SELECT AVG(a.scrollDepthPercentage) FROM OCSAnalytics a WHERE a.person = :person")
-    Optional<Double> getAverageScrollDepth(@Param("person") Person person);}
+    Optional<Double> getAverageScrollDepth(@Param("person") Person person);
+
+    /**
+     * Get total bathroom time for user
+     */
+    @Query("SELECT SUM(a.sessionDurationSeconds) FROM OCSAnalytics a WHERE a.person = :person AND a.questName = 'Bathroom Pass'")
+    Optional<Long> getTotalBathroomTimeSpentSeconds(@Param("person") Person person);
+}
