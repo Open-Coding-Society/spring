@@ -134,26 +134,27 @@ public class EmailNotificationService {
             return;
         }
 
-        if (issueOwnerUid.equals(comment.getAuthor())) {
-            return;
+        Person recipient = personRepository.findByUid(issueOwnerUid);
+        String recipientEmail = recipient == null ? null : recipient.getEmail();
+        if (recipientEmail == null || recipientEmail.isBlank()) {
+            recipientEmail = resolveRecipientEmail();
         }
 
-        Person recipient = personRepository.findByUid(issueOwnerUid);
-        if (recipient == null || recipient.getEmail() == null || recipient.getEmail().isBlank()) {
+        if (recipientEmail == null || recipientEmail.isBlank()) {
             return;
         }
 
         String issueTitle = issue.getTitle() == null ? "your issue" : issue.getTitle();
         String subject = "Open Coding Society: new comment on " + issueTitle;
         String body = new StringBuilder()
-                .append(comment.getAuthor()).append(" commented on your issue:\n\n")
+                .append(comment.getAuthor()).append(" commented on an issue you created:\n\n")
                 .append(issueTitle).append("\n")
                 .append("Issue ID: ").append(issue.getId()).append("\n\n")
                 .append(comment.getText())
                 .toString();
 
         try {
-            Email.sendEmail(recipient.getEmail(), subject, body);
+            Email.sendEmail(recipientEmail, subject, body);
         } catch (Exception ex) {
             ex.printStackTrace();
         }

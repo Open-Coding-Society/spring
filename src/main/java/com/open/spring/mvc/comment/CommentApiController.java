@@ -17,12 +17,14 @@ import org.springframework.web.bind.annotation.RestController;
 
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.web.bind.annotation.CrossOrigin;
 
 import com.open.spring.mvc.slack.CalendarIssueService;
 import com.open.spring.mvc.slack.EmailNotificationService;
 
 @RestController
 @RequestMapping("/api/Comment")
+@CrossOrigin(origins = { "http://127.0.0.1:4500", "https://pages.opencodingsociety.com" }, allowCredentials = "true")
 public class CommentApiController {
 
     @Autowired

@@ -56,4 +56,18 @@ public class CalendarIssueServiceTest {
         assertEquals(1, res.size());
         assertEquals("Test", res.get(0).getTitle());
     }
+
+    @Test
+    public void testLegacyIssueWithoutOwnerOrGroupRemainsVisible() {
+        CalendarIssue legacy = new CalendarIssue();
+        legacy.setTitle("Legacy issue");
+        legacy.setDueDate(LocalDate.of(2026, 2, 14));
+        when(calendarIssueRepository.findAll()).thenReturn(List.of(legacy));
+
+        List<CalendarIssue> res = issueService.getIssues(null, null, null, null, null,
+                null, null, null, null, null, "alice", false);
+
+        assertEquals(1, res.size());
+        assertEquals("Legacy issue", res.get(0).getTitle());
+    }
 }

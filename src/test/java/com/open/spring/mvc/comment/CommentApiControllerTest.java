@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.Map;
+import java.util.List;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -79,5 +80,18 @@ public class CommentApiControllerTest {
         Map<?, ?> body = (Map<?, ?>) response.getBody();
         assertEquals(Boolean.TRUE, body.get("starred"));
         assertEquals(1L, body.get("starCount"));
+    }
+
+    @Test
+    public void getCommentsByIssueReturnsCommentsForAuthenticatedUser() {
+        Comment comment = new Comment("issue-12", "Looks good", "alice");
+        when(commentJPA.findByAssignmentOrderByTimestampDesc("issue-12")).thenReturn(List.of(comment));
+
+        UserDetails userDetails = User.withUsername("alice").password("ignored").authorities("ROLE_USER").build();
+        ResponseEntity<List<Comment>> response = controller.getCommentsByIssue(12L, userDetails);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertNotNull(response.getBody());
+        assertEquals(1, response.getBody().size());
     }
 }

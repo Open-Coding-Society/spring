@@ -150,13 +150,17 @@ public class CalendarIssueService {
             return false;
         }
 
+        if (issue.getOwnerUid() == null || issue.getOwnerUid().isBlank()) {
+            return true;
+        }
+
         if (requesterUid.equals(issue.getOwnerUid())) {
             return true;
         }
 
         String issueGroupName = issue.getGroupName();
         if (issueGroupName == null || issueGroupName.isBlank()) {
-            return false;
+            return true;
         }
 
         Person requester = personJpaRepository.findByUid(requesterUid);
