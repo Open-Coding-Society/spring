@@ -520,6 +520,10 @@ public class OCSAnalyticsController {
                 Double avgAccuracy = analyticsRepository.getAverageAccuracy(person).orElse(0.0);
                 summary.put("averageAccuracyPercentage", avgAccuracy);
                 
+                Long bathroomSeconds = analyticsRepository.getTotalBathroomTimeSpentSeconds(person).orElse(0L);
+                summary.put("bathroomTimeSeconds", bathroomSeconds);
+                summary.put("bathroomTimeFormatted", formatSeconds(bathroomSeconds));
+                
                 userSummaries.add(summary);
             }
             
