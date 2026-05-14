@@ -17,4 +17,6 @@ public interface CommentJPA extends JpaRepository<Comment, Long> {
     boolean existsByAssignmentAndAuthor(String assignment, String author);
 
     void deleteByAssignmentAndAuthor(String assignment, String author);
+
+    List<Comment> findByAssignmentAndText(String assignment, String text);
 }

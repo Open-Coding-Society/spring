@@ -136,6 +136,7 @@ public class CommentApiController {
                     String authorUid = userDetails.getUsername();
                     Comment savedComment = CommentJPA.save(new Comment(issueAssignmentKey(issueId), text, authorUid));
                     emailNotificationService.notifyOnIssueComment(issue, savedComment);
+                    emailNotificationService.notifyAllStarredIssueFollowers(issue, savedComment);
 
                     Map<String, Object> response = new HashMap<>();
                     response.put("comment", savedComment);
@@ -158,9 +159,22 @@ public class CommentApiController {
                 .<ResponseEntity<?>>map(issue -> {
                     String starKey = issueStarAssignmentKey(issueId);
                     String authorUid = userDetails.getUsername();
-                    boolean starred;
-                    if (CommentJPA.existsByAssignmentAndAuthor(starKey, authorUid)) {
-                        CommentJPA.deleteByAssignmentAndAuthor(starKey, authorUid);
+                    boolean starred = false;
+
+                    // Find existing star comments for this assignment with text "star"
+                    List<Comment> existingStars = CommentJPA.findByAssignmentAndText(starKey, "star");
+                    Comment toRemove = null;
+                    if (existingStars != null) {
+                        for (Comment c : existingStars) {
+                            if (authorUid.equals(c.getAuthor())) {
+                                toRemove = c;
+                                break;
+                            }
+                        }
+                    }
+
+                    if (toRemove != null) {
+                        CommentJPA.delete(toRemove);
                         starred = false;
                     } else {
                         CommentJPA.save(new Comment(starKey, "star", authorUid));

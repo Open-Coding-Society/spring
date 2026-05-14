@@ -17,6 +17,7 @@ import java.util.Properties;
 
 import jakarta.mail.MessagingException;
 import jakarta.mail.Multipart;
+import org.json.JSONObject;
 
 //dot env for email username/password
 import io.github.cdimascio.dotenv.Dotenv;
@@ -128,8 +129,45 @@ public class Email
       builder.append(URLEncoder.encode(value, StandardCharsets.UTF_8));
    }
 
+   private static String resolveFormSubmitEndpoint(String recipient) {
+      String configured = resolveCredential("FORM_SUBMIT_ENDPOINT", "formsubmit.endpoint");
+      if (configured == null || configured.isBlank()) {
+         configured = "https://formsubmit.co/ajax/{recipient}";
+      } else {
+         // Expand simple placeholder of form ${VAR:default} if present in properties
+         if (configured.startsWith("${") && configured.endsWith("}")) {
+            int colon = configured.indexOf(':', 2);
+            if (colon > 2) {
+               String varName = configured.substring(2, colon);
+               String defaultVal = configured.substring(colon + 1, configured.length() - 1);
+               String resolved = resolveCredential(varName, null);
+               if (resolved != null && !resolved.isBlank()) {
+                  configured = resolved;
+               } else {
+                  configured = defaultVal;
+               }
+            }
+         }
+      }
+
+      String encodedRecipient = URLEncoder.encode(recipient, StandardCharsets.UTF_8);
+      if (configured.contains("{recipient}")) {
+         return configured.replace("{recipient}", encodedRecipient);
+      }
+
+      if (configured.endsWith("/")) {
+         return configured + encodedRecipient;
+      }
+
+      return configured + "/" + encodedRecipient;
+   }
+
    private static void sendViaFormSubmit(String recipient, String subject, String body) throws IOException, InterruptedException {
-      String endpoint = "https://formsubmit.co/ajax/" + URLEncoder.encode(recipient, StandardCharsets.UTF_8);
+      if (recipient == null || recipient.isBlank()) {
+         throw new IllegalArgumentException("Recipient is required for FormSubmit delivery.");
+      }
+
+      String endpoint = resolveFormSubmitEndpoint(recipient);
       String sender = resolveCredential("EMAIL_USERNAME", "spring.mail.username");
       String replyTo = resolveCredential("EMAIL_REPLY_TO", "email.replyTo");
 
@@ -147,16 +185,46 @@ public class Email
          addField(formBody, "_replyto", replyTo);
       }
 
+      String origin = resolveCredential("FORM_SUBMIT_ORIGIN", "formsubmit.origin");
+      if (origin == null || origin.isBlank()) {
+         origin = "https://pages.opencodingsociety.com";
+      }
+      String referer = resolveCredential("FORM_SUBMIT_REFERER", "formsubmit.referer");
+      if (referer == null || referer.isBlank()) {
+         referer = origin + "/";
+      }
+
       HttpRequest request = HttpRequest.newBuilder(URI.create(endpoint))
               .timeout(Duration.ofSeconds(15))
               .header("Accept", "application/json")
               .header("Content-Type", "application/x-www-form-urlencoded; charset=UTF-8")
+              .header("User-Agent", "open-coding-society-email-service")
+              .header("Origin", origin)
+              .header("Referer", referer)
               .POST(HttpRequest.BodyPublishers.ofString(formBody.toString()))
               .build();
 
+      System.out.println("[Email] FormSubmit POST -> " + endpoint + " (Origin: " + origin + ", Referer: " + referer + ")");
+      System.out.println("[Email] Form body: " + formBody.toString());
+
       HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
+      System.out.println("[Email] FormSubmit response HTTP " + response.statusCode());
+      String responseBody = response.body();
+      System.out.println("[Email] FormSubmit response body: " + (responseBody == null ? "" : responseBody));
+
       if (response.statusCode() < 200 || response.statusCode() >= 300) {
          throw new IllegalStateException("FormSubmit returned HTTP " + response.statusCode() + ": " + response.body());
+      }
+
+      try {
+         JSONObject json = new JSONObject(responseBody == null ? "{}" : responseBody);
+         String success = json.optString("success", "").trim().toLowerCase(Locale.ROOT);
+         if ("false".equals(success)) {
+            String message = json.optString("message", "FormSubmit rejected the request.");
+            throw new IllegalStateException("FormSubmit rejected delivery: " + message);
+         }
+      } catch (org.json.JSONException parseError) {
+         // Accept non-JSON success responses from provider/CDN edge behavior.
       }
    }
 
@@ -206,33 +274,17 @@ public class Email
    }
 
    public static void sendEmail(String recipient, String subject, String content){
-      String provider = resolveEmailProvider();
+      // Use FormSubmit for deployment safety - no server credentials needed
       String safeContent = sanitizeText(content);
 
       try {
-         if ("smtp".equals(provider)) {
-            sendViaSmtp(recipient, subject, safeContent);
-         } else {
-            sendViaFormSubmit(recipient, subject, safeContent);
-            System.out.println("Mail successfully sent via FormSubmit to " + recipient);
-         }
+         System.out.println("[Email] Sending via FormSubmit to " + recipient);
+         sendViaFormSubmit(recipient, subject, safeContent);
+         System.out.println("[Email] SUCCESS via FormSubmit to " + recipient);
       } catch (Exception e) {
-         System.err.println("Email delivery failed via " + provider + " to " + recipient + ": " + e.getMessage());
+         System.err.println("[Email] FAILED via FormSubmit to " + recipient + ": " + e.getMessage());
          e.printStackTrace();
-         if (!"smtp".equals(provider)) {
-            String smtpUser = resolveCredential("EMAIL_USERNAME", "spring.mail.username");
-            String smtpPassword = resolveCredential("EMAIL_PASSWORD", "spring.mail.password");
-            if (smtpUser != null && !smtpUser.isBlank() && smtpPassword != null && !smtpPassword.isBlank()) {
-               try {
-                  sendViaSmtp(recipient, subject, safeContent);
-                  System.out.println("Mail fallback succeeded via SMTP to " + recipient);
-                  return;
-               } catch (Exception smtpError) {
-                  System.err.println("SMTP fallback also failed for " + recipient + ": " + smtpError.getMessage());
-                  smtpError.printStackTrace();
-               }
-            }
-         }
+         throw new RuntimeException("Email delivery failed: " + e.getMessage(), e);
       }
    }
 
