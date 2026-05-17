@@ -327,6 +327,31 @@ public class CalendarEventController {
         return calendarEventService.getAllEvents();
     }
 
+    /**
+     * GET /api/calendar/events/filter
+     * Optional query params: type, groupName, individual, classPeriod, start, end (YYYY-MM-DD)
+     */
+    @GetMapping("/events/filter")
+    public List<CalendarEvent> getFilteredEvents(
+            @RequestParam(required = false) String type,
+            @RequestParam(required = false) String groupName,
+            @RequestParam(required = false) String individual,
+            @RequestParam(required = false) String classPeriod,
+            @RequestParam(required = false) String start,
+            @RequestParam(required = false) String end) {
+
+        java.time.LocalDate startDate = null;
+        java.time.LocalDate endDate = null;
+        try {
+            if (start != null && !start.isBlank()) startDate = java.time.LocalDate.parse(start);
+            if (end != null && !end.isBlank()) endDate = java.time.LocalDate.parse(end);
+        } catch (Exception e) {
+            return List.of();
+        }
+
+        return calendarEventService.filterEvents(type, groupName, individual, classPeriod, startDate, endDate);
+    }
+
     @GetMapping("/events/range")
     public List<CalendarEvent> getEventsWithinDateRange(@RequestParam String start, @RequestParam String end) {
         return calendarEventService.getEventsWithinDateRange(LocalDate.parse(start), LocalDate.parse(end));

@@ -30,7 +30,7 @@ public class CalendarIssueService {
         private GroupsJpaRepository groupsJpaRepository;
 
     public List<CalendarIssue> getIssues(String status, String priority, LocalDate dueDate, String eventId, String q,
-            String requesterUid, boolean privileged) {
+            String author, String tags, LocalDate start, LocalDate end, String groupName, String requesterUid, boolean privileged) {
         List<CalendarIssue> accessibleIssues = privileged
                 ? calendarIssueRepository.findAll()
             : calendarIssueRepository.findAll().stream()
@@ -43,9 +43,34 @@ public class CalendarIssueService {
                 .filter(issue -> dueDate == null || dueDate.equals(issue.getDueDate()))
                 .filter(issue -> eventId == null || eventId.isBlank() || eventId.equals(issue.getEventId()))
                 .filter(issue -> matchesSearch(issue, q))
+                .filter(issue -> author == null || author.isBlank() || (issue.getOwnerUid() != null && issue.getOwnerUid().equals(author)))
+                .filter(issue -> tags == null || tags.isBlank() || matchesTags(issue, tags))
+                .filter(issue -> groupName == null || groupName.isBlank() || (issue.getGroupName() != null && issue.getGroupName().equalsIgnoreCase(groupName)))
+                .filter(issue -> inDateRange(issue, start, end))
                 .sorted(Comparator.comparing(CalendarIssue::getDueDate)
                         .thenComparing(CalendarIssue::getUpdatedAt).reversed())
                 .collect(Collectors.toList());
+    }
+
+    private boolean inDateRange(CalendarIssue issue, LocalDate start, LocalDate end) {
+        if (start == null && end == null) return true;
+        java.time.LocalDateTime createdDt = issue.getCreatedAt();
+        if (createdDt == null) return false;
+        LocalDate created = createdDt.toLocalDate();
+        if (start != null && created.isBefore(start)) return false;
+        if (end != null && created.isAfter(end)) return false;
+        return true;
+    }
+
+    private boolean matchesTags(CalendarIssue issue, String rawTags) {
+        if (rawTags == null || rawTags.isBlank()) return true;
+        String[] parts = rawTags.split(",");
+        String issueTags = issue.getTags() == null ? "" : issue.getTags().toLowerCase(Locale.ROOT);
+        for (String p : parts) {
+            String t = p.trim().toLowerCase(Locale.ROOT);
+            if (!t.isEmpty() && !issueTags.contains(t)) return false;
+        }
+        return true;
     }
 
     public Optional<CalendarIssue> getIssueById(Long id, String requesterUid, boolean privileged) {
@@ -125,13 +150,17 @@ public class CalendarIssueService {
             return false;
         }
 
+        if (issue.getOwnerUid() == null || issue.getOwnerUid().isBlank()) {
+            return true;
+        }
+
         if (requesterUid.equals(issue.getOwnerUid())) {
             return true;
         }
 
         String issueGroupName = issue.getGroupName();
         if (issueGroupName == null || issueGroupName.isBlank()) {
-            return false;
+            return true;
         }
 
         Person requester = personJpaRepository.findByUid(requesterUid);
