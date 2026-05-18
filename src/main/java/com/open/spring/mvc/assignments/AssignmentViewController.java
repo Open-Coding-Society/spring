@@ -101,12 +101,8 @@ public class AssignmentViewController {
         }
 
         Assignment assignment = new Assignment(name, type, description, points, normalizedDueDate);
-        if (customId != null) {
-            if (assignmentRepository.findById(customId).isPresent()) {
-                throw new ResponseStatusException(HttpStatus.CONFLICT, "Assignment ID already exists");
-            }
-            assignment.setId(customId);
-        }
+        // Assignment.id is @GeneratedValue; setting it manually causes merge/stale-state issues.
+        // Keep customId as a tolerated input for backward-compatible form posts, but ignore it.
 
         assignmentRepository.save(assignment);
         return "redirect:/mvc/assignments/tracker-v2";
