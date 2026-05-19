@@ -251,6 +251,8 @@ public class SecurityConfig {
         configuration.addAllowedOriginPattern("http://127.0.0.1:4599");
         configuration.addAllowedOriginPattern("http://127.0.0.1:4600");
         configuration.addAllowedOriginPattern("http://127.0.0.1:8585");
+        configuration.addAllowedOriginPattern("http://127.0.0.1:4000");
+        configuration.addAllowedOriginPattern("http://localhost:4000");
         configuration.addAllowedOriginPattern("http://localhost:4500");
         configuration.addAllowedOriginPattern("http://localhost:4599");
         configuration.addAllowedOriginPattern("http://localhost:4600");

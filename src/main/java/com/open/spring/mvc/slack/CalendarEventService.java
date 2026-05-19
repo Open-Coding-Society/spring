@@ -116,6 +116,26 @@ public class CalendarEventService {
         return calendarEventRepository.findAll();
     }
 
+    /**
+     * Filter events by optional criteria. If start/end provided, restrict to that range first.
+     */
+    public List<CalendarEvent> filterEvents(String type, String groupName, String individual, String classPeriod,
+            LocalDate start, LocalDate end) {
+        List<CalendarEvent> source;
+        if (start != null && end != null) {
+            source = getEventsWithinDateRange(start, end);
+        } else {
+            source = getAllEvents();
+        }
+
+        return source.stream()
+                .filter(e -> type == null || type.isBlank() || (e.getType() != null && e.getType().equalsIgnoreCase(type)))
+                .filter(e -> groupName == null || groupName.isBlank() || (e.getGroupName() != null && e.getGroupName().equalsIgnoreCase(groupName)))
+                .filter(e -> individual == null || individual.isBlank() || (e.getIndividual() != null && e.getIndividual().equalsIgnoreCase(individual)))
+                .filter(e -> classPeriod == null || classPeriod.isBlank() || (e.getClassPeriod() != null && e.getClassPeriod().equalsIgnoreCase(classPeriod)))
+                .toList();
+    }
+
     public List<CalendarEvent> getEventsWithinDateRange(LocalDate startDate, LocalDate endDate) {
         return calendarEventRepository.findByDateBetween(startDate, endDate);
     }
