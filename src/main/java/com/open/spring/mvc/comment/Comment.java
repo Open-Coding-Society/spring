@@ -36,6 +36,8 @@ public class Comment {
 
     private String timestamp;
 
+    private Long parentCommentId;  // For nested replies/threads
+
     private static DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     // Constructor with timestamp initialization
