@@ -146,6 +146,7 @@ public class AssignmentsApiController {
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         requireTeacherOrAdmin(userDetails);
+        logger.debug("createAssignment called with name='{}' type='{}' points={} dueDate='{}' by user={}", name, type, points, dueDate, userDetails==null?"<anon>":userDetails.getUsername());
         Assignment newAssignment = new Assignment(name, type, description, points, dueDate);
         normalizeAssignmentSequenceForSqlite();
         Assignment savedAssignment = assignmentRepo.save(newAssignment);
@@ -198,6 +199,9 @@ public class AssignmentsApiController {
             @RequestParam(required = false, defaultValue = "") String description,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
+        // Debug log input
+        logger.debug("autoCreateAssignment called with name='{}' contentUrl='{}' description='{}' userDetails={}", name, contentUrl, description, userDetails==null?"<anon>":userDetails.getUsername());
+
         // Check authentication - any authenticated user can create assignments from frontmatter
         if (userDetails == null) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Authentication required"));
