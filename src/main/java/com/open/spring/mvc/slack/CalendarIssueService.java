@@ -342,6 +342,23 @@ public class CalendarIssueService {
         return calendarIssueRepository.save(issue);
     }
 
+    public void ensureGroupStarsForIssue(CalendarIssue issue) {
+        createGroupStarsForIssue(issue);
+    }
+
+    public boolean isIssueAssignedToUserGroups(CalendarIssue issue, String requesterUid) {
+        if (issue == null || requesterUid == null || requesterUid.isBlank()) {
+            return false;
+        }
+
+        Person requester = personJpaRepository.findByUid(requesterUid);
+        if (requester == null) {
+            return false;
+        }
+
+        return isIssueAssignedToUserGroups(issue, requester);
+    }
+
     /**
      * Get all issues assigned to any of the user's groups
      * @param userUid - User UID
@@ -355,7 +372,12 @@ public class CalendarIssueService {
                 .findFirst()
                 .orElse(null);
 
-        if (user == null || user.getGroups() == null || user.getGroups().isEmpty()) {
+        if (user == null) {
+            return List.of();
+        }
+
+        List<Groups> userGroups = groupsJpaRepository.findGroupsByPersonIdWithMembers(user.getId());
+        if (userGroups == null || userGroups.isEmpty()) {
             return List.of();
         }
 
@@ -374,12 +396,13 @@ public class CalendarIssueService {
      * @return true if issue is assigned to any user group
      */
     private boolean isIssueAssignedToUserGroups(CalendarIssue issue, Person user) {
-        if (issue.getAssignedGroups() == null || issue.getAssignedGroups().isEmpty()) {
+        if (issue == null || issue.getAssignedGroups() == null || issue.getAssignedGroups().isEmpty() || user == null) {
             return false;
         }
 
         String assignedGroups = issue.getAssignedGroups();
-        for (Groups group : user.getGroups()) {
+        List<Groups> userGroups = groupsJpaRepository.findGroupsByPersonIdWithMembers(user.getId());
+        for (Groups group : userGroups) {
             String groupId = group.getId() == null ? "" : group.getId().toString();
             String groupName = group.getName() == null ? "" : group.getName();
             String groupPeriod = group.getPeriod() == null ? "" : group.getPeriod();

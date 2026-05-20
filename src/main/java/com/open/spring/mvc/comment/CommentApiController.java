@@ -244,6 +244,7 @@ public class CommentApiController {
                 .<ResponseEntity<?>>map(issue -> {
                     String starKey = issueStarAssignmentKey(issueId);
                     String authorUid = userDetails.getUsername();
+                    boolean starLocked = calendarIssueService.isIssueAssignedToUserGroups(issue, authorUid);
                     boolean starred = false;
 
                     // Find existing star comments for this assignment with text "star"
@@ -259,6 +260,10 @@ public class CommentApiController {
                     }
 
                     if (toRemove != null) {
+                        if (starLocked) {
+                            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                    .body(Map.of("message", "This issue is auto-starred because it is assigned to one of your groups."));
+                        }
                         CommentJPA.delete(toRemove);
                         starred = false;
                     } else {

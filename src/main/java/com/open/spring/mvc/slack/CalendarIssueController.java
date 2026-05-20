@@ -267,6 +267,7 @@ public class CalendarIssueController {
         data.put("starCount", issue.getId() == null ? 0L : commentJPA.countByAssignment(issueStarAssignmentKey(issue.getId())));
         data.put("starred", issue.getId() != null && requesterUid != null && !requesterUid.isBlank()
             && commentJPA.existsByAssignmentAndAuthor(issueStarAssignmentKey(issue.getId()), requesterUid));
+        data.put("starLocked", issue.getId() != null && calendarIssueService.isIssueAssignedToUserGroups(issue, requesterUid));
         return data;
     }
 
@@ -380,6 +381,7 @@ public class CalendarIssueController {
                         issue.setAssignedGroups(jsonGroups);
                     }
                     CalendarIssue updated = calendarIssueService.saveIssue(issue);
+                    calendarIssueService.ensureGroupStarsForIssue(updated);
                     return ResponseEntity.ok(updated);
                 })
                 .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
