@@ -2,11 +2,9 @@ package com.open.spring.mvc.assignments;
 
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -28,7 +26,6 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.person.Person;
@@ -37,7 +34,6 @@ import com.open.spring.mvc.synergy.SynergyGrade;
 import com.open.spring.mvc.synergy.SynergyGradeJpaRepository;
 
 import jakarta.transaction.Transactional;
-import javassist.tools.web.BadHttpRequest;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -192,16 +188,32 @@ public class AssignmentSubmissionAPIController {
      */
     @PostMapping("/{assignmentId}")
     public ResponseEntity<?> submitAssignment(
+            @PathVariable Long assignmentId,
             @RequestBody SubmissionRequestDto requestData
     ) {
-        Assignment assignment = assignmentRepo.findById(requestData.assignmentId).orElse(null);
+        Long resolvedAssignmentId = requestData.assignmentId != null ? requestData.assignmentId : assignmentId;
+        Assignment assignment = assignmentRepo.findById(resolvedAssignmentId).orElse(null);
 
         if (assignment != null) {
+            boolean isGroupSubmission = Boolean.TRUE.equals(requestData.isGroupSubmission);
+
+            if (requestData.submitterId == null) {
+                Map<String, String> error = new HashMap<>();
+                error.put("error", "Submitter not found");
+                return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+            }
+
             Submitter submitter;
-            if (requestData.isGroupSubmission) {
+            if (isGroupSubmission) {
                 submitter = groupRepo.findById(requestData.submitterId).orElse(null);
             } else {
                 submitter = personRepo.findById(requestData.submitterId).orElse(null);
+            }
+
+            if (submitter == null) {
+                Map<String, String> error = new HashMap<>();
+                error.put("error", "Submitter not found");
+                return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
             }
 
             AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, requestData.content, requestData.comment,requestData.isLate);
