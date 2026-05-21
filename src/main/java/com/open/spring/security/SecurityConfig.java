@@ -193,6 +193,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/ocs-analytics/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // ===================================
 
+                        // Capstone projects — public read, auth required for writes
+                        .requestMatchers(HttpMethod.GET, "/api/capstones", "/api/capstones/**").permitAll()
+
                         // ========== DEFAULT: ALL OTHER API ENDPOINTS ==========
                         // Secure by default - any endpoint not explicitly listed above requires authentication
                         .requestMatchers("/api/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")

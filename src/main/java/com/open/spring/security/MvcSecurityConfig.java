@@ -109,6 +109,7 @@ public class MvcSecurityConfig {
                 .requestMatchers("/mvc/progress/read").hasAnyAuthority("ROLE_ADMIN", "ROLE_TEACHER")
                 .requestMatchers("/ws-chat/**").permitAll()
                 .requestMatchers("/run/**").permitAll()  // Java runner endpoints - public access
+                .requestMatchers("/error", "/error/**").permitAll()  // Allow error dispatch without redirect to login
                 .anyRequest().authenticated()
             )
             .formLogin(form -> form
