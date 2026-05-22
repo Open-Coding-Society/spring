@@ -8,6 +8,7 @@ import java.util.Optional;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -136,6 +137,24 @@ public class GroupChatApiController {
         String groupName = groupOpt.get().getName();
         List<GroupChatMessage> updated = groupChatService.getMessages(groupName);
         return new ResponseEntity<>(updated, HttpStatus.OK);
+    }
+
+    @DeleteMapping("/{groupId}/messages/{messageId}")
+    public ResponseEntity<?> deleteMessage(
+            @PathVariable Long groupId,
+            @PathVariable String messageId) {
+        Optional<Groups> groupOpt = groupsRepository.findById(groupId);
+        if (groupOpt.isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+
+        try {
+            realtimeService.deleteMessage(groupId, messageId);
+        } catch (RuntimeException ex) {
+            return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
+        }
+
+        return new ResponseEntity<>(HttpStatus.OK);
     }
 
     @GetMapping("/{groupId}/files")
