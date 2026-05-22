@@ -14,6 +14,7 @@ import lombok.NoArgsConstructor;
 public class GroupChatEvent {
     private String context;
     private Long groupId;
+    private String messageId;
     private String sender;
     private String message;
     private String image;
