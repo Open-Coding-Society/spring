@@ -90,7 +90,8 @@ public class CapstoneInit {
                "AI auto-extracts and tracks action items per user",
                "Admins moderate content and manage channel permissions",
                "Platform deployed and accessible at messaging.opencodingsociety.com"),
-            "https://messaging.opencodingsociety.com", null, null
+            "https://messaging.opencodingsociety.com", null, null,
+            "/images/capstone/database_defenders.png"
         ));
 
         list.add(p(
@@ -114,7 +115,8 @@ public class CapstoneInit {
                "Reduces onboarding time for new developers by 40%"),
             "https://pages.opencodingsociety.com/capstone/educators/",
             "https://github.com/NithikaVivek/pages-educators",
-            "https://github.com/NithikaVivek/spring-educators"
+            "https://github.com/NithikaVivek/spring-educators",
+            "/images/capstone/educators_icon.png"
         ));
 
         list.add(p(
@@ -803,6 +805,15 @@ public class CapstoneInit {
             List<String> tech, List<String> teamMembers,
             List<String> keyPoints, List<String> impact,
             String pageUrl, String frontendUrl, String backendUrl) {
+        return p(title, subtitle, description, about, courseCode, status, tech, teamMembers, keyPoints, impact, pageUrl, frontendUrl, backendUrl, null);
+    }
+
+    private CapstoneProject p(
+            String title, String subtitle, String description, String about,
+            String courseCode, String status,
+            List<String> tech, List<String> teamMembers,
+            List<String> keyPoints, List<String> impact,
+            String pageUrl, String frontendUrl, String backendUrl, String imageUrl) {
         CapstoneProject cp = new CapstoneProject();
         cp.setTitle(title);
         cp.setSubtitle(subtitle);
@@ -817,6 +828,7 @@ public class CapstoneInit {
         cp.setPageUrl(pageUrl);
         cp.setFrontendUrl(frontendUrl);
         cp.setBackendUrl(backendUrl);
+        cp.setImageUrl(imageUrl);
         return cp;
     }
 
