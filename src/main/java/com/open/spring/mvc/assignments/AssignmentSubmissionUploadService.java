@@ -40,6 +40,7 @@ public class AssignmentSubmissionUploadService {
 
     public Map<String, Object> upload(
             String assignmentName,
+            Long assignmentId,
             Long userId,
             String username,
             MultipartFile file,
@@ -47,17 +48,17 @@ public class AssignmentSubmissionUploadService {
             UserDetails userDetails) {
 
         validateAuthentication(userDetails);
-        validateRequiredFields(assignmentName, userId, username, file);
+        validateRequiredFields(userId, username, file);
 
         Person authenticatedUser = getAuthenticatedUser(userDetails);
         Person targetUser = getTargetUser(userId);
-        Assignment assignment = getAssignment(assignmentName);
+        Assignment assignment = resolveAssignment(assignmentId, assignmentName);
 
         validateUsernameMatchesTarget(username, targetUser);
         validateSubmitPermission(authenticatedUser, userId);
 
         String originalFilename = sanitizeFilename(file);
-        String s3Filename = buildS3Filename(assignmentName, originalFilename);
+        String s3Filename = buildS3Filename(assignment.getName(), originalFilename);
         String base64Data = toBase64(file);
 
         String storedFilename = uploadToStorage(base64Data, s3Filename, targetUser.getUid());
@@ -73,7 +74,7 @@ public class AssignmentSubmissionUploadService {
             storedFilename);
 
         return buildResponse(
-                assignmentName,
+            assignment,
                 notes,
                 file,
                 authenticatedUser,
@@ -90,9 +91,9 @@ public class AssignmentSubmissionUploadService {
         }
     }
 
-    private void validateRequiredFields(String assignmentName, Long userId, String username, MultipartFile file) {
-        if (isBlank(assignmentName) || isBlank(username) || userId == null) {
-            throw new UploadException(HttpStatus.BAD_REQUEST, "assignmentName, userId, and username are required");
+    private void validateRequiredFields(Long userId, String username, MultipartFile file) {
+        if (isBlank(username) || userId == null) {
+            throw new UploadException(HttpStatus.BAD_REQUEST, "userId and username are required");
         }
         if (file == null || file.isEmpty()) {
             throw new UploadException(HttpStatus.BAD_REQUEST, "file is required");
@@ -115,8 +116,20 @@ public class AssignmentSubmissionUploadService {
         return targetUser;
     }
 
-    private Assignment getAssignment(String assignmentName) {
-        Assignment assignment = assignmentRepo.findByName(assignmentName);
+    private Assignment resolveAssignment(Long assignmentId, String assignmentName) {
+        if (assignmentId != null) {
+            Assignment assignment = assignmentRepo.findById(assignmentId).orElse(null);
+            if (assignment == null) {
+                throw new UploadException(HttpStatus.NOT_FOUND, "Assignment not found with id: " + assignmentId);
+            }
+            return assignment;
+        }
+
+        if (isMissingAssignmentName(assignmentName)) {
+            throw new UploadException(HttpStatus.BAD_REQUEST, "assignmentId or assignmentName is required");
+        }
+
+        Assignment assignment = assignmentRepo.findByName(assignmentName.trim());
         if (assignment == null) {
             throw new UploadException(HttpStatus.NOT_FOUND, "Assignment not found: " + assignmentName);
         }
@@ -203,7 +216,7 @@ public class AssignmentSubmissionUploadService {
     }
 
     private Map<String, Object> buildResponse(
-            String assignmentName,
+            Assignment assignment,
             String notes,
             MultipartFile file,
             Person authenticatedUser,
@@ -216,7 +229,8 @@ public class AssignmentSubmissionUploadService {
         Map<String, Object> response = new HashMap<>();
         response.put("message", "Assignment submission uploaded successfully");
         response.put("submissionId", savedSubmission.getId());
-        response.put("assignmentName", assignmentName);
+        response.put("assignmentId", assignment.getId());
+        response.put("assignmentName", assignment.getName());
         response.put("userId", targetUser.getId());
         response.put("username", targetUser.getUid());
         response.put("displayName", targetUser.getName());
@@ -238,6 +252,14 @@ public class AssignmentSubmissionUploadService {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private boolean isMissingAssignmentName(String value) {
+        if (isBlank(value)) {
+            return true;
+        }
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        return "null".equals(normalized) || "undefined".equals(normalized);
     }
 
     public static class UploadException extends RuntimeException {
