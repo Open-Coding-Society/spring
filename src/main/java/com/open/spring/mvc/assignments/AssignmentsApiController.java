@@ -1,6 +1,8 @@
 package com.open.spring.mvc.assignments;
 
 import java.nio.file.Paths;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.ArrayList;
@@ -146,6 +148,7 @@ public class AssignmentsApiController {
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         requireTeacherOrAdmin(userDetails);
+        logger.debug("createAssignment called with name='{}' type='{}' points={} dueDate='{}' by user={}", name, type, points, dueDate, userDetails==null?"<anon>":userDetails.getUsername());
         Assignment newAssignment = new Assignment(name, type, description, points, dueDate);
         normalizeAssignmentSequenceForSqlite();
         Assignment savedAssignment = assignmentRepo.save(newAssignment);
@@ -196,8 +199,13 @@ public class AssignmentsApiController {
             @RequestParam String name,
             @RequestParam String contentUrl,
             @RequestParam(required = false, defaultValue = "") String description,
+            @RequestParam(required = false) Double points,
+            @RequestParam(required = false) String dueDate,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
+        // Debug log input
+        logger.debug("autoCreateAssignment called with name='{}' contentUrl='{}' description='{}' points={} dueDate='{}' userDetails={}", name, contentUrl, description, points, dueDate, userDetails==null?"<anon>":userDetails.getUsername());
+
         // Check authentication - any authenticated user can create assignments from frontmatter
         if (userDetails == null) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Authentication required"));
@@ -210,6 +218,11 @@ public class AssignmentsApiController {
         if (contentUrl == null || contentUrl.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Content URL is required"));
         }
+
+        double resolvedPoints = points != null ? points : 1.0;
+        String resolvedDueDate = (dueDate != null && !dueDate.trim().isEmpty())
+            ? dueDate.trim()
+            : LocalDate.now().plusDays(3).format(DateTimeFormatter.ofPattern("MM/dd/yyyy"));
         
         // Check if assignment already exists for this content URL
         // For auto-created assignments, we store the content URL with a marker format:
@@ -244,8 +257,8 @@ public class AssignmentsApiController {
                 name.trim(),
                 "auto-created",  // type - identifies this as auto-created from frontmatter
                 finalDescription,
-                0.0,              // points (default)
-                "01/01/2099"      // default due date
+                resolvedPoints,
+                resolvedDueDate
             );
             
             normalizeAssignmentSequenceForSqlite();

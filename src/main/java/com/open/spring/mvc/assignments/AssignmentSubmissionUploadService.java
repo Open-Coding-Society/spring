@@ -14,6 +14,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.S3uploads.FileHandler;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
@@ -23,10 +24,18 @@ public class AssignmentSubmissionUploadService {
 
     private final FileHandler fileHandler;
     private final PersonJpaRepository personRepo;
+    private final AssignmentJpaRepository assignmentRepo;
+    private final AssignmentSubmissionJPA submissionRepo;
 
-    public AssignmentSubmissionUploadService(FileHandler fileHandler, PersonJpaRepository personRepo) {
+    public AssignmentSubmissionUploadService(
+            FileHandler fileHandler,
+            PersonJpaRepository personRepo,
+            AssignmentJpaRepository assignmentRepo,
+            AssignmentSubmissionJPA submissionRepo) {
         this.fileHandler = fileHandler;
         this.personRepo = personRepo;
+        this.assignmentRepo = assignmentRepo;
+        this.submissionRepo = submissionRepo;
     }
 
     public Map<String, Object> upload(
@@ -42,6 +51,7 @@ public class AssignmentSubmissionUploadService {
 
         Person authenticatedUser = getAuthenticatedUser(userDetails);
         Person targetUser = getTargetUser(userId);
+        Assignment assignment = getAssignment(assignmentName);
 
         validateUsernameMatchesTarget(username, targetUser);
         validateSubmitPermission(authenticatedUser, userId);
@@ -52,6 +62,16 @@ public class AssignmentSubmissionUploadService {
 
         String storedFilename = uploadToStorage(base64Data, s3Filename, targetUser.getUid());
 
+        AssignmentSubmission savedSubmission = saveSubmission(
+            assignment,
+            targetUser,
+            notes,
+            file,
+            authenticatedUser,
+            originalFilename,
+            s3Filename,
+            storedFilename);
+
         return buildResponse(
                 assignmentName,
                 notes,
@@ -60,7 +80,8 @@ public class AssignmentSubmissionUploadService {
                 targetUser,
                 originalFilename,
                 s3Filename,
-                storedFilename);
+            storedFilename,
+            savedSubmission);
     }
 
     private void validateAuthentication(UserDetails userDetails) {
@@ -92,6 +113,14 @@ public class AssignmentSubmissionUploadService {
             throw new UploadException(HttpStatus.NOT_FOUND, "Target user not found for userId=" + userId);
         }
         return targetUser;
+    }
+
+    private Assignment getAssignment(String assignmentName) {
+        Assignment assignment = assignmentRepo.findByName(assignmentName);
+        if (assignment == null) {
+            throw new UploadException(HttpStatus.NOT_FOUND, "Assignment not found: " + assignmentName);
+        }
+        return assignment;
     }
 
     private void validateUsernameMatchesTarget(String username, Person targetUser) {
@@ -142,6 +171,37 @@ public class AssignmentSubmissionUploadService {
         return storedFilename;
     }
 
+    private AssignmentSubmission saveSubmission(
+            Assignment assignment,
+            Person targetUser,
+            String notes,
+            MultipartFile file,
+            Person authenticatedUser,
+            String originalFilename,
+            String s3Filename,
+            String storedFilename) {
+
+        Map<String, Object> content = new HashMap<>();
+        content.put("type", "file");
+        content.put("filename", originalFilename);
+        content.put("storedFilename", storedFilename);
+        content.put("storagePath", targetUser.getUid() + "/" + s3Filename);
+        content.put("contentType", file.getContentType());
+        content.put("size", file.getSize());
+        content.put("uploadedBy", authenticatedUser.getUid());
+        content.put("notes", notes);
+
+        Submitter submitter = targetUser;
+        AssignmentSubmission submission = new AssignmentSubmission(
+                assignment,
+                submitter,
+                content,
+                notes == null ? "" : notes,
+                false);
+
+        return submissionRepo.save(submission);
+    }
+
     private Map<String, Object> buildResponse(
             String assignmentName,
             String notes,
@@ -150,10 +210,12 @@ public class AssignmentSubmissionUploadService {
             Person targetUser,
             String originalFilename,
             String s3Filename,
-            String storedFilename) {
+            String storedFilename,
+            AssignmentSubmission savedSubmission) {
 
         Map<String, Object> response = new HashMap<>();
         response.put("message", "Assignment submission uploaded successfully");
+        response.put("submissionId", savedSubmission.getId());
         response.put("assignmentName", assignmentName);
         response.put("userId", targetUser.getId());
         response.put("username", targetUser.getUid());
