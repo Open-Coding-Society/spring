@@ -24,6 +24,7 @@ public class AssignmentSubmissionFileApiController {
     @PostMapping(value = "/upload", consumes = "multipart/form-data")
     public ResponseEntity<?> uploadAssignmentSubmission(
             @RequestParam("assignmentName") String assignmentName,
+            @RequestParam(value = "assignmentId", required = false) Long assignmentId,
             @RequestParam("userId") Long userId,
             @RequestParam("username") String username,
             @RequestParam("file") MultipartFile file,
@@ -33,6 +34,7 @@ public class AssignmentSubmissionFileApiController {
         try {
             Map<String, Object> response = uploadService.upload(
                     assignmentName,
+                    assignmentId,
                     userId,
                     username,
                     file,
