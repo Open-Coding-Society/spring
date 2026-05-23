@@ -26,6 +26,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.open.spring.mvc.comment.CommentJPA;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.core.JsonProcessingException;
 
 @RestController
 @RequestMapping("/api/calendar/issues")
@@ -37,6 +39,9 @@ public class CalendarIssueController {
 
     @Autowired
     private CommentJPA commentJPA;
+    
+    @Autowired
+    private com.open.spring.mvc.groups.GroupsJpaRepository groupsJpaRepository;
 
     @GetMapping
         public ResponseEntity<List<Map<String, Object>>> getIssues(
@@ -181,6 +186,21 @@ public class CalendarIssueController {
         issue.setEventId(trimToNull((String) payload.get("eventId")));
         issue.setGroupName(trimToNull((String) payload.get("groupName")));
         issue.setTags(normalizeTags(payload.get("tags")));
+        // assignedGroups may be passed as a JSON string or as a List; normalize to JSON string
+        ObjectMapper mapper = new ObjectMapper();
+        Object ag = payload.get("assignedGroups");
+        if (ag != null) {
+            if (ag instanceof String) {
+                issue.setAssignedGroups(((String) ag).trim().isEmpty() ? null : (String) ag);
+            } else {
+                try {
+                    issue.setAssignedGroups(mapper.writeValueAsString(ag));
+                } catch (JsonProcessingException e) {
+                    // fallback: store toString()
+                    issue.setAssignedGroups(String.valueOf(ag));
+                }
+            }
+        }
         return issue;
     }
 
@@ -192,7 +212,52 @@ public class CalendarIssueController {
         data.put("author", issue.getOwnerUid());
         data.put("status", issue.getStatus() == null ? null : issue.getStatus().name().toLowerCase());
         data.put("priority", issue.getPriority() == null ? null : issue.getPriority().name().toLowerCase());
-        data.put("dueDate", issue.getDueDate() == null ? null : issue.getDueDate().toString());
+            // Normalize assignedGroups: return as an array (not a raw JSON string) for frontend consistency
+            try {
+                String agRaw = issue.getAssignedGroups();
+                if (agRaw == null || agRaw.isBlank()) {
+                    data.put("assignedGroups", java.util.List.of());
+                    data.put("assignedGroupLabels", java.util.List.of());
+                } else {
+                    java.util.List<String> assigned = new java.util.ArrayList<>();
+                    try {
+                        com.fasterxml.jackson.databind.ObjectMapper om = new com.fasterxml.jackson.databind.ObjectMapper();
+                        Object parsed = om.readValue(agRaw, Object.class);
+                        if (parsed instanceof java.util.List) {
+                            for (Object o : (java.util.List<?>) parsed) assigned.add(String.valueOf(o));
+                        } else if (parsed != null) assigned.add(String.valueOf(parsed));
+                    } catch (Exception e) {
+                        // fallback: comma-separated
+                        for (String part : agRaw.split(",")) if (!part.trim().isEmpty()) assigned.add(part.trim());
+                    }
+                    data.put("assignedGroups", assigned);
+                    // Build labels using groups repo when possible
+                    java.util.List<String> labels = new java.util.ArrayList<>();
+                    for (String idOrName : assigned) {
+                        String label = idOrName;
+                        try {
+                            Long gid = Long.valueOf(idOrName);
+                            java.util.Optional<com.open.spring.mvc.groups.Groups> gopt = groupsJpaRepository.findById(gid);
+                            if (gopt.isPresent()) {
+                                com.open.spring.mvc.groups.Groups g = gopt.get();
+                                label = ("Period " + (g.getPeriod() == null ? "" : g.getPeriod()) + " - " + (g.getName() == null ? "" : g.getName())).trim();
+                            }
+                        } catch (NumberFormatException nfe) {
+                            java.util.Optional<com.open.spring.mvc.groups.Groups> gopt = groupsJpaRepository.findByName(idOrName);
+                            if (gopt.isPresent()) {
+                                com.open.spring.mvc.groups.Groups g = gopt.get();
+                                label = ("Period " + (g.getPeriod() == null ? "" : g.getPeriod()) + " - " + (g.getName() == null ? "" : g.getName())).trim();
+                            }
+                        }
+                        labels.add(label);
+                    }
+                    data.put("assignedGroupLabels", labels);
+                }
+            } catch (Exception e) {
+                data.put("assignedGroups", java.util.List.of());
+                data.put("assignedGroupLabels", java.util.List.of());
+            }
+            data.put("dueDate", issue.getDueDate() == null ? null : issue.getDueDate().toString());
         data.put("eventId", issue.getEventId());
         data.put("groupName", issue.getGroupName());
         data.put("tags", parseTags(issue.getTags()));
@@ -202,6 +267,7 @@ public class CalendarIssueController {
         data.put("starCount", issue.getId() == null ? 0L : commentJPA.countByAssignment(issueStarAssignmentKey(issue.getId())));
         data.put("starred", issue.getId() != null && requesterUid != null && !requesterUid.isBlank()
             && commentJPA.existsByAssignmentAndAuthor(issueStarAssignmentKey(issue.getId()), requesterUid));
+        data.put("starLocked", issue.getId() != null && calendarIssueService.isIssueAssignedToUserGroups(issue, requesterUid));
         return data;
     }
 
@@ -282,5 +348,60 @@ public class CalendarIssueController {
         return userDetails.getAuthorities().stream()
                 .map(GrantedAuthority::getAuthority)
                 .anyMatch(role -> "ROLE_ADMIN".equals(role) || "ROLE_TEACHER".equals(role));
+    }
+
+    /**
+     * Assign one or more groups to an issue
+     * Only the issue owner or privileged users can assign groups
+     * @param issueId - ID of the issue
+     * @param payload - Contains groupIds array
+     * @param userDetails - Authenticated user
+     * @return ResponseEntity with updated issue
+     */
+    @PutMapping("/{issueId}/assign-groups")
+    public ResponseEntity<?> assignGroups(@PathVariable Long issueId,
+            @RequestBody Map<String, Object> payload,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        if (userDetails == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("message", "Authentication required"));
+        }
+
+        return calendarIssueService.getIssueById(issueId, userDetails.getUsername(), hasPrivilegedRole(userDetails))
+                .<ResponseEntity<?>>map(issue -> {
+                    @SuppressWarnings("unchecked")
+                    List<String> groupIds = (List<String>) payload.get("groupIds");
+                    if (groupIds == null || groupIds.isEmpty()) {
+                        issue.setAssignedGroups(null);
+                    } else {
+                        // Store as JSON array string
+                        String jsonGroups = "[" + groupIds.stream()
+                                .map(id -> "\"" + id + "\"")
+                                .collect(Collectors.joining(",")) + "]";
+                        issue.setAssignedGroups(jsonGroups);
+                    }
+                    CalendarIssue updated = calendarIssueService.saveIssue(issue);
+                    calendarIssueService.ensureGroupStarsForIssue(updated);
+                    return ResponseEntity.ok(updated);
+                })
+                .orElseGet(() -> ResponseEntity.status(HttpStatus.NOT_FOUND)
+                        .body(Map.of("message", "Issue not found")));
+    }
+
+    /**
+     * Get issues assigned to any of the user's groups
+     * @param userDetails - Authenticated user
+     * @return ResponseEntity with list of issues
+     */
+    @GetMapping("/by-user-groups")
+    public ResponseEntity<List<Map<String, Object>>> getIssuesByUserGroups(
+            @AuthenticationPrincipal UserDetails userDetails) {
+        if (userDetails == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
+        }
+
+        // This will be implemented in CalendarIssueService with group lookup
+        List<Map<String, Object>> issues = calendarIssueService.getIssuesByUserGroups(userDetails.getUsername());
+        return ResponseEntity.ok(issues);
     }
 }

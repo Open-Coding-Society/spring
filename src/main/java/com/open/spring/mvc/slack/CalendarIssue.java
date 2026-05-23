@@ -47,6 +47,9 @@ public class CalendarIssue {
     @Column(length = 1000)
     private String tags;
 
+    @Column(length = 1000)
+    private String assignedGroups;  // JSON array of group IDs, e.g., ["1", "2", "3"]
+
     @Column(length = 120)
     private String ownerUid;
 
@@ -134,6 +137,14 @@ public class CalendarIssue {
 
     public void setTags(String tags) {
         this.tags = tags;
+    }
+
+    public String getAssignedGroups() {
+        return assignedGroups;
+    }
+
+    public void setAssignedGroups(String assignedGroups) {
+        this.assignedGroups = assignedGroups;
     }
 
     public LocalDateTime getCreatedAt() {
