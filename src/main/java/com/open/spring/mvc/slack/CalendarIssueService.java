@@ -2,9 +2,11 @@ package com.open.spring.mvc.slack;
 
 import java.time.LocalDate;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -16,6 +18,7 @@ import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.comment.CommentJPA;
 
 @Service
 public class CalendarIssueService {
@@ -23,11 +26,14 @@ public class CalendarIssueService {
     @Autowired
     private CalendarIssueRepository calendarIssueRepository;
 
-        @Autowired
-        private PersonJpaRepository personJpaRepository;
+    @Autowired
+    private PersonJpaRepository personJpaRepository;
 
-        @Autowired
-        private GroupsJpaRepository groupsJpaRepository;
+    @Autowired
+    private GroupsJpaRepository groupsJpaRepository;
+
+    @Autowired
+    private CommentJPA commentJPA;
 
     public List<CalendarIssue> getIssues(String status, String priority, LocalDate dueDate, String eventId, String q,
             String author, String tags, LocalDate start, LocalDate end, String groupName, String requesterUid, boolean privileged) {
@@ -86,7 +92,10 @@ public class CalendarIssueService {
             issue.setPriority(CalendarIssuePriority.MEDIUM);
         }
         issue.setOwnerUid(ownerUid);
-        return calendarIssueRepository.save(issue);
+        CalendarIssue saved = calendarIssueRepository.save(issue);
+        // After saving, create star comments for all members of assigned groups (if any)
+        createGroupStarsForIssue(saved);
+        return saved;
     }
 
     public Optional<CalendarIssue> updateIssue(Long id, CalendarIssue updated, String requesterUid, boolean privileged) {
@@ -106,9 +115,78 @@ public class CalendarIssueService {
             existing.setDueDate(updated.getDueDate());
             existing.setEventId(updated.getEventId());
             existing.setGroupName(updated.getGroupName());
+            existing.setAssignedGroups(updated.getAssignedGroups());
             existing.setTags(updated.getTags());
-            return calendarIssueRepository.save(existing);
+            CalendarIssue saved = calendarIssueRepository.save(existing);
+            // Update group stars if assignedGroups changed
+            createGroupStarsForIssue(saved);
+            return saved;
         });
+    }
+
+    /**
+     * For a saved issue, create star comments (assignment "issue-{id}::star") for every user
+     * who is a member of any assigned group. Avoid duplicate stars.
+     */
+    private void createGroupStarsForIssue(CalendarIssue issue) {
+        if (issue == null || issue.getId() == null) return;
+        String agRaw = issue.getAssignedGroups();
+        if (agRaw == null || agRaw.isBlank()) return;
+
+        // Parse assignedGroups JSON array of ids/names
+        java.util.List<String> assigned = new java.util.ArrayList<>();
+        try {
+            com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+            Object parsed = mapper.readValue(agRaw, Object.class);
+            if (parsed instanceof java.util.List) {
+                for (Object o : (java.util.List<?>) parsed) assigned.add(String.valueOf(o));
+            } else if (parsed != null) {
+                assigned.add(String.valueOf(parsed));
+            }
+        } catch (Exception e) {
+            // could be a comma-separated string — split defensively
+            for (String part : agRaw.split(",")) {
+                if (!part.trim().isEmpty()) assigned.add(part.trim());
+            }
+        }
+
+        if (assigned.isEmpty()) return;
+
+        // Collect unique member IDs from all groups
+        java.util.Set<Long> memberIds = new java.util.HashSet<>();
+        for (String gid : assigned) {
+            try {
+                Long groupId = Long.valueOf(gid);
+                java.util.List<Object[]> rows = groupsJpaRepository.findGroupMembersRaw(groupId);
+                if (rows != null) {
+                    for (Object[] row : rows) {
+                        if (row != null && row.length > 0 && row[0] instanceof Number) {
+                            memberIds.add(((Number) row[0]).longValue());
+                        }
+                    }
+                }
+            } catch (NumberFormatException nfe) {
+                // not a numeric id; try to find group by name
+                java.util.Optional<Groups> gopt = groupsJpaRepository.findByName(gid);
+                if (gopt.isPresent()) {
+                    java.util.List<Object[]> rows = groupsJpaRepository.findGroupMembersRaw(gopt.get().getId());
+                    if (rows != null) for (Object[] row : rows) if (row != null && row.length>0 && row[0] instanceof Number) memberIds.add(((Number)row[0]).longValue());
+                }
+            }
+        }
+
+        if (memberIds.isEmpty()) return;
+
+        String starAssignment = "issue-" + issue.getId() + "::star";
+        for (Long pid : memberIds) {
+            Person p = personJpaRepository.findById(pid).orElse(null);
+            if (p == null) continue;
+            String uid = p.getUid();
+            if (uid == null || uid.isBlank()) continue;
+            // avoid duplicates
+            if (commentJPA.existsByAssignmentAndAuthor(starAssignment, uid)) continue;
+            commentJPA.save(new com.open.spring.mvc.comment.Comment(starAssignment, "star", uid));
+        }
     }
 
     public Optional<CalendarIssue> updateIssueStatus(Long id, CalendarIssueStatus nextStatus,
@@ -127,6 +205,29 @@ public class CalendarIssueService {
         if (!calendarIssueRepository.existsByIdAndOwnerUid(id, requesterUid)) {
             return false;
         }
+        
+        // Delete all comments associated with this issue (cascade delete with nested replies)
+        String issueAssignmentKey = "issue-" + id;
+        List<com.open.spring.mvc.comment.Comment> comments = commentJPA.findByAssignment(issueAssignmentKey);
+        if (comments != null && !comments.isEmpty()) {
+            // First delete all replies (nested comments) for each comment
+            for (com.open.spring.mvc.comment.Comment comment : comments) {
+                List<com.open.spring.mvc.comment.Comment> replies = commentJPA.findByParentCommentId(comment.getId());
+                if (replies != null && !replies.isEmpty()) {
+                    commentJPA.deleteAll(replies);
+                }
+            }
+            // Then delete the top-level comments
+            commentJPA.deleteAll(comments);
+        }
+        
+        // Also delete star comments
+        String starAssignmentKey = issueAssignmentKey + "::star";
+        List<com.open.spring.mvc.comment.Comment> starComments = commentJPA.findByAssignment(starAssignmentKey);
+        if (starComments != null && !starComments.isEmpty()) {
+            commentJPA.deleteAll(starComments);
+        }
+        
         calendarIssueRepository.deleteById(id);
         return true;
     }
@@ -229,5 +330,108 @@ public class CalendarIssueService {
                     || next == CalendarIssueStatus.DONE;
             case DONE -> next == CalendarIssueStatus.OPEN;
         };
+    }
+
+    /**
+     * Save an issue (insert or update)
+     * @param issue - The issue to save
+     * @return The saved issue
+     */
+    public CalendarIssue saveIssue(CalendarIssue issue) {
+        validateIssue(issue);
+        return calendarIssueRepository.save(issue);
+    }
+
+    public void ensureGroupStarsForIssue(CalendarIssue issue) {
+        createGroupStarsForIssue(issue);
+    }
+
+    public boolean isIssueAssignedToUserGroups(CalendarIssue issue, String requesterUid) {
+        if (issue == null || requesterUid == null || requesterUid.isBlank()) {
+            return false;
+        }
+
+        Person requester = personJpaRepository.findByUid(requesterUid);
+        if (requester == null) {
+            return false;
+        }
+
+        return isIssueAssignedToUserGroups(issue, requester);
+    }
+
+    /**
+     * Get all issues assigned to any of the user's groups
+     * @param userUid - User UID
+     * @return List of issues assigned to user's groups
+     */
+    public List<Map<String, Object>> getIssuesByUserGroups(String userUid) {
+        // Find the person to get their groups
+        List<Person> persons = personJpaRepository.findAll();
+        Person user = persons.stream()
+                .filter(p -> userUid.equals(p.getUid()))
+                .findFirst()
+                .orElse(null);
+
+        if (user == null) {
+            return List.of();
+        }
+
+        List<Groups> userGroups = groupsJpaRepository.findGroupsByPersonIdWithMembers(user.getId());
+        if (userGroups == null || userGroups.isEmpty()) {
+            return List.of();
+        }
+
+        // Get all issues and filter by assigned groups
+        List<CalendarIssue> allIssues = calendarIssueRepository.findAll();
+        return allIssues.stream()
+                .filter(issue -> isIssueAssignedToUserGroups(issue, user))
+                .map(this::convertToMap)
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Check if an issue is assigned to any of the user's groups
+     * @param issue - The issue to check
+     * @param user - The user with groups
+     * @return true if issue is assigned to any user group
+     */
+    private boolean isIssueAssignedToUserGroups(CalendarIssue issue, Person user) {
+        if (issue == null || issue.getAssignedGroups() == null || issue.getAssignedGroups().isEmpty() || user == null) {
+            return false;
+        }
+
+        String assignedGroups = issue.getAssignedGroups();
+        List<Groups> userGroups = groupsJpaRepository.findGroupsByPersonIdWithMembers(user.getId());
+        for (Groups group : userGroups) {
+            String groupId = group.getId() == null ? "" : group.getId().toString();
+            String groupName = group.getName() == null ? "" : group.getName();
+            String groupPeriod = group.getPeriod() == null ? "" : group.getPeriod();
+
+            // Check if any of the group identifiers appear in the assignedGroups JSON
+            if (assignedGroups.contains("\"" + groupId + "\"") ||
+                assignedGroups.contains("\"" + groupName + "\"") ||
+                assignedGroups.contains("\"" + groupPeriod + "\"")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private Map<String, Object> convertToMap(CalendarIssue issue) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("id", issue.getId());
+        map.put("title", issue.getTitle());
+        map.put("description", issue.getDescription());
+        map.put("status", issue.getStatus());
+        map.put("priority", issue.getPriority());
+        map.put("dueDate", issue.getDueDate());
+        map.put("eventId", issue.getEventId());
+        map.put("groupName", issue.getGroupName());
+        map.put("tags", issue.getTags());
+        map.put("assignedGroups", issue.getAssignedGroups());
+        map.put("ownerUid", issue.getOwnerUid());
+        map.put("createdAt", issue.getCreatedAt());
+        map.put("updatedAt", issue.getUpdatedAt());
+        return map;
     }
 }
