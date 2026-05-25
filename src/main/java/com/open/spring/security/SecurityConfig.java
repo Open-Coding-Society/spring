@@ -170,6 +170,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/calendar/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // Chat APIs - require authentication
                         .requestMatchers("/api/chat/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
+                        // Email send API - require authentication (sends via Gmail SMTP)
+                        .requestMatchers("/api/email/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         .requestMatchers("/api/files/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // Sprint dates - GET requires authenticated roles
                         .requestMatchers(HttpMethod.GET, "/api/sprint-dates/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
