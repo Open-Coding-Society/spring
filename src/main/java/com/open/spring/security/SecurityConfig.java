@@ -121,9 +121,9 @@ public class SecurityConfig {
                         // Previously public endpoints now require authenticated roles
                         .requestMatchers("/api/jokes/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // Pause Menu APIs should be public
-                        .requestMatchers("/api/pausemenu/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
+                        .requestMatchers("/api/pausemenu/**").permitAll()
                         // Leaderboard should be public - displays scores without authentication
-                        .requestMatchers("/api/leaderboard/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
+                        .requestMatchers("/api/leaderboard/**").permitAll()
                         // Frontend calls gamer score endpoint; make it public
                         .requestMatchers("/api/gamer/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // ==========================================
@@ -170,6 +170,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/calendar/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // Chat APIs - require authentication
                         .requestMatchers("/api/chat/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
+                        // Email send API - require authentication (sends via Gmail SMTP)
+                        .requestMatchers("/api/email/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         .requestMatchers("/api/files/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // Sprint dates - GET requires authenticated roles
                         .requestMatchers(HttpMethod.GET, "/api/sprint-dates/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
@@ -235,6 +237,8 @@ public class SecurityConfig {
         policy.put("POST /api/face/register", "ROLE_USER|ROLE_STUDENT|ROLE_TEACHER|ROLE_ADMIN");
         policy.put("/api/face/**", "ROLE_TEACHER|ROLE_ADMIN");
         policy.put("POST /api/assignment-submissions/upload", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT");
+        policy.put("/api/pausemenu/**", "permitAll");
+        policy.put("/api/leaderboard/**", "permitAll");
         policy.put("/api/exports/**", "ROLE_ADMIN");
         policy.put("/api/imports/**", "ROLE_ADMIN");
         policy.put("/api/**", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT");
@@ -257,6 +261,10 @@ public class SecurityConfig {
         configuration.addAllowedOriginPattern("http://localhost:4599");
         configuration.addAllowedOriginPattern("http://localhost:4600");
         configuration.addAllowedOriginPattern("http://localhost:8585");
+        configuration.addAllowedOriginPattern("https://opencodingsociety.com");
+        configuration.addAllowedOriginPattern("http://opencodingsociety.com");
+        configuration.addAllowedOriginPattern("https://pages.opencodingsociety.com");
+        configuration.addAllowedOriginPattern("https://spring.opencodingsociety.com");
         configuration.addAllowedHeader("*");
         configuration.addAllowedMethod("*");
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

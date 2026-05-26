@@ -104,6 +104,23 @@ public class GroupChatService {
         return messages;
     }
 
+    public void deleteMessage(String groupName, String messageId) {
+        if (messageId == null) return;
+        List<GroupChatMessage> messages = getMessages(groupName);
+        boolean removed = messages.removeIf(m -> messageId.equals(m.getId()));
+        
+        if (removed) {
+            String jsonl = messages.stream()
+                    .map(this::toJson)
+                    .collect(Collectors.joining("\n"));
+
+            String base64Data = Base64.getEncoder()
+                    .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
+
+            s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+        }
+    }
+
     public List<Map<String, String>> listSharedFiles(String groupName) {
         String prefix = groupName + "/" + SHARED_FILES_PREFIX;
         List<String> keys = s3FileHandler.listFiles(prefix);
