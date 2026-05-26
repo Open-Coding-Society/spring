@@ -40,8 +40,6 @@ import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
-import com.open.spring.mvc.synergy.SynergyGrade;
-import com.open.spring.mvc.synergy.SynergyGradeJpaRepository;
 
 import jakarta.transaction.Transactional;
 import lombok.AllArgsConstructor;
@@ -70,9 +68,6 @@ public class AssignmentSubmissionAPIController {
 
     @Autowired
     private GroupsJpaRepository groupRepo;
-
-    @Autowired
-    private SynergyGradeJpaRepository gradesRepo;
 
     @Autowired
     private FileHandler fileHandler;
@@ -339,23 +334,8 @@ public class AssignmentSubmissionAPIController {
         // we have a correct submission
         submission.setGrade(grade);
         submission.setFeedback(feedback);
-        submissionRepo.save(submission);
-
-        for (Person student : submission.getSubmitter().getMembers()) {
-            SynergyGrade assignedGrade = gradesRepo.findByAssignmentAndStudent(submission.getAssignment(), student);
-            if (assignedGrade != null) {
-                // the assignment has a previously assigned grade, so we are just updating it
-                assignedGrade.setGrade(grade);
-                gradesRepo.save(assignedGrade);
-            }
-            else {
-                // assignment is not graded, we must create a new grade
-                SynergyGrade newGrade = new SynergyGrade(grade, submission.getAssignment(), student);
-                gradesRepo.save(newGrade);
-            }
-        }
-
-        return new ResponseEntity<>("Grade updated successfully", HttpStatus.OK);
+        AssignmentSubmission savedSubmission = submissionRepo.save(submission);
+        return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
     }
 
     /**
