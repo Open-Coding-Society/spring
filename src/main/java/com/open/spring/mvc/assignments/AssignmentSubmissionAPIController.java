@@ -296,11 +296,19 @@ public class AssignmentSubmissionAPIController {
                     .body(Map.of("error", "contentType must be either link or file"));
         }
 
+        // Preserve existing content map for change detection
+        Map<String, Object> existingContent = submission.getContent() != null ? submission.getContent() : Collections.emptyMap();
+        boolean contentChanged = !Objects.equals(existingContent, updatedContent);
+
         submission.setContent(updatedContent);
         submission.setComment(comment == null ? "" : comment);
         submission.setIsLate(Boolean.TRUE.equals(isLate));
-        submission.setGrade(null);
-        submission.setFeedback(null);
+
+        // Only clear grade/feedback when the submission content actually changed
+        if (contentChanged) {
+            submission.setGrade(null);
+            submission.setFeedback(null);
+        }
 
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
         return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
