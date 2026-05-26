@@ -1,10 +1,16 @@
 package com.open.spring.mvc.assignments;
 
+import java.nio.file.Paths;
+import java.time.Instant;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -14,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -21,17 +28,18 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.multipart.MultipartFile;
 
+import com.open.spring.mvc.S3uploads.FileHandler;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
-import com.open.spring.mvc.synergy.SynergyGrade;
-import com.open.spring.mvc.synergy.SynergyGradeJpaRepository;
 
 import jakarta.transaction.Transactional;
 import lombok.AllArgsConstructor;
@@ -62,7 +70,7 @@ public class AssignmentSubmissionAPIController {
     private GroupsJpaRepository groupRepo;
 
     @Autowired
-    private SynergyGradeJpaRepository gradesRepo;
+    private FileHandler fileHandler;
     
     /**
      * A DTO class for returning only necessary assignment submission details.
@@ -224,6 +232,82 @@ public class AssignmentSubmissionAPIController {
         error.put("error", "Assignment not found");
         return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
     }
+
+    @PutMapping(value = "/{submissionId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Transactional
+    public ResponseEntity<?> updateSubmission(
+            @PathVariable Long submissionId,
+            @RequestParam String contentType,
+            @RequestParam(required = false) String url,
+            @RequestParam(required = false) String notes,
+            @RequestParam(required = false) String comment,
+            @RequestParam(required = false) Boolean isLate,
+            @RequestParam(required = false) MultipartFile file,
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        if (userDetails == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Authentication required"));
+        }
+
+        Person currentUser = personRepo.findByUid(userDetails.getUsername());
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Authenticated user not found"));
+        }
+
+        AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
+        if (submission == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "Submission not found"));
+        }
+
+        if (!canEditSubmission(currentUser, submission)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "You can only edit your own submissions"));
+        }
+
+        String normalizedContentType = contentType == null ? "" : contentType.trim().toLowerCase(Locale.ROOT);
+        Map<String, Object> updatedContent;
+
+        if ("link".equals(normalizedContentType)) {
+            if (url == null || url.trim().isEmpty()) {
+                return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                        .body(Map.of("error", "A submission URL is required for link submissions"));
+            }
+
+            updatedContent = new HashMap<>();
+            updatedContent.put("type", "link");
+            updatedContent.put("url", url.trim());
+            updatedContent.put("notes", notes == null ? "" : notes);
+        } else if ("file".equals(normalizedContentType)) {
+            updatedContent = updateFileSubmissionContent(submission, currentUser, file, notes);
+            if (updatedContent == null) {
+                return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                        .body(Map.of("error", "Failed to update file submission"));
+            }
+        } else {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("error", "contentType must be either link or file"));
+        }
+
+        // Preserve existing content map for change detection
+        Map<String, Object> existingContent = submission.getContent() != null ? submission.getContent() : Collections.emptyMap();
+        boolean contentChanged = !Objects.equals(existingContent, updatedContent);
+
+        submission.setContent(updatedContent);
+        submission.setComment(comment == null ? "" : comment);
+        submission.setIsLate(Boolean.TRUE.equals(isLate));
+
+        // Only clear grade/feedback when the submission content actually changed
+        if (contentChanged) {
+            submission.setGrade(null);
+            submission.setFeedback(null);
+        }
+
+        AssignmentSubmission savedSubmission = submissionRepo.save(submission);
+        return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
+    }
     
     /**
      * Grade an existing assignment submission.
@@ -250,23 +334,8 @@ public class AssignmentSubmissionAPIController {
         // we have a correct submission
         submission.setGrade(grade);
         submission.setFeedback(feedback);
-        submissionRepo.save(submission);
-
-        for (Person student : submission.getSubmitter().getMembers()) {
-            SynergyGrade assignedGrade = gradesRepo.findByAssignmentAndStudent(submission.getAssignment(), student);
-            if (assignedGrade != null) {
-                // the assignment has a previously assigned grade, so we are just updating it
-                assignedGrade.setGrade(grade);
-                gradesRepo.save(assignedGrade);
-            }
-            else {
-                // assignment is not graded, we must create a new grade
-                SynergyGrade newGrade = new SynergyGrade(grade, submission.getAssignment(), student);
-                gradesRepo.save(newGrade);
-            }
-        }
-
-        return new ResponseEntity<>("Grade updated successfully", HttpStatus.OK);
+        AssignmentSubmission savedSubmission = submissionRepo.save(submission);
+        return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
     }
 
     /**
@@ -381,5 +450,106 @@ public class AssignmentSubmissionAPIController {
             .collect(Collectors.toList());
 
         return new ResponseEntity<>(submissionDtos, HttpStatus.OK);
+    }
+
+    private boolean canEditSubmission(Person currentUser, AssignmentSubmission submission) {
+        if (currentUser.hasRoleWithName("ROLE_ADMIN") || currentUser.hasRoleWithName("ROLE_TEACHER")) {
+            return true;
+        }
+
+        Submitter submitter = submission.getSubmitter();
+        if (submitter == null) {
+            return false;
+        }
+
+        if (submitter instanceof Person personSubmitter) {
+            return Objects.equals(personSubmitter.getId(), currentUser.getId());
+        }
+
+        return groupRepo.findGroupsByPersonId(currentUser.getId()).stream()
+                .anyMatch(group -> Objects.equals(group.getId(), submitter.getId()));
+    }
+
+    private Map<String, Object> updateFileSubmissionContent(
+            AssignmentSubmission submission,
+            Person currentUser,
+            MultipartFile file,
+            String notes) {
+
+        Map<String, Object> existingContent = submission.getContent() != null
+                ? submission.getContent()
+                : Collections.emptyMap();
+
+        String updatedNotes = notes != null ? notes : (String) existingContent.getOrDefault("notes", "");
+
+        if (file == null || file.isEmpty()) {
+            Map<String, Object> updatedContent = new HashMap<>(existingContent);
+            updatedContent.put("type", "file");
+            updatedContent.put("notes", updatedNotes);
+            return updatedContent;
+        }
+
+        if (submission.getAssignment() == null) {
+            return null;
+        }
+
+        String originalFilename = sanitizeFilename(file);
+        String storageUid = resolveStorageUid(submission.getSubmitter());
+        String s3Filename = buildS3Filename(submission.getAssignment().getName(), originalFilename);
+        String base64Data = toBase64(file);
+        String storedFilename = fileHandler.uploadFile(base64Data, s3Filename, storageUid);
+
+        if (storedFilename == null) {
+            return null;
+        }
+
+        Map<String, Object> updatedContent = new HashMap<>();
+        updatedContent.put("type", "file");
+        updatedContent.put("filename", originalFilename);
+        updatedContent.put("storedFilename", storedFilename);
+        updatedContent.put("storagePath", storageUid + "/" + s3Filename);
+        updatedContent.put("contentType", file.getContentType());
+        updatedContent.put("size", file.getSize());
+        updatedContent.put("uploadedBy", currentUser.getUid());
+        updatedContent.put("notes", updatedNotes);
+        return updatedContent;
+    }
+
+    private String resolveStorageUid(Submitter submitter) {
+        if (submitter instanceof Person personSubmitter) {
+            return personSubmitter.getUid();
+        }
+
+        return submitter != null ? String.valueOf(submitter.getId()) : "submission";
+    }
+
+    private String sanitizeFilename(MultipartFile file) {
+        String incomingName = file.getOriginalFilename() == null ? "submission.bin" : file.getOriginalFilename();
+        return Paths.get(incomingName).getFileName().toString();
+    }
+
+    private String toBase64(MultipartFile file) {
+        try {
+            return Base64.getEncoder().encodeToString(file.getBytes());
+        } catch (Exception e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Error processing submission file: " + e.getMessage());
+        }
+    }
+
+    private String buildS3Filename(String assignmentName, String originalFilename) {
+        return "assignment-submissions/"
+                + slugify(assignmentName)
+                + "/"
+                + Instant.now().toEpochMilli()
+                + "_"
+                + UUID.randomUUID()
+                + "_"
+                + originalFilename;
+    }
+
+    private String slugify(String input) {
+        String normalized = input == null ? "assignment" : input.toLowerCase(Locale.ROOT).trim();
+        String slug = normalized.replaceAll("[^a-z0-9]+", "-").replaceAll("(^-|-$)", "");
+        return slug.isEmpty() ? "assignment" : slug;
     }
 }

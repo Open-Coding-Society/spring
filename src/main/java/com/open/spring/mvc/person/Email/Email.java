@@ -12,7 +12,10 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Properties;
 
 import jakarta.mail.MessagingException;
@@ -286,6 +289,31 @@ public class Email
          e.printStackTrace();
          throw new RuntimeException("Email delivery failed: " + e.getMessage(), e);
       }
+   }
+
+   public static Map<String, String> sendEmailViaSmtp(List<String> recipients, String subject, String body) {
+      if (recipients == null || recipients.isEmpty()) {
+         throw new IllegalArgumentException("At least one recipient is required.");
+      }
+
+      String safeBody = sanitizeText(body);
+      Map<String, String> results = new LinkedHashMap<>();
+      for (String recipient : recipients) {
+         if (recipient == null || recipient.isBlank()) {
+            results.put(String.valueOf(recipient), "error: blank recipient");
+            continue;
+         }
+         try {
+            System.out.println("[Email] Sending via SMTP to " + recipient);
+            sendViaSmtp(recipient.trim(), subject, safeBody);
+            System.out.println("[Email] SUCCESS via SMTP to " + recipient);
+            results.put(recipient, "sent");
+         } catch (Exception e) {
+            System.err.println("[Email] FAILED via SMTP to " + recipient + ": " + e.getMessage());
+            results.put(recipient, "error: " + e.getMessage());
+         }
+      }
+      return results;
    }
 
    public static void sendPasswordResetEmail(String recipient,String code){

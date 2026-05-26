@@ -31,7 +31,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.Getter;
-
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 /**
  * This class provides RESTful API endpoints for managing BathroomQueue
  * entities.
@@ -42,6 +43,7 @@ import lombok.Getter;
 @RestController
 @RequestMapping("/api/bathroom") // Updated mapping to match frontend
 @CrossOrigin(origins = { "http://localhost:8585", "https://pages.opencodingsociety.com/" })
+@Tag(name = "Bathroom Queue API", description = "Endpoints for managing the bathroom queue")
 public class BathroomQueueApiController {
 
     /**
@@ -92,6 +94,7 @@ public class BathroomQueueApiController {
      */
     @CrossOrigin(origins = { "http://localhost:8585", "https://pages.opencodingsociety.com" })
     @PostMapping("/addQueue")
+    @Operation(summary = "Create a new bathroom queue")
     public ResponseEntity<String> addQueue(@RequestBody QueueAddReq request) {
         System.out.println(request);
 
@@ -123,6 +126,7 @@ public class BathroomQueueApiController {
      */
     @CrossOrigin(origins = { "http://localhost:8585", "https://pages.opencodingsociety.com" })
     @PostMapping("/add")
+    @Operation(summary = "Add a student to the queue")
     public ResponseEntity<Object> addToQueue(@RequestBody QueueDto queueDto) {
         // Check if a queue already exists for the given teacher
         Optional<BathroomQueue> existingQueue = repository.findByTeacherEmail(queueDto.getTeacherEmail());
@@ -169,6 +173,7 @@ public class BathroomQueueApiController {
      */
     @CrossOrigin(origins = { "http://localhost:8585", "https://pages.opencodingsociety.com" })
     @DeleteMapping("/remove")
+    @Operation(summary = "Remove a student from the queue")
     public ResponseEntity<Object> removeFromQueue(@RequestBody QueueDto queueDto) {
         Optional<BathroomQueue> queueEntry = repository.findByTeacherEmail(queueDto.getTeacherEmail());
 
@@ -199,6 +204,7 @@ public class BathroomQueueApiController {
      */
     @CrossOrigin(origins = { "http://localhost:8585", "https://pages.opencodingsociety.com" })
     @PostMapping("/removefront/{teacher}")
+    @Operation(summary = "Remove the front student from the queue")
     public void removeFront(@PathVariable String teacher) {
         Optional<BathroomQueue> queueEntry = repository.findByTeacherEmail(teacher);
         BathroomQueue bathroomQueue = queueEntry.get();
@@ -220,6 +226,7 @@ public class BathroomQueueApiController {
      */
     @CrossOrigin(origins = { "*" })
     @PostMapping("/approve")
+    @Operation(summary = "Approve the front student in the queue")
     public ResponseEntity<Object> approveStudent(@RequestBody QueueDto queueDto) {
         Optional<BathroomQueue> queueEntry = repository.findByTeacherEmail(queueDto.getTeacherEmail());
 
@@ -239,6 +246,7 @@ public class BathroomQueueApiController {
 
     @CrossOrigin(origins = { "*" })
     @PostMapping("/updateMaxOccupancy")
+    @Operation(summary = "Update maximum occupancy of a queue")
     public ResponseEntity<Object> updateMaxOccupancy(@RequestBody Map<String, Object> payload) {
         String teacherEmail = (String) payload.get("teacherEmail");
         Integer maxOccupancy = (Integer) payload.get("maxOccupancy");
@@ -260,6 +268,7 @@ public class BathroomQueueApiController {
 
     @CrossOrigin(origins = { "http://localhost:8585", "https://pages.opencodingsociety.com" })
     @PostMapping("/removeFront")
+    @Operation(summary = "Remove the front student from the queue (Alternative)")
     public ResponseEntity<Object> removeFrontStudent(@RequestBody QueueDto queueDto) {
         Optional<BathroomQueue> queueEntry = repository.findByTeacherEmail(queueDto.getTeacherEmail());
 
@@ -302,6 +311,7 @@ public class BathroomQueueApiController {
      *         queue doesn't exist
      */
     @GetMapping("/approveLink")
+    @Operation(summary = "Approve a student via direct link")
     public ResponseEntity<Object> approveStudentViaLink(@RequestParam String teacherEmail,
             @RequestParam String studentName) {
         Optional<BathroomQueue> queueEntry = repository.findByTeacherEmail(teacherEmail);
@@ -325,6 +335,7 @@ public class BathroomQueueApiController {
      * @return A ResponseEntity containing a list of all BathroomQueue entities
      */
     @GetMapping("/all")
+    @Operation(summary = "Retrieve all queues")
     public ResponseEntity<List<BathroomQueue>> getAllQueues() {
         return new ResponseEntity<>(repository.findAll(), HttpStatus.OK);
     }
@@ -338,6 +349,7 @@ public class BathroomQueueApiController {
      */
     @CrossOrigin(origins = { "http://localhost:8585", "https://pages.opencodingsociety.com" })
     @GetMapping("/getActive")
+    @Operation(summary = "Retrieve active queues")
     public ResponseEntity<Object> getActiveQueues() {
         return new ResponseEntity<>(repository.findAll(), HttpStatus.OK);
     }
@@ -363,6 +375,7 @@ public class BathroomQueueApiController {
      * @return A ResponseEntity containing the BathroomQueue entity if found
      */
     @GetMapping("/queue/{teacherEmail}")
+    @Operation(summary = "Get queue by teacher email")
     public ResponseEntity<BathroomQueue> getQueueByTeacher(@PathVariable String teacherEmail) {
         return repository.findByTeacherEmail(teacherEmail)
                 .map(ResponseEntity::ok)

@@ -32,6 +32,7 @@ public class GroupChatRealtimeService {
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("sendMessageServer")
                 .groupId(groupId)
+                .messageId(persisted.getId())
                 .sender(sender)
                 .message(message)
                 .image(image)
@@ -40,6 +41,20 @@ public class GroupChatRealtimeService {
 
         broadcastToGroup(groupId, event);
         return event;
+    }
+
+    public void deleteMessage(Long groupId, String messageId) {
+        Groups group = getGroupOrThrow(groupId);
+        groupChatService.deleteMessage(group.getName(), messageId);
+
+        GroupChatEvent event = GroupChatEvent.builder()
+                .context("deleteMessageServer")
+                .groupId(groupId)
+                .messageId(messageId)
+                .date(Instant.now().toString())
+                .build();
+
+        broadcastToGroup(groupId, event);
     }
 
     public GroupChatEvent publishFile(Long groupId, String sender, String filename, String base64Data) {

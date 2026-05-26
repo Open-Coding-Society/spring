@@ -24,6 +24,14 @@ Entity-removal helpers (run before any large cleanup):
 - `./audit2.sh` — scans code + DB for usage of legacy entities (User, StudentResponse, etc.) and prints a SAFE-TO-DELETE verdict
 - `./delete.sh` — removes only the entities `audit2.sh` cleared; rerun `./mvnw clean compile` after
 
+## Quick links
+
+- DB migrations/scripts and `.env` setup: [README.md](README.md) and [scripts/](scripts/)
+- Auth/JWT cookie flow: `JwtApiController` sets `jwt_java_spring` on POST `/authenticate`; `JwtRequestFilter` reads it on `/api/**` (local cookie overrides in `.env`, see [README.md](README.md))
+- WebSocket endpoints: native `/websocket` in [src/main/java/com/open/spring/mvc/mortevision/nativesocket/WebSocketConfig.java](src/main/java/com/open/spring/mvc/mortevision/nativesocket/WebSocketConfig.java); group chat STOMP `/ws-chat` with `/app` + `/topic` in [src/main/java/com/open/spring/mvc/groups/WebSocketBrokerConfig.java](src/main/java/com/open/spring/mvc/groups/WebSocketBrokerConfig.java) and port gating in [src/main/java/com/open/spring/mvc/groups/ChatWebSocketPortFilter.java](src/main/java/com/open/spring/mvc/groups/ChatWebSocketPortFilter.java)
+- Frontend templates/static assets: [src/main/resources/templates/](src/main/resources/templates/) (per-domain + layouts) and [src/main/resources/static/](src/main/resources/static/); Backend UI notes in [README.md](README.md)
+- Testing/build verification: commands above + Verification section; run `./mvnw clean compile` and `./mvnw test` before schema or auth changes
+
 ## Architecture
 
 Single Spring Boot app, root package `com.open.spring`, three layers:
@@ -59,3 +67,12 @@ After meaningful changes, run all of:
 - `./mvnw clean compile` — catches Lombok/annotation-processor breakage
 - `./mvnw test`
 - `./mvnw spring-boot:run`, then `curl http://127.0.0.1:8585/api/jokes/` (smoke test, no auth required) and authenticate via `POST /authenticate` with `{"uid":"toby","password":"<ADMIN_PASSWORD>"}` to confirm the JWT cookie flow still works
+
+## Coding Conventions & Agent Notes
+
+To ensure consistency in this repository, agents should adhere to the following conventions:
+
+- **Testing**: The project relies on plain JUnit 5 and Mockito (`@Mock`, `@InjectMocks`) for unit tests. Spring context testing (e.g., `@WebMvcTest`, `@SpringBootTest`) is generally avoided. Prefer isolating layers and testing logic directly using Mockito.
+- **Entity & Code Style**: There is no enforcement via Checkstyle or Spotless. However, classes (especially entities) heavily utilize Lombok (`@Data`, `@NoArgsConstructor`, `@AllArgsConstructor`). Avoid generating manual getters, setters, or standard constructors for entities.
+- **Naming/Keywords**: `spring.jpa.properties.hibernate.globally_quoted_identifiers=true` is enabled. You can safely use SQL reserved words (like `groups`) as table or column names, as Hibernate will quote them automatically.
+- **Deployment**: There are no GitHub Action workflows currently managing CI/CD. The application isolates deployment to `docker-compose up -d --build` leveraging the root `Dockerfile` and mounting `./volumes` to persist SQLite data and backups locally.

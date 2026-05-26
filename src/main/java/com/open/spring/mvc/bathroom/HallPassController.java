@@ -14,9 +14,11 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import lombok.Getter;
-
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 @RestController
 @RequestMapping("/api/hallpass")
+@Tag(name = "Hall Pass API", description = "Endpoints for requesting and managing hall passes")
 public class HallPassController {
 
     @Autowired private HallPassService hallPassService;
@@ -34,6 +36,7 @@ public class HallPassController {
      */
     //@CrossOrigin(origins = "http://127.0.0.1:4500")
     @PostMapping("/request")
+    @Operation(summary = "Request a hall pass")
     public ResponseEntity<Object> requestHallPass(@RequestBody HallPassRequestDTO request) {
         try {
             HallPass pass = hallPassService.requestPass(    
@@ -53,6 +56,7 @@ public class HallPassController {
      */
     //@CrossOrigin(origins = "http://127.0.0.1:4500")
     @PostMapping("/checkout")
+    @Operation(summary = "Checkout a hall pass")
     public ResponseEntity<Object> checkoutHallPass(@RequestParam("email") String emailAddress) {
         try {
             boolean pass = hallPassService.checkoutPass(emailAddress);
@@ -65,6 +69,7 @@ public class HallPassController {
 
     @CrossOrigin(origins = "http://127.0.0.1:8080")
     @GetMapping("/getTeacher")
+    @Operation(summary = "Get a teacher by first and last name")
     public ResponseEntity<Object> getTeacher(@RequestParam("fname") String firstName, 
     @RequestParam("lname") String lastName) {
         try {
@@ -77,6 +82,7 @@ public class HallPassController {
 
     //@CrossOrigin(origins = "http://127.0.0.1:4500")
     @GetMapping("/getactivepass")
+    @Operation(summary = "Get the active pass for a user")
     public ResponseEntity<Object> getPass(@RequestParam("email") String emailAddress) {
         try {
             HallPass hallpass = hallPassService.getActivePassForUser(emailAddress);
@@ -87,6 +93,7 @@ public class HallPassController {
     }
     
     @GetMapping("/getTeacherById")
+    @Operation(summary = "Get a teacher by ID")
     public ResponseEntity<Object> getTeacherById(@RequestParam("id") Long teacherId) {
         try {
             Teacher teacher = hallPassService.getTeacherById(teacherId);
@@ -97,6 +104,7 @@ public class HallPassController {
     }
     
     @PostMapping("/addTeacher")
+    @Operation(summary = "Add a new teacher")
     public ResponseEntity<Object> addTeacher(@RequestBody Map<String, String> teacherData) {
         try {
             Teacher teacher = new Teacher();
@@ -112,6 +120,7 @@ public class HallPassController {
      
     // Endpoint to remove a teacher by ID
     @DeleteMapping("/removeTeacher")
+    @Operation(summary = "Remove a teacher")
     public ResponseEntity<Object> removeTeacher(@RequestParam("id") Long teacherId) {
         try {
             boolean removed = hallPassService.removeTeacher(teacherId);

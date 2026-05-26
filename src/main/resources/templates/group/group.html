@@ -58,8 +58,7 @@
                             Add Group Member
                         </button>
                         <button class="btn btn-sm btn-danger delete-group"
-                                th:data-groupid="${group.id}"
-                                onclick="return confirm('Are you sure you want to delete this group?')">
+                                th:data-groupid="${group.id}">
                             Delete
                         </button>
                         <button class="btn btn-sm btn-success open-group-chat"
@@ -674,7 +673,11 @@
         // Delete group handler
         $(document).on("click", ".delete-group", function () {
             const groupId = $(this).data("groupid");
-            
+
+            if (!confirm("Are you sure you want to delete this group?")) {
+                return;
+            }
+
             fetch(`${javaURL}/${groupId}`, {
                 method: "DELETE",
                 headers: { "Content-Type": "application/json" }
