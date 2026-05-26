@@ -24,6 +24,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -321,9 +322,20 @@ public class AssignmentSubmissionAPIController {
     @Transactional
     public ResponseEntity<?> gradeSubmission(
             @PathVariable Long submissionId,
+            @AuthenticationPrincipal UserDetails userDetails,
             @RequestParam Double grade,
             @RequestParam(required = false) String feedback
     ) {
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Authentication required"));
+        }
+        if (!canGradeOrDeleteSubmission(currentUser)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Admin or teacher access required"));
+        }
+
         AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
         if (submission == null) {
             Map<String, String> error = new HashMap<>();
@@ -336,6 +348,38 @@ public class AssignmentSubmissionAPIController {
         submission.setFeedback(feedback);
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
         return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
+    }
+
+    /**
+     * Delete an existing assignment submission.
+     *
+     * @param submissionId the ID of the submission to delete
+     * @param userDetails the authenticated user
+     * @return a success or error response
+     */
+    @DeleteMapping("/{submissionId}")
+    @Transactional
+    public ResponseEntity<?> deleteSubmission(
+            @PathVariable Long submissionId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Authentication required"));
+        }
+        if (!canGradeOrDeleteSubmission(currentUser)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Admin or teacher access required"));
+        }
+
+        AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
+        if (submission == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "Submission not found"));
+        }
+
+        submissionRepo.delete(submission);
+        return ResponseEntity.ok(Map.of("message", "Submission deleted successfully"));
     }
 
     /**
@@ -468,6 +512,17 @@ public class AssignmentSubmissionAPIController {
 
         return groupRepo.findGroupsByPersonId(currentUser.getId()).stream()
                 .anyMatch(group -> Objects.equals(group.getId(), submitter.getId()));
+    }
+
+    private boolean canGradeOrDeleteSubmission(Person currentUser) {
+        return currentUser.hasRoleWithName("ROLE_ADMIN") || currentUser.hasRoleWithName("ROLE_TEACHER");
+    }
+
+    private Person getAuthenticatedPerson(UserDetails userDetails) {
+        if (userDetails == null) {
+            return null;
+        }
+        return personRepo.findByUid(userDetails.getUsername());
     }
 
     private Map<String, Object> updateFileSubmissionContent(
