@@ -15,6 +15,7 @@ public interface CalendarEventRepository extends JpaRepository<CalendarEvent, Lo
     List<CalendarEvent> findAll();
     Optional<CalendarEvent> findByTitle(String title); // Optional is fine here
     Optional<CalendarEvent> findByTitleAndDate(String title, LocalDate date); // Find duplicate by title and date
+    Optional<CalendarEvent> findByTitleAndDateAndIndividual(String title, LocalDate date, String individual);
 
     // Count appointments by date and classPeriod for validation
     @Query("SELECT COUNT(e) FROM CalendarEvent e WHERE e.date = :date AND e.classPeriod = :classPeriod AND e.type = 'appointment'")
