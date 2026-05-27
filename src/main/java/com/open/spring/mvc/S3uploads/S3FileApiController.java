@@ -68,6 +68,19 @@ public class S3FileApiController {
     public ResponseEntity<?> downloadFile(
             @PathVariable String uid,
             @PathVariable String filename) {
+        return downloadFileByQuery(uid, filename);
+        }
+
+        /**
+         * Download a file from S3 using query parameters so nested keys survive URL parsing.
+         * @param uid User ID
+         * @param filename File key inside the user's S3 prefix
+         * @return File bytes as a downloadable/inline response
+         */
+        @GetMapping("/download")
+        public ResponseEntity<?> downloadFileByQuery(
+            @RequestParam String uid,
+            @RequestParam String filename) {
         
         try {
             String base64Data = fileHandler.decodeFile(uid, filename);
