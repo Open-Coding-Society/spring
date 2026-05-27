@@ -110,6 +110,7 @@ public class SecurityConfig {
                         // Face biometric data:
                         //   GET /faces  - teacher/admin only (scanner feed)
                         //   POST /register - any authenticated user (self-service face enrollment)
+                        .requestMatchers(HttpMethod.POST, "/api/face/register/public", "/api/face/register/public/").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/face/faces").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/face/register").hasAnyAuthority("ROLE_USER", "ROLE_STUDENT", "ROLE_TEACHER", "ROLE_ADMIN")
                         .requestMatchers("/api/face/**").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
@@ -235,6 +236,7 @@ public class SecurityConfig {
         policy.put("PUT /api/person/**", "ROLE_ADMIN");
         policy.put("GET /api/person/uid/**", "permitAll");
         // Face biometric endpoints
+        policy.put("POST /api/face/register/public", "permitAll");
         policy.put("GET /api/face/faces", "ROLE_TEACHER|ROLE_ADMIN");
         policy.put("POST /api/face/register", "ROLE_USER|ROLE_STUDENT|ROLE_TEACHER|ROLE_ADMIN");
         policy.put("/api/face/**", "ROLE_TEACHER|ROLE_ADMIN");

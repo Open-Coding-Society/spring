@@ -39,6 +39,45 @@ public class FaceApiController {
         private String faceData;
     }
 
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @Getter
+    @Setter
+    public static class PublicFaceDto {
+        private String sid;
+        private String uid;
+        private String faceData;
+    }
+
+    /**
+     * Public unauthenticated registration to save face data by student ID or GitHub ID.
+     */
+    @PostMapping("/register/public")
+    public ResponseEntity<Object> registerPublicFace(@RequestBody PublicFaceDto publicFaceDto) {
+        if (publicFaceDto.getFaceData() == null || publicFaceDto.getFaceData().isEmpty()) {
+            return new ResponseEntity<>("Face data is required", HttpStatus.BAD_REQUEST);
+        }
+
+        Person person = null;
+        if (publicFaceDto.getSid() != null && !publicFaceDto.getSid().isBlank()) {
+            person = repository.findBySid(publicFaceDto.getSid());
+        }
+        if (person == null && publicFaceDto.getUid() != null && !publicFaceDto.getUid().isBlank()) {
+            person = repository.findByUid(publicFaceDto.getUid());
+        }
+
+        if (person == null) {
+            return new ResponseEntity<>("Student not found", HttpStatus.NOT_FOUND);
+        }
+
+        person.setFaceData(publicFaceDto.getFaceData());
+        repository.save(person);
+
+        logger.info("Public face data registered for user: {}", person.getUid());
+        Map<String, String> response = new HashMap<>();
+        response.put("message", "Face data registered successfully");
+        return new ResponseEntity<>(response, HttpStatus.OK);
+    }
+
     /**
      * Registration for authenticated users to save their face data.
      */
