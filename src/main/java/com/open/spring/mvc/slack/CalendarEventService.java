@@ -33,6 +33,10 @@ public class CalendarEventService {
         return calendarEventRepository.findByTitleAndDate(title, date).orElse(null);
     }
 
+    public CalendarEvent findByTitleAndDateAndIndividual(String title, LocalDate date, String individual) {
+        return calendarEventRepository.findByTitleAndDateAndIndividual(title, date, individual).orElse(null);
+    }
+
     // Create a calendar event
     public void createCalendarEvent(String title, LocalDate eventDate, String description, String type, String period) {
         CalendarEvent event = new CalendarEvent();
@@ -47,6 +51,29 @@ public class CalendarEventService {
     // Get events by a specific date
     public List<CalendarEvent> getEventsByDate(LocalDate date) {
         return calendarEventRepository.findByDate(date);
+    }
+
+    public List<CalendarEvent> getEventsVisibleToIndividual(String individual) {
+        List<CalendarEvent> events = calendarEventRepository.findAll();
+        if (individual == null || individual.isBlank()) {
+            return events;
+        }
+
+        return events.stream()
+                .filter(event -> event.getIndividual() == null || event.getIndividual().isBlank() || individual.equalsIgnoreCase(event.getIndividual()))
+                .toList();
+    }
+
+    public List<CalendarEvent> getEventsByDateVisibleToIndividual(LocalDate date, String individual) {
+        return getEventsVisibleToIndividual(individual).stream()
+                .filter(event -> date.equals(event.getDate()))
+                .toList();
+    }
+
+    public List<CalendarEvent> getEventsWithinDateRangeVisibleToIndividual(LocalDate startDate, LocalDate endDate, String individual) {
+        return getEventsVisibleToIndividual(individual).stream()
+                .filter(event -> !event.getDate().isBefore(startDate) && !event.getDate().isAfter(endDate))
+                .toList();
     }
 
     // Update event by id

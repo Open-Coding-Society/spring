@@ -67,8 +67,10 @@ public class CalendarEventController {
      * Returns detailed response with created/updated/failed counts
      */
     @PostMapping("/add_events")
-    public ResponseEntity<BulkEventsResponse> addEvents(@RequestBody BulkEventsRequest request) {
+    public ResponseEntity<BulkEventsResponse> addEvents(@RequestBody BulkEventsRequest request,
+                                                        @AuthenticationPrincipal UserDetails userDetails) {
         BulkEventsResponse response = new BulkEventsResponse();
+        String currentIndividual = resolveIndividual(userDetails);
         
         if (request.getEvents() == null || request.getEvents().isEmpty()) {
             response.setSuccess(false);
@@ -85,7 +87,10 @@ public class CalendarEventController {
                 String period = eventMap.get("period");
                 String classPeriod = eventMap.getOrDefault("classPeriod", "");
                 String groupName = eventMap.getOrDefault("groupName", "");
-                String individual = eventMap.getOrDefault("individual", "");
+                String individual = eventMap.getOrDefault("individual", currentIndividual != null ? currentIndividual : "");
+                if (currentIndividual != null && !currentIndividual.isBlank()) {
+                    individual = currentIndividual;
+                }
 
                 if (title == null || title.trim().isEmpty() || dateStr == null || dateStr.trim().isEmpty()) {
                     response.setFailed(response.getFailed() + 1);
@@ -103,7 +108,9 @@ public class CalendarEventController {
                 }
 
                 // Check for duplicate (same title and date)
-                CalendarEvent existingEvent = calendarEventService.findByTitleAndDate(title.trim(), date);
+                CalendarEvent existingEvent = (individual != null && !individual.isBlank())
+                    ? calendarEventService.findByTitleAndDateAndIndividual(title.trim(), date, individual.trim())
+                    : calendarEventService.findByTitleAndDate(title.trim(), date);
                 if (existingEvent != null) {
                     // Update existing event
                     existingEvent.setDescription(description);
@@ -140,7 +147,9 @@ public class CalendarEventController {
     }
 
     @PostMapping("/add_bulk")
-    public void addBulkEvents(@RequestBody List<Map<String, String>> events) {
+    public void addBulkEvents(@RequestBody List<Map<String, String>> events,
+                              @AuthenticationPrincipal UserDetails userDetails) {
+        String currentIndividual = resolveIndividual(userDetails);
         for (Map<String, String> eventMap : events) {
             String dateStr = eventMap.get("date");
             String title = eventMap.get("title");
@@ -149,7 +158,7 @@ public class CalendarEventController {
             String period = eventMap.get("period");
             String classPeriod = eventMap.getOrDefault("classPeriod", "");
             String groupName = eventMap.getOrDefault("groupName", "");
-            String individual = eventMap.getOrDefault("individual", "");
+            String individual = eventMap.getOrDefault("individual", currentIndividual != null ? currentIndividual : "");
 
             LocalDate date = LocalDate.parse(dateStr);
             CalendarEvent event = new CalendarEvent(date, title, description, type, period, classPeriod, groupName, individual);
@@ -161,6 +170,7 @@ public class CalendarEventController {
     public ResponseEntity<Object> addEvent(@RequestBody Map<String, String> jsonMap,
                                            @AuthenticationPrincipal UserDetails userDetails) {
         Map<String, String> errorResponse = new HashMap<>();
+        String currentIndividual = resolveIndividual(userDetails);
         try {
             String title = jsonMap.get("title");
             String dateStr = jsonMap.get("date");
@@ -187,7 +197,7 @@ public class CalendarEventController {
             String period = jsonMap.get("period"); // Might be null
             String classPeriod = jsonMap.getOrDefault("classPeriod", "");
             String groupName = jsonMap.getOrDefault("groupName", "");
-            String individual = jsonMap.getOrDefault("individual", "");
+            String individual = jsonMap.getOrDefault("individual", currentIndividual != null ? currentIndividual : "");
 
             // Validation for appointments
             if ("appointment".equals(type)) {
@@ -208,7 +218,9 @@ public class CalendarEventController {
             }
 
             // Check for duplicate (same title and date)
-            CalendarEvent existingEvent = calendarEventService.findByTitleAndDate(title.trim(), date);
+                CalendarEvent existingEvent = (individual != null && !individual.isBlank())
+                    ? calendarEventService.findByTitleAndDateAndIndividual(title.trim(), date, individual.trim())
+                    : calendarEventService.findByTitleAndDate(title.trim(), date);
             if (existingEvent != null) {
                 // Update existing event instead of creating duplicate
                 existingEvent.setDescription(description);
@@ -233,9 +245,10 @@ public class CalendarEventController {
     }
 
     @GetMapping("/events/{date}")
-    public List<CalendarEvent> getEventsByDate(@PathVariable String date) {
+    public List<CalendarEvent> getEventsByDate(@PathVariable String date,
+                                               @AuthenticationPrincipal UserDetails userDetails) {
         LocalDate localDate = LocalDate.parse(date);
-        return calendarEventService.getEventsByDate(localDate);
+        return filterForCurrentUser(calendarEventService.getEventsByDate(localDate), resolveIndividual(userDetails));
     }
 
     @PutMapping("/edit/{id}")
@@ -243,6 +256,7 @@ public class CalendarEventController {
     public ResponseEntity<Object> editEvent(@PathVariable int id, @RequestBody Map<String, String> payload,
                                             @AuthenticationPrincipal UserDetails userDetails) {
         Map<String, String> errorResponse = new HashMap<>();
+        String currentIndividual = resolveIndividual(userDetails);
         try {
             String newTitle = payload.get("newTitle");
             String description = payload.get("description");
@@ -251,7 +265,7 @@ public class CalendarEventController {
             String type = payload.getOrDefault("type", "event");
             String classPeriod = payload.getOrDefault("classPeriod", "");
             String groupName = payload.getOrDefault("groupName", "");
-            String individual = payload.getOrDefault("individual", "");
+            String individual = payload.getOrDefault("individual", currentIndividual != null ? currentIndividual : "");
 
             if (newTitle == null || newTitle.trim().isEmpty()) {
                 errorResponse.put("message", "New title cannot be null or empty.");
@@ -323,8 +337,8 @@ public class CalendarEventController {
     }
 
     @GetMapping("/events")
-    public List<CalendarEvent> getAllEvents() {
-        return calendarEventService.getAllEvents();
+    public List<CalendarEvent> getAllEvents(@AuthenticationPrincipal UserDetails userDetails) {
+        return filterForCurrentUser(calendarEventService.getAllEvents(), resolveIndividual(userDetails));
     }
 
     /**
@@ -338,7 +352,10 @@ public class CalendarEventController {
             @RequestParam(required = false) String individual,
             @RequestParam(required = false) String classPeriod,
             @RequestParam(required = false) String start,
-            @RequestParam(required = false) String end) {
+            @RequestParam(required = false) String end,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        String currentIndividual = resolveIndividual(userDetails);
+        String effectiveIndividual = (individual != null && !individual.isBlank()) ? individual : currentIndividual;
 
         java.time.LocalDate startDate = null;
         java.time.LocalDate endDate = null;
@@ -349,17 +366,25 @@ public class CalendarEventController {
             return List.of();
         }
 
-        return calendarEventService.filterEvents(type, groupName, individual, classPeriod, startDate, endDate);
+        return filterForCurrentUser(
+                calendarEventService.filterEvents(type, groupName, effectiveIndividual, classPeriod, startDate, endDate),
+                currentIndividual);
     }
 
     @GetMapping("/events/range")
-    public List<CalendarEvent> getEventsWithinDateRange(@RequestParam String start, @RequestParam String end) {
-        return calendarEventService.getEventsWithinDateRange(LocalDate.parse(start), LocalDate.parse(end));
+    public List<CalendarEvent> getEventsWithinDateRange(@RequestParam String start,
+                                                       @RequestParam String end,
+                                                       @AuthenticationPrincipal UserDetails userDetails) {
+        return filterForCurrentUser(
+                calendarEventService.getEventsWithinDateRange(LocalDate.parse(start), LocalDate.parse(end)),
+                resolveIndividual(userDetails));
     }
 
     @GetMapping("/events/next-day")
-    public List<CalendarEvent> getNextDayEvents() {
-        return calendarEventService.getEventsByDate(LocalDate.now().plusDays(1));
+    public List<CalendarEvent> getNextDayEvents(@AuthenticationPrincipal UserDetails userDetails) {
+        return filterForCurrentUser(
+                calendarEventService.getEventsByDate(LocalDate.now().plusDays(1)),
+                resolveIndividual(userDetails));
     }
 
     /**
@@ -405,7 +430,8 @@ public class CalendarEventController {
     @GetMapping("/events/bulk")
     public ResponseEntity<List<CalendarEvent>> bulkExtractEvents(
             @RequestParam(required = false) String startDate,
-            @RequestParam(required = false) String endDate) {
+            @RequestParam(required = false) String endDate,
+            @AuthenticationPrincipal UserDetails userDetails) {
         try {
             List<CalendarEvent> events;
             if (startDate != null && endDate != null) {
@@ -415,7 +441,7 @@ public class CalendarEventController {
             } else {
                 events = calendarEventService.getAllEvents();
             }
-            return ResponseEntity.ok(events);
+            return ResponseEntity.ok(filterForCurrentUser(events, resolveIndividual(userDetails)));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(null);
@@ -438,6 +464,24 @@ public class CalendarEventController {
     @Setter
     public static class DeleteByTitleRequest {
         private String title;
+    }
+
+    private String resolveIndividual(UserDetails userDetails) {
+        return userDetails != null ? userDetails.getUsername() : null;
+    }
+
+    private List<CalendarEvent> filterForCurrentUser(List<CalendarEvent> events, String individual) {
+        if (individual == null || individual.isBlank()) {
+            return events;
+        }
+
+        List<CalendarEvent> visibleEvents = new ArrayList<>();
+        for (CalendarEvent event : events) {
+            if (event.getIndividual() == null || event.getIndividual().isBlank() || individual.equalsIgnoreCase(event.getIndividual())) {
+                visibleEvents.add(event);
+            }
+        }
+        return visibleEvents;
     }
 
     /**
