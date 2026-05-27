@@ -88,6 +88,9 @@ public class CalendarEventController {
                 String classPeriod = eventMap.getOrDefault("classPeriod", "");
                 String groupName = eventMap.getOrDefault("groupName", "");
                 String individual = eventMap.getOrDefault("individual", currentIndividual != null ? currentIndividual : "");
+                if (currentIndividual != null && !currentIndividual.isBlank()) {
+                    individual = currentIndividual;
+                }
 
                 if (title == null || title.trim().isEmpty() || dateStr == null || dateStr.trim().isEmpty()) {
                     response.setFailed(response.getFailed() + 1);
