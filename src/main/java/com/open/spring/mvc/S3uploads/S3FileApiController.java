@@ -1,10 +1,15 @@
 package com.open.spring.mvc.S3uploads;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.ContentDisposition;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -68,11 +73,25 @@ public class S3FileApiController {
             String base64Data = fileHandler.decodeFile(uid, filename);
             
             if (base64Data != null) {
-                Map<String, String> response = new HashMap<>();
-                response.put("filename", filename);
-                response.put("uid", uid);
-                response.put("base64Data", base64Data);
-                return new ResponseEntity<>(response, HttpStatus.OK);
+                    byte[] data = java.util.Base64.getDecoder().decode(base64Data);
+                    ByteArrayResource resource = new ByteArrayResource(data);
+
+                    MediaType mediaType = MediaType.APPLICATION_OCTET_STREAM;
+                    org.springframework.util.MimeType mimeType = org.springframework.http.MediaTypeFactory.getMediaType(filename).orElse(null);
+                    if (mimeType != null) {
+                        mediaType = MediaType.parseMediaType(mimeType.toString());
+                    }
+
+                    HttpHeaders headers = new HttpHeaders();
+                    headers.setContentDisposition(ContentDisposition.inline()
+                            .filename(filename, StandardCharsets.UTF_8)
+                            .build());
+
+                    return ResponseEntity.ok()
+                            .headers(headers)
+                            .contentType(mediaType)
+                            .contentLength(data.length)
+                            .body(resource);
             } else {
                 return new ResponseEntity<>("File not found", HttpStatus.NOT_FOUND);
             }
