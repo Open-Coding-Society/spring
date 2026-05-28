@@ -143,9 +143,9 @@ public class SecurityConfig {
                         // AI preferences endpoints require authenticated roles
                         .requestMatchers(HttpMethod.POST, "/api/upai").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         .requestMatchers(HttpMethod.GET, "/api/upai/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
-                        // ← GEMINI FRQ GRADING - PUBLIC (NO AUTH REQUIRED for exam simulator)
-                        .requestMatchers(HttpMethod.POST, "/api/gemini-frq/grade").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/gemini-frq/grade/").permitAll()
+                        // ← GEMINI FRQ GRADING - authenticated role access
+                        .requestMatchers(HttpMethod.POST, "/api/gemini-frq/grade").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/gemini-frq/grade/").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         .requestMatchers(HttpMethod.GET, "/api/gemini-frq/grade/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // Admin access for certificates + quests
                         .requestMatchers(HttpMethod.POST, "/api/quests/**").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")

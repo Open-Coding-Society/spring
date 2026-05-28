@@ -47,7 +47,7 @@ public class GeminiController {
 
     // POST - Grade a student's answer
     @PostMapping("/grade")
-    @PreAuthorize("permitAll()")
+    @PreAuthorize("hasAnyAuthority('ROLE_USER', 'ROLE_ADMIN', 'ROLE_TEACHER', 'ROLE_STUDENT')")
     public ResponseEntity<?> grade(@RequestBody GradeRequest request) {
         try {
             String question = request.getQuestion();
