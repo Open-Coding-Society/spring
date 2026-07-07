@@ -49,7 +49,7 @@ public class JwtApiController {
 	@Value("${jwt.cookie.same-site:None}")  // Defaults to production setting if property not found
 	private String cookieSameSite;
 
-	@Value("${jwt.cookie.max-age:43200}")  // 12 hours
+	@Value("${jwt.cookie.max-age:604800}")  // 1 week
 	private long cookieMaxAge;
 
 	@Value("${server.servlet.session.cookie.name:sess_java_spring}")
