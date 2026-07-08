@@ -105,6 +105,7 @@ public class MvcSecurityConfig {
                 .requestMatchers("/mvc/grades/**").hasAuthority("ROLE_ADMIN")
                 .requestMatchers("/mvc/assignments/read").hasAnyAuthority("ROLE_ADMIN", "ROLE_TEACHER")
                 .requestMatchers("/mvc/bank/read").hasAuthority("ROLE_ADMIN")
+                .requestMatchers("/bank/**").permitAll()
                 .requestMatchers(HttpMethod.OPTIONS, "/ws-chat/**").permitAll()
                 .requestMatchers("/mvc/progress/read").hasAnyAuthority("ROLE_ADMIN", "ROLE_TEACHER")
                 .requestMatchers("/ws-chat/**").permitAll()
