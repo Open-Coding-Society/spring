@@ -167,54 +167,111 @@ AWS_REGION=us-east-2
 
 ## Database Management Workflow with Scripts
 
-If you are working with the database, follow the below procedure to safely interact with the remote DB while applying changes locally. Certain scripts require spring to be running while others don't, so follow the instructions that the scripts provide.
+If you are working with the database, follow the procedure below. Production runs
+on **MySQL (AWS RDS)**; local development runs on SQLite. The migration scripts move
+data between the two and verify, table by table, that nothing was left behind.
 
-Note, steps 1,2,3,5 are on your development (LOCAL) server. You need to update your .env on development server and be sure all PRs are completed, pulled, and tested before you start pushing to production.
+Note: steps 1, 2, 3 and 6 run on your development (LOCAL) machine. Be sure all PRs are
+merged, pulled and tested before you touch production.
 
-0. Be sure ADMIN_PASSWORD is set in .env.  You will need a venv for the python scripts.
+0. Set `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` in `.env` (pointing at production RDS) and
+   create a venv with `mysql-connector-python` installed. `mysqldump` must be on PATH.
 
-1. Initialize your local DB with clean data. For example, this would be good to see that a schema update works correctly.
-> python scripts/db_init.py
+   Confirm what you are pointed at, and that the schema translation is sound:
+   > python3 scripts/db_migrate.py status
+   > python3 scripts/db_migrate.py check
 
-2. Pull the database content from the remote DB onto your local machine. This allows you to work with real data and test that real data works with your local changes.
-> python scripts/db_prod2local.py
+1. Pull production into a local SQLite backup. This records production's exact MySQL DDL
+   and row counts alongside the data, and **exits non-zero if any table or row is missing**.
+   > python3 scripts/db_migrate.py backup
 
-3. TEST TEST TEST! Make sure your changes work correctly with the local DB.
+   The backup lands in `volumes/backups/mysql_backup_<timestamp>.db`. Do not proceed if
+   this command fails -- an incomplete backup is not a valid migration source.
 
-4. Now go onto the remote DB and back up the db using "cp sqlite.db backups/sqlite_year-month-day.db" in the volumes directory of the spring directory on cockpit. Then, run `git pull` to ensure that spring has been updated with the latest code. Then, run `python scripts/db_init.py` again to ensure that the remote DB schema is up to date with the latest code.
+2. Point your local app at that backup (or at `volumes/sqlite.db`) and TEST TEST TEST.
+   Make sure the new code works with real production data.
 
-5. Once you are satisfied with your changes, push the local DB content to the remote DB. This requires authentication, so you need to replace the ADMIN_PASSWORD in the .env file of "spring" with the production admin password.
-> python scripts/db_local2prod.py
+3. Verify the new schema builds cleanly on a scratch MySQL database first, if you have one.
 
-## Direct migration scripts
+4. On production (cockpit, `open/spring`):
+   - Take spring down: `docker compose down`
+   - Update code: `git pull`
+   - Rebuild the schema with Hibernate (native MySQL DDL, no cross-dialect translation):
+     `python3 scripts/db_migrate.py init`
 
-Use these when you want a full one-command database sync instead of the staged workflow above:
+5. Load your data on top of the new schema:
+   > python3 scripts/db_migrate.py restore --keep-target-schema --backup-file volumes/backups/mysql_backup_<timestamp>.db
 
-- Pull MySQL into local SQLite: `python scripts/db_mysql2local.py`
-- Push local SQLite into MySQL: `python scripts/db_local2mysql.py`
+   This takes a `mysqldump` rollback point before touching anything, loads only the columns
+   the old and new schemas share (reporting added/dropped columns), and re-counts every
+   table afterwards. It exits non-zero if MySQL does not match the backup.
 
-Both scripts use the database settings from `.env`, and both can be run non-interactively with `FORCE_YES=true`.
+6. Bring spring up: `docker compose up -d --build`
 
-## Condensed DB/Schema update simple steps
+### Restoring production exactly as it was (rollback)
 
-**(a copy of what's above, just condensed)**
+`mysqlrestore.py` without `--keep-target-schema` rebuilds each table from the MySQL DDL
+recorded in the backup -- types, indexes, UNIQUE keys and foreign keys included -- so it
+reproduces the source database rather than approximating it:
 
-1. Initialize local DB: `python scripts/db_init.py`
+> python3 scripts/db_migrate.py restore --backup-file volumes/backups/mysql_backup_<timestamp>.db
 
-2. Pull production data to local: `python scripts/db_prod2local.py`
+The `mysqldump` safety dump taken before any destructive run is the faster rollback:
 
-3. Test your changes locally
+> mysql -h <host> -P <port> -u <user> -p <database> < volumes/backups/predrop_<db>_<timestamp>.sql
 
-4. On production server (in cockpit: open/spring directory):
-- Backup DB in volumes directory: `cp sqlite.db backups/sqlite_year-month-day.db`
-- Take spring instance down: `docker compose down`
-- Update code: `git pull`
-- Update schema: `python scripts/db_init.py`
-- Bring spring instance up: `docker compose up -d --build`
+### Notes on what the scripts guarantee
 
-5. Push local changes to production: `python scripts/db_local2prod.py`
-(Requires admin password from production in .env)
+- **All tables, including Hibernate Envers audit tables** (`HT_*`, `HTE_*`) and the
+  Hibernate id-allocation tables (`*_seq`). The app runs with
+  `spring.jpa.hibernate.ddl-auto=none`, so Hibernate will *not* recreate anything that
+  gets dropped -- losing `*_seq` would restart id allocation at 1 and collide with
+  existing rows, and losing `HTE_*` breaks every write to an audited entity.
+- **Row-count reconciliation** on both directions. Any shortfall is a non-zero exit,
+  never a printed warning.
+- Older backups that predate the recorded-DDL format still restore, via a fallback that
+  derives types from SQLite. That path is lossy and the script says so loudly; prefer
+  `--keep-target-schema`.
 
+### How the scripts fit together
+
+`db_migrate.py` is the only entry point you need:
+
+| Command | What it does |
+| --- | --- |
+| `status` | Prints the configured target and what is currently in it |
+| `check` | Round-trips the schema through both translators and fails if they disagree |
+| `backup` | MySQL to a verified local SQLite backup |
+| `init` | Rebuilds the schema on the target with Hibernate |
+| `restore` | SQLite backup back into MySQL |
+
+Underneath, `mysqlbackup.py` and `mysqlrestore.py` still hold the backup and restore
+implementations and can be run directly -- `db_migrate.py` calls straight into them, so
+there is one implementation, not two. Everything shared between them (reading `.env`,
+parsing `DB_URL`, opening connections, the backup metadata table name) lives in
+`mysql_common.py`, so the two scripts cannot disagree about which database they are
+talking to.
+
+**Why `check` exists.** The MySQL-to-SQLite and SQLite-to-MySQL type maps are inverse
+functions living in two different files. Nothing structural forces them to stay inverse,
+and when they drifted the round trip quietly turned every `VARCHAR` and `DATETIME` column
+into `LONGTEXT`. `check` runs every table in `schema_full.txt` through both directions and
+fails on any degradation. It needs no database and no driver, so it is safe to run
+anywhere, including CI. Run it after any change to either map.
+
+`schema_full.txt` is a point-in-time snapshot, so it goes stale as entities are added.
+It is fixture data for `check` and nothing else — no part of the application reads it.
+To check against the schema that actually exists right now:
+
+> python3 scripts/db_migrate.py check --live
+
+### Superseded scripts
+
+`db_prod2local.py`, `db_local2prod.py`, `db_mysql2local.py`, `db_local2mysql.py` and
+`db_prod_to_mysql.py` predate the MySQL migration and are **not** part of this workflow.
+Each now carries a deprecation banner. `db_local2mysql.py` in particular has its own
+independent MySQL writer that received none of the schema, safety-dump or row-count
+fixes -- running it against production would reintroduce every bug listed above.
 
 # Testing Grade FRQs API with Postman
 
