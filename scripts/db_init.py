@@ -125,37 +125,57 @@ def run_sqlite_source_init(force: bool) -> None:
     runner.run(timeout_seconds=180, settle_seconds=5)
 
 
-def restore_sqlite_source_to_mysql(env_values):
-    """Restore the freshly generated local SQLite database into MySQL."""
-    from mysqlrestore import parse_jdbc_url, restore_sqlite_to_mysql
+def mysql_connection_settings(env_values):
+    """Resolve (host, port, database, username, password) for the MySQL target."""
+    from mysqlrestore import parse_jdbc_url
 
-    host = None
-    port = 3306
-    database = None
     db_url = resolve_setting("DB_URL", env_values)
+    if not db_url:
+        raise MigrationError("DB_URL is required for a MySQL target")
 
-    if db_url:
-        try:
-            host, port, database = parse_jdbc_url(db_url)
-        except Exception as exc:
-            raise MigrationError(f"Invalid DB_URL for MySQL target: {db_url}") from exc
+    try:
+        host, port, database = parse_jdbc_url(db_url)
+    except SystemExit as exc:
+        raise MigrationError(f"Invalid DB_URL for MySQL target: {db_url}") from exc
 
     username = resolve_setting("DB_USERNAME", env_values)
     password = resolve_setting("DB_PASSWORD", env_values)
 
     if not host or not database or not username or not password:
-        raise MigrationError("Missing MySQL settings for restore step")
+        raise MigrationError("Missing MySQL settings (DB_URL, DB_USERNAME, DB_PASSWORD)")
 
-    print("\nRestoring local SQLite schema/data into MySQL...")
-    restore_sqlite_to_mysql(
-        backup_file=str(DB_FILE),
-        host=host,
-        port=port,
-        user=username,
-        password=password,
-        database=database,
-        force=True,
+    return host, port, database, username, password
+
+
+def run_mysql_schema_init(env_values):
+    """Build the MySQL schema with Hibernate itself.
+
+    Hibernate emits native MySQL DDL for the current entities, so the schema is
+    correct by construction. Translating a SQLite schema into MySQL instead
+    (the old path) downgraded every VARCHAR/DATETIME/JSON column to LONGTEXT and
+    dropped every index, UNIQUE key and foreign key.
+    """
+    host, port, database, username, password = mysql_connection_settings(env_values)
+    db_url = resolve_setting("DB_URL", env_values)
+    driver = resolve_setting("DB_DRIVER", env_values) or "com.mysql.cj.jdbc.Driver"
+    dialect = resolve_setting("DB_DIALECT", env_values) or "org.hibernate.dialect.MySQLDialect"
+
+    print(f"\nGenerating the MySQL schema with Hibernate on {host}:{port}/{database}...")
+    print("(This drops and recreates every table Hibernate manages.)")
+
+    runner = SpringBootSchemaRunner(
+        PROJECT_ROOT,
+        LOG_FILE,
+        SPRING_PORT,
+        additional_run_args=[
+            f"--spring.datasource.url={db_url}",
+            f"--spring.datasource.username={username}",
+            f"--spring.datasource.password={password}",
+            f"--spring.datasource.driver-class-name={driver}",
+            f"--spring.jpa.database-platform={dialect}",
+        ],
     )
+    runner.run(timeout_seconds=300, settle_seconds=10)
 
 def check_spring_boot_running():
     """Check if Spring Boot is already running"""
@@ -201,22 +221,24 @@ def main():
         print("Cancelled.")
         sys.exit(0)
 
-    # Step 3/4/5: Always create a local SQLite source snapshot first.
-    run_sqlite_source_init(force=os.getenv('FORCE_YES') == 'true')
-
+    # Step 3: Build the schema on the target with Hibernate, which emits DDL
+    # native to that database. No cross-dialect translation is involved.
     if target_db == "mysql":
         apply_mysql_defaults_and_validate(env_values)
-        restore_sqlite_source_to_mysql(env_values)
-    
+        run_mysql_schema_init(env_values)
+    else:
+        run_sqlite_source_init(force=os.getenv('FORCE_YES') == 'true')
+
     # Success message
     print_header("DATABASE RESET COMPLETE")
     print(f"The {target_db.upper()} database has been reset to original state with:")
+    print("  Fresh schema created by Hibernate (native DDL for this database)")
+    print("  Default data loaded (Person.init(), QuizScore.init(), etc.)")
     if target_db == "mysql":
-        print("  SQLite source snapshot created")
-        print("  SQLite schema/data restored into MySQL")
-    else:
-        print("  Fresh schema created")
-        print("  Default data loaded (Person.init(), QuizScore.init(), etc.)")
+        print("\nThe MySQL database now holds the NEW schema and seed data only.")
+        print("Load your real data on top of it with:")
+        print("  python3 scripts/mysqlrestore.py --keep-target-schema \\")
+        print("      --backup-file volumes/backups/<your_backup>.db")
     print("\nYou can now start your application normally:")
     print("  ./mvnw spring-boot:run\n")
 
