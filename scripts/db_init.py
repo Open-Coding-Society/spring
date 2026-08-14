@@ -103,9 +103,20 @@ def apply_mysql_defaults_and_validate(env_values):
 
 
 def run_sqlite_source_init(force: bool) -> None:
-    """Create a fresh local SQLite database to serve as the schema/data source."""
+    """Rebuild the local SQLite database with a fresh schema and default data."""
     db_files = SqliteDatabaseFiles(DB_FILE, BACKUP_DIR)
-    db_files.backup()
+
+    if DB_FILE.exists():
+        # Use the online backup API rather than a file copy: this database runs
+        # in WAL mode, so a plain copy can miss whatever is still in the -wal
+        # file. backup_sqlite() also verifies row counts and raises if the
+        # backup came up short, which is what makes it safe to delete the
+        # original on the next line.
+        import sqlite_migrate
+        sqlite_migrate.backup_sqlite(DB_FILE, BACKUP_DIR)
+    else:
+        print("No existing database file to backup")
+
     db_files.remove()
 
     print("\nStarting Spring Boot to recreate LOCAL SQLite schema and load default data...")

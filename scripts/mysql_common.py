@@ -141,8 +141,35 @@ def get_mysql_connection(host, port, user, password, database):
         sys.exit(1)
 
 
+SQLITE_DB_FILE = PROJECT_ROOT / "volumes" / "sqlite.db"
+
+
+def detect_target():
+    """Return 'mysql' or 'sqlite' for the database the app is configured to use.
+
+    application.properties defaults to `jdbc:sqlite:volumes/sqlite.db` and only
+    switches to MySQL when DB_URL is set, so a commented-out DB_URL means the
+    deployment is running on the local SQLite file -- which is where its real
+    data then lives.
+    """
+    if not ENV_FILE.exists():
+        return "sqlite"
+
+    env_vars = load_env_file()
+    db_url = env_vars.get("DB_URL")
+    db_driver = env_vars.get("DB_DRIVER")
+
+    if db_url and db_url.lower().startswith("jdbc:mysql:"):
+        return "mysql"
+    if db_driver and "mysql" in db_driver.lower():
+        return "mysql"
+    return "sqlite"
+
+
 def describe_target():
     """One-line description of the database the scripts are pointed at."""
+    if detect_target() == "sqlite":
+        return f"sqlite:{SQLITE_DB_FILE}"
     host, port, user, _password, database = get_mysql_config()
     return f"{user}@{host}:{port}/{database}"
 
