@@ -167,12 +167,19 @@ AWS_REGION=us-east-2
 
 ## Database Management Workflow with Scripts
 
-If you are working with the database, follow the procedure below. Production runs
-on **MySQL (AWS RDS)**; local development runs on SQLite. The migration scripts move
-data between the two and verify, table by table, that nothing was left behind.
+> **Which database am I on?** `application.properties` defaults to
+> `jdbc:sqlite:volumes/sqlite.db` and only switches to MySQL when `DB_URL` is set. If
+> `DB_URL` is commented out in `.env`, the deployment is running on that **local SQLite
+> file**, and that file — not RDS — holds the live data. Always run
+> `python3 scripts/db_migrate.py status` first; every command follows the same detection,
+> so `backup`, `init` and `restore` all act on whichever database the app itself uses.
 
-Note: steps 1, 2, 3 and 6 run on your development (LOCAL) machine. Be sure all PRs are
-merged, pulled and tested before you touch production.
+Two deployment shapes are supported, and the scripts handle both. See
+**SQLite deployment** below for the current one; the MySQL procedure that follows applies
+once `DB_URL` is set and RDS becomes the live database again.
+
+Note: the MySQL procedure assumes production is on RDS. Be sure all PRs are merged, pulled
+and tested before you touch production either way.
 
 0. Set `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` in `.env` (pointing at production RDS) and
    create a venv with `mysql-connector-python` installed. `mysqldump` must be on PATH.
@@ -233,6 +240,38 @@ The `mysqldump` safety dump taken before any destructive run is the faster rollb
   derives types from SQLite. That path is lossy and the script says so loudly; prefer
   `--keep-target-schema`.
 
+## SQLite deployment (current state)
+
+With `DB_URL` unset, production data lives in `volumes/sqlite.db`. The sequence is the
+same shape as the MySQL one, and `db_migrate.py` picks the SQLite code paths for you:
+
+```bash
+python3 scripts/db_migrate.py status              # confirm Mode: SQLITE
+python3 scripts/db_migrate.py backup              # must exit 0
+docker compose down
+git pull
+python3 scripts/db_migrate.py init                # fresh schema from the JPA entities
+python3 scripts/db_migrate.py restore --backup-file volumes/backups/sqlite_backup_<ts>.db
+docker compose up -d --build
+```
+
+`backup` uses SQLite's online backup API, not a file copy. The database runs in WAL mode,
+so a `cp` of `sqlite.db` can silently miss everything still sitting in the `-wal` file.
+
+`restore` keeps the schema `init` just built and loads only the columns both sides share.
+Columns added by your change take their defaults; columns and tables removed by it are
+listed explicitly rather than being dropped in silence. `*_seq` tables come across intact,
+so Hibernate keeps allocating ids where it left off instead of restarting at 1.
+
+Rolling back is a file copy, because the backup *is* a complete database:
+
+```bash
+docker compose down
+cp volumes/backups/sqlite_backup_<ts>.db volumes/sqlite.db
+rm -f volumes/sqlite.db-wal volumes/sqlite.db-shm
+docker compose up -d
+```
+
 ### How the scripts fit together
 
 `db_migrate.py` is the only entry point you need:
@@ -241,12 +280,12 @@ The `mysqldump` safety dump taken before any destructive run is the faster rollb
 | --- | --- |
 | `status` | Prints the configured target and what is currently in it |
 | `check` | Round-trips the schema through both translators and fails if they disagree |
-| `backup` | MySQL to a verified local SQLite backup |
+| `backup` | Verified backup of the live database (MySQL or SQLite) |
 | `init` | Rebuilds the schema on the target with Hibernate |
-| `restore` | SQLite backup back into MySQL |
+| `restore` | Loads a backup back into the target |
 
-Underneath, `mysqlbackup.py` and `mysqlrestore.py` still hold the backup and restore
-implementations and can be run directly -- `db_migrate.py` calls straight into them, so
+Underneath, `mysqlbackup.py` / `mysqlrestore.py` (MySQL) and `sqlite_migrate.py` (SQLite)
+hold the backup and restore implementations and can be run directly -- `db_migrate.py` calls straight into them, so
 there is one implementation, not two. Everything shared between them (reading `.env`,
 parsing `DB_URL`, opening connections, the backup metadata table name) lives in
 `mysql_common.py`, so the two scripts cannot disagree about which database they are
