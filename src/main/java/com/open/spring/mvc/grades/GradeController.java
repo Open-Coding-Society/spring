@@ -16,8 +16,14 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
+import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.client.RestTemplate;
+
+import org.apache.hc.client5.http.config.RequestConfig;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.util.Timeout;
 
 import com.open.spring.mvc.person.PersonJpaRepository;
 
@@ -29,6 +35,29 @@ public class GradeController {
     private PersonJpaRepository personRepository;
     @Value("${gist.token:}")
     private String gistToken;
+
+    /**
+     * Give up on GitHub after this long. Without an explicit timeout a stalled
+     * request never returns, and each one pins a request thread until the whole
+     * server runs out and stops answering anything.
+     */
+    private static final Timeout GIST_TIMEOUT = Timeout.ofSeconds(10);
+
+    /** Built once and reused; also gives us connection pooling. */
+    private final RestTemplate gistRestTemplate;
+
+    public GradeController() {
+        RequestConfig requestConfig = RequestConfig.custom()
+                .setConnectTimeout(GIST_TIMEOUT)   // time to open the connection
+                .setResponseTimeout(GIST_TIMEOUT)  // time to wait for GitHub's reply
+                .build();
+
+        CloseableHttpClient httpClient = HttpClients.custom()
+                .setDefaultRequestConfig(requestConfig)
+                .build();
+
+        this.gistRestTemplate = new RestTemplate(new HttpComponentsClientHttpRequestFactory(httpClient));
+    }
 
     @GetMapping
     public List<Grade> getAllGrades() {
@@ -168,12 +197,13 @@ public class GradeController {
         // Build GitHub payload
         Map<String, Object> gistPayload = new HashMap<>();
         gistPayload.put("description", description);
-        gistPayload.put("public", true);
+        // Secret gist: unlisted and not searchable, but still viewable by anyone
+        // with the URL - which is exactly how submissions get reviewed. Public
+        // would list every student's work on the token owner's gist profile.
+        gistPayload.put("public", false);
         gistPayload.put("files", files);
 
         try {
-            RestTemplate restTemplate = new RestTemplate();
-
             HttpHeaders headers = new HttpHeaders();
             headers.set("Accept", "application/vnd.github+json");
             headers.set("Authorization", "Bearer " + gistToken);
@@ -182,7 +212,7 @@ public class GradeController {
 
             HttpEntity<Map<String, Object>> request = new HttpEntity<>(gistPayload, headers);
 
-            ResponseEntity<Map> response = restTemplate.exchange(
+            ResponseEntity<Map> response = gistRestTemplate.exchange(
                     "https://api.github.com/gists",
                     HttpMethod.POST,
                     request,
