@@ -101,6 +101,9 @@ public class SecurityConfig {
                         // ← GIST CREATION ENDPOINTS - PUBLIC (NO AUTH)
                         .requestMatchers(HttpMethod.POST, "/api/grades/create-gist").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/grades/create-gist/").permitAll()
+                        // ← GIST READ - PUBLIC (mirrors create-gist; a gist URL is
+                        //    already shareable, so reading one adds no exposure)
+                        .requestMatchers(HttpMethod.GET, "/api/grades/read-gist/**").permitAll()
                         // ← MAKE DEBUGGER - PUBLIC (NO AUTH)
                         .requestMatchers("/api/make/**").permitAll()
                         // Admin-only endpoints, beware of DELETE operations and impact to cascading relational data 

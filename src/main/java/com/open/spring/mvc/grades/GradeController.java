@@ -2,6 +2,7 @@ package com.open.spring.mvc.grades;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -18,6 +19,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.http.client.HttpComponentsClientHttpRequestFactory;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.client.HttpClientErrorException;
 import org.springframework.web.client.RestTemplate;
 
 import org.apache.hc.client5.http.config.RequestConfig;
@@ -235,6 +237,85 @@ public class GradeController {
         } catch (Exception e) {
             Map<String, Object> error = new HashMap<>();
             error.put("error", "Failed to create Gist: " + e.getMessage());
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+    }
+
+    /**
+     * Read a gist back by id — the other half of create-gist.
+     *
+     * Reads are proxied rather than fetched straight from the browser for two
+     * reasons: gists are created secret, and the token that can see them lives
+     * here. Only the file contents are returned; GitHub's response carries owner
+     * and account detail that the page has no use for.
+     */
+    @GetMapping("/read-gist/{id}")
+    @PreAuthorize("permitAll()")
+    public ResponseEntity<Map<String, Object>> readGist(@PathVariable String id) {
+        // Validate the caller's input before anything about server state, so a
+        // bad id always reports as a bad id. Gist ids are hex; reject anything
+        // else rather than pasting caller input into the upstream URL.
+        if (id == null || !id.matches("[a-fA-F0-9]{6,64}")) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Invalid gist id");
+            return ResponseEntity.badRequest().body(error);
+        }
+
+        if (gistToken == null || gistToken.trim().isEmpty()) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Gist token not configured on server");
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
+        }
+
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.set("Accept", "application/vnd.github+json");
+            headers.set("Authorization", "Bearer " + gistToken);
+            headers.set("X-GitHub-Api-Version", "2022-11-28");
+
+            ResponseEntity<Map> response = gistRestTemplate.exchange(
+                    "https://api.github.com/gists/" + id,
+                    HttpMethod.GET,
+                    new HttpEntity<>(headers),
+                    Map.class
+            );
+
+            Map<String, Object> data = response.getBody();
+            if (data == null) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Empty response from GitHub");
+                return ResponseEntity.status(HttpStatus.BAD_GATEWAY).body(error);
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> rawFiles = (Map<String, Object>) data.get("files");
+
+            // Narrow to { name: { content } } - drop raw_url, size, type, owner...
+            Map<String, Object> files = new LinkedHashMap<>();
+            if (rawFiles != null) {
+                for (Map.Entry<String, Object> entry : rawFiles.entrySet()) {
+                    if (!(entry.getValue() instanceof Map)) continue;
+                    @SuppressWarnings("unchecked")
+                    Map<String, Object> file = (Map<String, Object>) entry.getValue();
+                    Map<String, Object> slim = new HashMap<>();
+                    slim.put("content", file.get("content"));
+                    files.put(entry.getKey(), slim);
+                }
+            }
+
+            Map<String, Object> out = new HashMap<>();
+            out.put("success", true);
+            out.put("files", files);
+            out.put("description", data.get("description"));
+            return ResponseEntity.ok(out);
+
+        } catch (HttpClientErrorException.NotFound e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "No gist with that id");
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Failed to read Gist: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(error);
         }
     }
