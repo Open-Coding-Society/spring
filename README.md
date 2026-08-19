@@ -304,13 +304,28 @@ To check against the schema that actually exists right now:
 
 > python3 scripts/db_migrate.py check --live
 
-### Superseded scripts
+### Removed scripts
 
 `db_prod2local.py`, `db_local2prod.py`, `db_mysql2local.py`, `db_local2mysql.py` and
-`db_prod_to_mysql.py` predate the MySQL migration and are **not** part of this workflow.
-Each now carries a deprecation banner. `db_local2mysql.py` in particular has its own
-independent MySQL writer that received none of the schema, safety-dump or row-count
-fixes -- running it against production would reintroduce every bug listed above.
+`db_prod_to_mysql.py` predated the MySQL migration and have been **deleted**. If you find
+one in an old branch or a stale checkout, do not run it. `db_local2mysql.py` in particular
+carried its own independent MySQL writer that received none of the schema, safety-dump or
+row-count fixes -- running it against production would reintroduce every bug those fixes
+addressed. They remain recoverable from git history if you ever need to read them.
+
+The current scripts are: `db_migrate.py` (entry point), `mysql_common.py` (shared config
+and connections), `mysqlbackup.py` / `mysqlrestore.py` (MySQL), `sqlite_migrate.py`
+(SQLite), `db_init.py` (schema rebuild) and `migration_utils.py` (Spring Boot runner).
+
+These seven migration files are byte-identical to the ones in `spring`. A fix applied to one
+repo belongs in the other -- check both before you consider a migration bug closed.
+
+### The full runbook
+
+The step-by-step production procedure -- with the gates, the rollback paths, and the audit
+of what was wrong with the old scripts -- lives at
+<https://pages.opencodingsociety.com/documentation/migration-runbook>. Read it before your
+first migration; this section is the summary.
 
 # Testing Grade FRQs API with Postman
 
