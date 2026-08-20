@@ -77,6 +77,8 @@ public class MvcSecurityConfig {
                 .requestMatchers(HttpMethod.GET, "/mvc/person/reset/check").permitAll()
                 .requestMatchers(HttpMethod.POST, "/mvc/person/reset/start").permitAll()
                 .requestMatchers(HttpMethod.POST, "/mvc/person/reset/check").permitAll()
+                .requestMatchers(HttpMethod.POST, "/mvc/person/reset/oauth/verify").permitAll()
+                .requestMatchers(HttpMethod.POST, "/mvc/person/reset/oauth/complete").permitAll()
                 .requestMatchers("/mvc/person/read/**").authenticated()
                 .requestMatchers("/mvc/person/cookie-clicker").authenticated()
                 .requestMatchers(HttpMethod.GET,"/mvc/person/update/user").authenticated()
@@ -191,6 +193,8 @@ public class MvcSecurityConfig {
         policy.put("GET /mvc/person/reset/check", "permitAll");
         policy.put("POST /mvc/person/reset/start", "permitAll");
         policy.put("POST /mvc/person/reset/check", "permitAll");
+        policy.put("POST /mvc/person/reset/oauth/verify", "permitAll");
+        policy.put("POST /mvc/person/reset/oauth/complete", "permitAll");
         policy.put("GET /mvc/person/update/user", "authenticated");
         policy.put("POST /mvc/person/update", "authenticated (+ controller ownership checks)");
         policy.put("POST /mvc/person/update/role", "ROLE_ADMIN");
