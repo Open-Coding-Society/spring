@@ -32,6 +32,8 @@ import org.springframework.http.HttpHeaders;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import lombok.Getter;
 import org.slf4j.Logger;
@@ -501,6 +503,140 @@ public class PersonViewController {
 
         logger.warn("AUDIT admin_password_reset admin={} target_uid={}", authentication.getName(), personToReset.getUid());
         return new ResponseEntity<>(HttpStatus.OK);
+    }
+
+    // Matches student emails shaped like "firstnamelastinitial12345@stu.powayusd.com" and
+    // captures the trailing 5 digits, which must match the last 5 digits of the account's sid.
+    private static final Pattern SCHOOL_EMAIL_DIGITS_PATTERN =
+        Pattern.compile("^[a-z]+([0-9]{5})@stu\\.powayusd\\.com$");
+
+    private ResponseEntity<Object> oauthResetDenied(HttpStatus status) {
+        HttpHeaders responseHeaders = new HttpHeaders();
+        responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+        String body = "{\"verified\":false}";
+        return new ResponseEntity<Object>(body, responseHeaders, status);
+    }
+
+    @Getter
+    public static class PersonOAuthResetVerifyBody {
+        private String uid;
+        private String idToken;
+    }
+
+    // Step 1 of the OAuth-verified reset: caller proves ownership of the account by signing
+    // in with their school Google account. The last 5 digits of that (server-verified) email
+    // must match the last 5 digits of the sid already on file for this uid before a reset
+    // token is issued. Denial responses are intentionally identical regardless of which check
+    // failed, so a caller can't use this endpoint to enumerate uid/sid pairs; the specific
+    // reason is only ever written to the server log.
+    @PostMapping("/reset/oauth/verify")
+    public ResponseEntity<Object> resetPasswordOAuthVerify(@RequestBody PersonOAuthResetVerifyBody requestBody) {
+        if (requestBody == null || requestBody.getUid() == null || requestBody.getUid().isBlank()) {
+            return new ResponseEntity<Object>(HttpStatus.BAD_REQUEST);
+        }
+
+        Person personToReset = repository.getByUid(requestBody.getUid());
+
+        //person not found
+        if (personToReset == null) {
+            return new ResponseEntity<Object>(HttpStatus.NO_CONTENT);
+        }
+
+        //don't allow people to reset the passwords of admins
+        if (personToReset.getRoles().stream().anyMatch(role -> "ROLE_ADMIN".equals(role.getName()))) {
+            return new ResponseEntity<Object>(HttpStatus.UNAUTHORIZED);
+        }
+
+        //dont allow people to reset password of default users (such as toby)
+        Person[] databasePersons = Person.init();
+        for (Person person : databasePersons) {
+            if (person.getUid().equals(personToReset.getUid())) {
+                return new ResponseEntity<Object>(HttpStatus.UNAUTHORIZED);
+            }
+        }
+
+        // enforce active-token and rolling-window rate limits, same as the email-based flow
+        if (!ResetCode.canIssueResetCode(personToReset.getUid())) {
+            return new ResponseEntity<Object>(HttpStatus.TOO_MANY_REQUESTS);
+        }
+
+        String verifiedEmail = GoogleIdTokenVerifier.verifyAndGetEmail(requestBody.getIdToken());
+        if (verifiedEmail == null) {
+            logger.warn("AUDIT oauth_reset_denied uid={} reason=invalid_token", personToReset.getUid());
+            return oauthResetDenied(HttpStatus.FORBIDDEN);
+        }
+
+        Matcher matcher = SCHOOL_EMAIL_DIGITS_PATTERN.matcher(verifiedEmail.toLowerCase());
+        if (!matcher.matches()) {
+            logger.warn("AUDIT oauth_reset_denied uid={} reason=email_format", personToReset.getUid());
+            return oauthResetDenied(HttpStatus.FORBIDDEN);
+        }
+
+        String emailDigits = matcher.group(1);
+        String sid = personToReset.getSid();
+        if (sid == null || sid.length() < 5) {
+            logger.warn("AUDIT oauth_reset_denied uid={} reason=no_sid", personToReset.getUid());
+            return oauthResetDenied(HttpStatus.FORBIDDEN);
+        }
+
+        String sidDigits = sid.substring(sid.length() - 5);
+        if (!emailDigits.equals(sidDigits)) {
+            logger.warn("AUDIT oauth_reset_denied uid={} reason=sid_mismatch", personToReset.getUid());
+            return oauthResetDenied(HttpStatus.FORBIDDEN);
+        }
+
+        String resetToken = ResetCode.GenerateResetCode(personToReset.getUid());
+        if (resetToken == null) {
+            return oauthResetDenied(HttpStatus.TOO_MANY_REQUESTS);
+        }
+
+        logger.info("AUDIT oauth_reset_verified uid={}", personToReset.getUid());
+
+        HttpHeaders responseHeaders = new HttpHeaders();
+        responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+        String body = "{\"verified\":true,\"resetToken\":\"" + resetToken + "\"}";
+        return new ResponseEntity<Object>(body, responseHeaders, HttpStatus.OK);
+    }
+
+    @Getter
+    public static class PersonOAuthResetCompleteBody {
+        private String uid;
+        private String resetToken;
+        private String newPassword;
+    }
+
+    // Step 2: spends the single-use token issued by /reset/oauth/verify to actually set the
+    // new password. The token, not the client's earlier "verified" claim, is what's trusted here.
+    @PostMapping("/reset/oauth/complete")
+    public ResponseEntity<Object> resetPasswordOAuthComplete(@RequestBody PersonOAuthResetCompleteBody requestBody) {
+        if (requestBody == null || requestBody.getUid() == null || requestBody.getUid().isBlank()) {
+            return new ResponseEntity<Object>(HttpStatus.BAD_REQUEST);
+        }
+
+        Person personToReset = repository.getByUid(requestBody.getUid());
+        if (personToReset == null) {
+            return new ResponseEntity<Object>(HttpStatus.NO_CONTENT);
+        }
+
+        if (requestBody.getNewPassword() == null || requestBody.getNewPassword().length() < 8) {
+            return new ResponseEntity<Object>(HttpStatus.BAD_REQUEST);
+        }
+
+        if (!ResetCode.validateAndConsume(personToReset.getUid(), requestBody.getResetToken())) {
+            logger.warn("AUDIT oauth_reset_complete_denied uid={} reason=invalid_token", personToReset.getUid());
+            return new ResponseEntity<Object>(HttpStatus.FORBIDDEN);
+        }
+
+        personToReset.setPassword(requestBody.getNewPassword());
+        repository.save(personToReset, false);
+
+        logger.info("AUDIT oauth_reset_completed uid={}", personToReset.getUid());
+
+        // Best-effort sync to Flask so both backends' passwords stay in sync for this
+        // account; failure here doesn't roll back or fail the Spring-side reset above.
+        FlaskPasswordSync.syncPassword(personToReset.getUid(), requestBody.getNewPassword());
+
+        return new ResponseEntity<Object>(HttpStatus.OK);
     }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
