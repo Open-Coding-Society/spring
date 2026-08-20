@@ -34,6 +34,39 @@
 
         <h3>Person Viewer</h3>
 
+        <!-- Password Reset Tickets: raised by users who hit the self-service reset rate
+             limit; granting one lifts that uid's limit by a batch of 5 extra attempts. -->
+        <div sec:authorize="hasRole('ROLE_ADMIN')" class="mb-4" th:if="${tickets != null and !tickets.isEmpty()}">
+            <h5>Password Reset Tickets</h5>
+            <div class="table-responsive">
+                <table class="table table-sm">
+                    <thead>
+                        <tr>
+                            <th>Requested</th>
+                            <th>UID</th>
+                            <th>Name</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr th:each="ticket : ${tickets}">
+                            <td th:text="${ticket.createdAt}">Requested At</td>
+                            <td>
+                                <a th:href="'https://github.com/' + ${ticket.uid}" target="_blank"
+                                    th:text="${ticket.uid}">User UID</a>
+                            </td>
+                            <td th:text="${ticket.name}">Name</td>
+                            <td>
+                                <button class="btn btn-warning btn-sm"
+                                    th:attr="data-id=${ticket.id}, data-uid=${ticket.uid}"
+                                    onclick="grantResetTicket(this)">Grant 5 Attempts</button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Column visibility toggle buttons -->
         <div class="d-flex flex-wrap mb-3">
             <button class="btn btn-secondary toggle-column active" data-column="0">ID#</button>
@@ -186,6 +219,26 @@
                     const msgEl = document.getElementById('resetModalMessage');
                     msgEl.className = 'alert alert-danger';
                     msgEl.textContent = 'Network error.';
+                    btn.disabled = false;
+                });
+        }
+    </script>
+
+    <script>
+        function grantResetTicket(btn) {
+            const id = btn.getAttribute('data-id');
+            btn.disabled = true;
+            fetch('/mvc/person/reset/ticket/' + id + '/grant', { method: 'POST' })
+                .then(res => {
+                    if (res.ok) {
+                        btn.closest('tr').remove();
+                    } else {
+                        alert('Could not grant reset attempts (status ' + res.status + ').');
+                        btn.disabled = false;
+                    }
+                })
+                .catch(() => {
+                    alert('Network error.');
                     btn.disabled = false;
                 });
         }

@@ -15,6 +15,8 @@ import javax.crypto.spec.SecretKeySpec;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import io.github.cdimascio.dotenv.Dotenv;
+
 public class ResetCode {
     private static final Logger logger = LoggerFactory.getLogger(ResetCode.class);
 
@@ -26,8 +28,11 @@ public class ResetCode {
     private static final Map<String, ResetTokenRecord> activeTokensByUid = new ConcurrentHashMap<>();
     private static final Map<String, Deque<Long>> resetRequestTimesByUid = new ConcurrentHashMap<>();
     private static final Map<String, String> lastIssueReasonByUid = new ConcurrentHashMap<>();
+    // Bumped by an admin from the reset-ticket queue when a rate-limited user needs more
+    // attempts; each grant adds one batch on top of MAX_REQUESTS_PER_WINDOW.
+    private static final Map<String, Integer> bonusAttemptsByUid = new ConcurrentHashMap<>();
 
-    private static final byte[] secret = loadSecret();
+    private static volatile byte[] cachedSecret;
 
     private static class ResetTokenRecord {
         private final String token;
@@ -39,16 +44,44 @@ public class ResetCode {
         }
     }
 
-    private static byte[] loadSecret() {
-        String envSecret = System.getenv("RESET_TOKEN_SECRET");
-        if (envSecret != null && !envSecret.isBlank()) {
-            return envSecret.getBytes(StandardCharsets.UTF_8);
+    // Same env-then-.env resolution order as FlaskPasswordSync/GoogleIdTokenVerifier: plain
+    // System.getenv() only sees real OS environment variables, not Spring's own
+    // spring.config.import=.env mechanism, so a Dotenv fallback is required for local dev
+    // where the secret only lives in .env.
+    private static String resolveConfiguredSecret() {
+        String value = System.getenv("RESET_TOKEN_SECRET");
+        if (value != null && !value.isBlank()) {
+            return value;
         }
+        try {
+            Dotenv dotenv = Dotenv.configure().ignoreIfMissing().load();
+            value = dotenv.get("RESET_TOKEN_SECRET");
+            if (value != null && !value.isBlank()) {
+                return value;
+            }
+        } catch (Exception e) {
+            // fall through
+        }
+        return null;
+    }
 
-        byte[] generated = new byte[32];
-        random.nextBytes(generated);
-        logger.warn("AUDIT reset_secret_fallback using ephemeral in-memory secret because RESET_TOKEN_SECRET is not set");
-        return generated;
+    // Deliberately fails closed instead of falling back to an ephemeral per-restart secret:
+    // a randomly generated fallback would silently invalidate every outstanding reset token
+    // (and undermine the HMAC's whole purpose) on every deploy, without anyone noticing.
+    private static byte[] getSecret() {
+        byte[] local = cachedSecret;
+        if (local != null) {
+            return local;
+        }
+        String configured = resolveConfiguredSecret();
+        if (configured == null) {
+            throw new IllegalStateException(
+                "RESET_TOKEN_SECRET is not set. Password reset cannot issue or validate tokens " +
+                "without it -- set RESET_TOKEN_SECRET in the environment or .env file.");
+        }
+        local = configured.getBytes(StandardCharsets.UTF_8);
+        cachedSecret = local;
+        return local;
     }
 
     private static String base64Url(byte[] value) {
@@ -58,8 +91,10 @@ public class ResetCode {
     private static String hmacSha256(String payload) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(secret, "HmacSHA256"));
+            mac.init(new SecretKeySpec(getSecret(), "HmacSHA256"));
             return base64Url(mac.doFinal(payload.getBytes(StandardCharsets.UTF_8)));
+        } catch (IllegalStateException e) {
+            throw e;
         } catch (Exception e) {
             throw new IllegalStateException("Unable to sign reset token", e);
         }
@@ -89,7 +124,8 @@ public class ResetCode {
         }
 
         Deque<Long> requestTimes = resetRequestTimesByUid.computeIfAbsent(uid, key -> new ArrayDeque<>());
-        if (requestTimes.size() >= MAX_REQUESTS_PER_WINDOW) {
+        int allowedRequests = MAX_REQUESTS_PER_WINDOW + bonusAttemptsByUid.getOrDefault(uid, 0);
+        if (requestTimes.size() >= allowedRequests) {
             lastIssueReasonByUid.put(uid, "rate-limit");
             return false;
         }
@@ -100,6 +136,14 @@ public class ResetCode {
 
     public static String getLastIssueReason(String uid) {
         return lastIssueReasonByUid.get(uid);
+    }
+
+    // Called by an admin resolving a reset ticket: lifts the rate limit by one batch of
+    // extraAttempts on top of the standard window, so the user can retry immediately.
+    public static synchronized void grantBonusAttempts(String uid, int extraAttempts) {
+        bonusAttemptsByUid.merge(uid, extraAttempts, Integer::sum);
+        logger.info("AUDIT reset_bonus_attempts_granted uid={} extraAttempts={} totalBonus={}",
+                uid, extraAttempts, bonusAttemptsByUid.get(uid));
     }
 
     public static synchronized String GenerateResetCode(String uid){

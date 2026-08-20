@@ -53,6 +53,9 @@ public class PersonViewController {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private ResetTicketJpaRepository ticketRepository;
+
     //@Autowired
     //private PersonJpaRepository find;
 
@@ -73,6 +76,7 @@ public class PersonViewController {
         if (isAdmin == true){
             List<Person> list = repository.listAll();  // Fetch all persons
             model.addAttribute("list", list);  // Add the list to the model for the view
+            model.addAttribute("tickets", ticketRepository.findByResolvedFalseOrderByIdDesc());
         }
         else {
             Person person = repository.getByUid(userDetails.getUsername());  // Fetch the person by email
@@ -502,6 +506,63 @@ public class PersonViewController {
         repository.save(personToReset, false);
 
         logger.warn("AUDIT admin_password_reset admin={} target_uid={}", authentication.getName(), personToReset.getUid());
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
+
+    private static final int TICKET_GRANT_BATCH_SIZE = 5;
+
+    @Getter
+    public static class ResetTicketRequestBody {
+        private String uid;
+    }
+
+    // Raised by the frontend's reset wizard when a uid hits the reset rate limit, so an
+    // admin can step in from the person/read portal instead of the user waiting out the
+    // window. Idempotent: a uid with an existing open ticket won't get a second one.
+    @PostMapping("/reset/ticket")
+    public ResponseEntity<Object> requestResetTicket(@RequestBody ResetTicketRequestBody requestBody) {
+        if (requestBody == null || requestBody.getUid() == null || requestBody.getUid().isBlank()) {
+            return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
+        }
+
+        Person personToReset = repository.getByUid(requestBody.getUid());
+        if (personToReset == null) {
+            return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+        }
+
+        if (ticketRepository.findByUidAndResolvedFalse(personToReset.getUid()).isEmpty()) {
+            ticketRepository.save(new ResetTicket(personToReset.getUid(), personToReset.getName()));
+            logger.info("AUDIT reset_ticket_created uid={}", personToReset.getUid());
+        }
+
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
+
+    // Admin resolves a reset ticket from the portal: grants the uid one batch of extra
+    // reset attempts (lifting the rate limit) and closes the ticket. If the user still
+    // needs more attempts after that, they raise a new ticket.
+    @PostMapping("/reset/ticket/{id}/grant")
+    public ResponseEntity<Object> grantResetTicket(@PathVariable Long id, Authentication authentication) {
+        boolean isAdmin = authentication.getAuthorities().stream()
+                .anyMatch(authority -> "ROLE_ADMIN".equals(authority.getAuthority()));
+        if (!isAdmin) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        ResetTicket ticket = ticketRepository.findById(id).orElse(null);
+        if (ticket == null) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        if (ticket.isResolved()) {
+            return new ResponseEntity<>(HttpStatus.OK);
+        }
+
+        ResetCode.grantBonusAttempts(ticket.getUid(), TICKET_GRANT_BATCH_SIZE);
+        ticket.markResolved(TICKET_GRANT_BATCH_SIZE);
+        ticketRepository.save(ticket);
+
+        logger.warn("AUDIT reset_ticket_granted admin={} target_uid={} batch={}",
+                authentication.getName(), ticket.getUid(), TICKET_GRANT_BATCH_SIZE);
         return new ResponseEntity<>(HttpStatus.OK);
     }
 
