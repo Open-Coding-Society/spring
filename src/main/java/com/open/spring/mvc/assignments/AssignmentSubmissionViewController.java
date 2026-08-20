@@ -153,6 +153,7 @@ public class AssignmentSubmissionViewController {
         private String feedback;
         private Boolean isLate;
         private Boolean isGroup;
+        private String aiSummary;
 
         // Private constructor for factory use
         private SubmissionListDTO() {}
@@ -211,14 +212,16 @@ public class AssignmentSubmissionViewController {
                 dto.grade = submission.getGrade();
                 dto.feedback = submission.getFeedback() != null ? submission.getFeedback() : "";
                 dto.isLate = submission.getIsLate() != null ? submission.getIsLate() : false;
+                dto.aiSummary = submission.getAiSummary();
             } catch (Exception e) {
                 dto.content = null;
                 dto.comment = "";
                 dto.grade = null;
                 dto.feedback = "";
                 dto.isLate = false;
+                dto.aiSummary = null;
             }
-            
+
             return dto;
         }
 
@@ -239,6 +242,7 @@ public class AssignmentSubmissionViewController {
                 dto.grade = null;
                 dto.feedback = "";
                 dto.isLate = false;
+                dto.aiSummary = null;
             } catch (Exception e) {
                 logger.error("Error in SubmissionListDTO.createFallback()", e);
             }
@@ -257,6 +261,7 @@ public class AssignmentSubmissionViewController {
         public String getFeedback() { return feedback; }
         public Boolean getIsLate() { return isLate; }
         public Boolean getIsGroup() { return isGroup; }
+        public String getAiSummary() { return aiSummary; }
     }
 
     /**

@@ -63,6 +63,9 @@ public class AssignmentSubmission {
     private Double grade;
     private String feedback;
 
+    @Column(columnDefinition = "text")
+    private String aiSummary;
+
     private String comment;
 
     private Long assignmentid;
