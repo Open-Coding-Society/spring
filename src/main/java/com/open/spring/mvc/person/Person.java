@@ -97,6 +97,15 @@ public class Person extends Submitter implements Comparable<Person> {
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
 
+    // Bumped every time the password actually changes (PersonDetailsService.save, when
+    // samePassword is false -- the single funnel every reset/update path goes through).
+    // Embedded in issued JWTs and checked on every /api/** request (JwtTokenUtil); a
+    // mismatch means the token predates the current password and is rejected, so a
+    // stolen JWT stops working the moment its owner resets their password instead of
+    // staying valid for the rest of its 12h lifetime.
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private Long tokenVersion = 0L;
+
     @NotEmpty
     @Size(min = 1)
     @Column(unique = true, nullable = false)

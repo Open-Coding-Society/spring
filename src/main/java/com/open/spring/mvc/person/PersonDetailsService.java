@@ -97,6 +97,9 @@ public class PersonDetailsService implements UserDetailsService {  // "implement
         if (!samePassword) {
             // Encode the password only if it's not the same as before
             person.setPassword(passwordEncoder.encode(person.getPassword()));
+            // Invalidates every JWT already issued to this person -- see the field
+            // comment on Person.tokenVersion.
+            person.setTokenVersion((person.getTokenVersion() == null ? 0L : person.getTokenVersion()) + 1);
         }
         personJpaRepository.save(person); // Save the person to the database
     }
