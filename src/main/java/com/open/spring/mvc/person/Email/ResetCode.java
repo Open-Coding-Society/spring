@@ -32,6 +32,27 @@ public class ResetCode {
     // attempts; each grant adds one batch on top of MAX_REQUESTS_PER_WINDOW.
     private static final Map<String, Integer> bonusAttemptsByUid = new ConcurrentHashMap<>();
 
+    // Ticket creation is unauthenticated and uid-idempotent (one open ticket per uid), so
+    // that alone doesn't stop a caller from paging through many *different* uids to spam the
+    // admin queue -- rate-limit by caller IP instead, separately from the uid-keyed limits
+    // above.
+    private static final long TICKET_RATE_WINDOW_SECONDS = 15 * 60;
+    private static final int MAX_TICKET_REQUESTS_PER_WINDOW = 5;
+    private static final Map<String, Deque<Long>> ticketRequestTimesByIp = new ConcurrentHashMap<>();
+
+    public static synchronized boolean canRequestTicket(String ip) {
+        long now = Instant.now().getEpochSecond();
+        Deque<Long> requestTimes = ticketRequestTimesByIp.computeIfAbsent(ip, key -> new ArrayDeque<>());
+        while (!requestTimes.isEmpty() && requestTimes.peekFirst() <= now - TICKET_RATE_WINDOW_SECONDS) {
+            requestTimes.removeFirst();
+        }
+        if (requestTimes.size() >= MAX_TICKET_REQUESTS_PER_WINDOW) {
+            return false;
+        }
+        requestTimes.addLast(now);
+        return true;
+    }
+
     private static volatile byte[] cachedSecret;
 
     private static class ResetTokenRecord {

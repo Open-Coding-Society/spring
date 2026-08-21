@@ -39,6 +39,8 @@ import lombok.Getter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import jakarta.servlet.http.HttpServletRequest;
+
 // Built using article: https://docs.spring.io/spring-framework/docs/3.2.x/spring-framework-reference/html/mvc.html
 // or similar: https://asbnotebook.com/2020/04/11/spring-boot-thymeleaf-form-validation-example/
 @Controller
@@ -519,10 +521,19 @@ public class PersonViewController {
     // Raised by the frontend's reset wizard when a uid hits the reset rate limit, so an
     // admin can step in from the person/read portal instead of the user waiting out the
     // window. Idempotent: a uid with an existing open ticket won't get a second one.
+    // Unauthenticated and takes an arbitrary uid, so it's also rate-limited per caller IP
+    // (separately from the global RateLimitFilter) -- otherwise a caller could page through
+    // many different real uids and spam the admin's ticket queue without ever tripping the
+    // per-uid idempotency check above.
     @PostMapping("/reset/ticket")
-    public ResponseEntity<Object> requestResetTicket(@RequestBody ResetTicketRequestBody requestBody) {
+    public ResponseEntity<Object> requestResetTicket(@RequestBody ResetTicketRequestBody requestBody,
+                                                       HttpServletRequest servletRequest) {
         if (requestBody == null || requestBody.getUid() == null || requestBody.getUid().isBlank()) {
             return new ResponseEntity<>(HttpStatus.BAD_REQUEST);
+        }
+
+        if (!ResetCode.canRequestTicket(servletRequest.getRemoteAddr())) {
+            return new ResponseEntity<>(HttpStatus.TOO_MANY_REQUESTS);
         }
 
         Person personToReset = repository.getByUid(requestBody.getUid());
