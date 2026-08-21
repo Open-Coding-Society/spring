@@ -41,6 +41,23 @@ public class FlaskPasswordSync {
         return fallback;
     }
 
+    // The request body carries the new password in plaintext, so this call is only safe if
+    // it's either loopback (same-box, never hits a real network) or TLS-wrapped. Parses the
+    // actual host rather than string-prefix-matching flaskUri, since a prefix check like
+    // startsWith("http://localhost") would wrongly pass a lookalike host such as
+    // "http://localhost.attacker.com".
+    private static boolean isSecureTransport(String flaskUri) {
+        try {
+            URI parsed = URI.create(flaskUri);
+            String host = parsed.getHost();
+            boolean isLoopback = "localhost".equals(host) || "127.0.0.1".equals(host);
+            boolean isHttps = "https".equals(parsed.getScheme());
+            return isLoopback || isHttps;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     // Best-effort: the Spring-side reset has already succeeded by the time this is
     // called, so a Flask sync failure is logged and swallowed rather than failing
     // the whole request -- the user's new password is already live on Spring,
@@ -51,6 +68,11 @@ public class FlaskPasswordSync {
 
         if (syncKey == null) {
             logger.warn("AUDIT flask_password_sync_skipped uid={} reason=no_sync_key_configured", uid);
+            return false;
+        }
+
+        if (!isSecureTransport(flaskUri)) {
+            logger.warn("AUDIT flask_password_sync_skipped uid={} reason=insecure_flask_uri uri={}", uid, flaskUri);
             return false;
         }
 
