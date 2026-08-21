@@ -121,6 +121,8 @@ If a user exhausts the rate limit (3 attempts / 15 min) before getting through, 
 
 No identity re-verification happens at ticket-request time — the ticket only *asks* for help; the actual identity check still happens in the normal OAuth flow once the user retries. Admin approval is the trust boundary here, same as it is for the direct admin-reset button.
 
+⚠️ **Was broken for its entire actual purpose until this was caught:** `POST /mvc/person/reset/ticket` was never added to `MvcSecurityConfig`'s `permitAll()` list, so an anonymous request — the *only* kind this endpoint should ever see, since a rate-limited user is by definition not logged in — got redirected to `/login` (`302`) instead of creating a ticket. Every test of it this session used an authenticated admin session (curl with a saved cookie jar), which never exercised the real caller path and completely masked the bug. Found by writing `scripts/inject_reset_tickets.py` to call it the way a real locked-out user would (no session) — its first run reported a false "200 created" because Python's `urllib` followed the redirect to `/login` and reported *that* page's `200`. Fixed by adding the route to `permitAll()` and by making the script refuse to follow redirects, so this exact class of bug can't hide again. `POST /mvc/person/reset/ticket/{id}/grant` (admin-only) was correctly left off `permitAll()` the whole time — it falls through to `anyRequest().authenticated()` plus the controller's own `ROLE_ADMIN` check, same pattern as `/mvc/person/reset/admin/{id}`.
+
 ## Legacy paths (still live, no longer advertised)
 
 **"Unlinked" is not "disabled."** Nothing below has been removed or gated off — de-linking the old "Forgot Password?" button only stops people from *discovering* these routes through the UI. Anyone who already has the URL, or finds it in browser history / an old bookmark / this document, can still hit them directly and they work exactly as before. That's security through obscurity, not a control. If these flows are genuinely no longer needed, actually disabling the endpoints (403 them, or delete the code) would be the stronger fix; that hasn't been done.
@@ -175,6 +177,8 @@ A few things that look like gaps but are intentional:
 | spring | `mvc/person/GoogleIdTokenVerifier.java` | Server-side Google ID token verification |
 | spring | `mvc/person/FlaskPasswordSync.java` | Server-to-server sync call to Flask |
 | spring | `mvc/person/ResetTicket.java` / `ResetTicketJpaRepository.java` | Reset-ticket persistence |
+| spring | `security/MvcSecurityConfig.java` | `permitAll()` list — see the ⚠️ note under "Escape hatch" |
+| spring | `scripts/inject_reset_tickets.py` | Test-creates tickets via the real (unauthenticated) endpoint |
 | spring | `templates/person/read.html` | Admin portal — reset-password button, ticket panel |
 | spring | `templates/login.html` | Server-rendered login page |
 | spring | `security/JwtTokenUtil.java` | JWT issuance/validation, `tokenVersion` claim |
