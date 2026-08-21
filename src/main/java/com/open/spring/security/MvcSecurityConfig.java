@@ -79,6 +79,11 @@ public class MvcSecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/mvc/person/reset/check").permitAll()
                 .requestMatchers(HttpMethod.POST, "/mvc/person/reset/oauth/verify").permitAll()
                 .requestMatchers(HttpMethod.POST, "/mvc/person/reset/oauth/complete").permitAll()
+                // Must be public: raised by a user who's rate-limited and, by definition,
+                // not logged in. /reset/ticket/{id}/grant is deliberately NOT here -- it
+                // falls through to anyRequest().authenticated() + the controller's own
+                // ROLE_ADMIN check below, same as /mvc/person/reset/admin/{id}.
+                .requestMatchers(HttpMethod.POST, "/mvc/person/reset/ticket").permitAll()
                 .requestMatchers("/mvc/person/read/**").authenticated()
                 .requestMatchers("/mvc/person/cookie-clicker").authenticated()
                 .requestMatchers(HttpMethod.GET,"/mvc/person/update/user").authenticated()
@@ -195,6 +200,8 @@ public class MvcSecurityConfig {
         policy.put("POST /mvc/person/reset/check", "permitAll");
         policy.put("POST /mvc/person/reset/oauth/verify", "permitAll");
         policy.put("POST /mvc/person/reset/oauth/complete", "permitAll");
+        policy.put("POST /mvc/person/reset/ticket", "permitAll");
+        policy.put("POST /mvc/person/reset/ticket/{id}/grant", "authenticated + ROLE_ADMIN (controller check)");
         policy.put("GET /mvc/person/update/user", "authenticated");
         policy.put("POST /mvc/person/update", "authenticated (+ controller ownership checks)");
         policy.put("POST /mvc/person/update/role", "ROLE_ADMIN");
