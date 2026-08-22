@@ -22,6 +22,7 @@ public class AssignmentSubmissionReturnDto {
     public String feedback;
     public Boolean isLate;
     public String aiSummary;
+    public Integer qualityScore;
 
     public AssignmentSubmissionReturnDto(AssignmentSubmission submission) {
         this.id = submission.getId();
@@ -34,5 +35,6 @@ public class AssignmentSubmissionReturnDto {
         this.feedback = submission.getFeedback();
         this.isLate = submission.getIsLate();
         this.aiSummary = submission.getAiSummary();
+        this.qualityScore = submission.getQualityScore();
     }
 }

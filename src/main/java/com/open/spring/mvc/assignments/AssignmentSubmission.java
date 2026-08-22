@@ -66,6 +66,8 @@ public class AssignmentSubmission {
     @Column(columnDefinition = "text")
     private String aiSummary;
 
+    private Integer qualityScore;
+
     private String comment;
 
     private Long assignmentid;

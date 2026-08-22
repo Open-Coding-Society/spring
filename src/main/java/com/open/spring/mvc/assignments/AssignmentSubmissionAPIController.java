@@ -300,11 +300,12 @@ public class AssignmentSubmissionAPIController {
         submission.setComment(comment == null ? "" : comment);
         submission.setIsLate(Boolean.TRUE.equals(isLate));
 
-        // Only clear grade/feedback/AI summary when the submission content actually changed
+        // Only clear grade/feedback/AI summary/quality score when the content actually changed
         if (contentChanged) {
             submission.setGrade(null);
             submission.setFeedback(null);
             submission.setAiSummary(null);
+            submission.setQualityScore(null);
         }
 
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
@@ -363,7 +364,8 @@ public class AssignmentSubmissionAPIController {
     public ResponseEntity<?> saveSubmissionSummary(
             @PathVariable Long submissionId,
             @AuthenticationPrincipal UserDetails userDetails,
-            @RequestParam String summary
+            @RequestParam String summary,
+            @RequestParam(required = false) Integer qualityScore
     ) {
         Person currentUser = getAuthenticatedPerson(userDetails);
         if (currentUser == null) {
@@ -382,6 +384,9 @@ public class AssignmentSubmissionAPIController {
         }
 
         submission.setAiSummary(summary);
+        if (qualityScore != null && qualityScore >= 1 && qualityScore <= 5) {
+            submission.setQualityScore(qualityScore);
+        }
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
         return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
     }
