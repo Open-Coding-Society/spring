@@ -26,8 +26,32 @@ public class ResetCode {
     private static final Map<String, ResetTokenRecord> activeTokensByUid = new ConcurrentHashMap<>();
     private static final Map<String, Deque<Long>> resetRequestTimesByUid = new ConcurrentHashMap<>();
     private static final Map<String, String> lastIssueReasonByUid = new ConcurrentHashMap<>();
+    // Bumped by an admin from the reset-ticket queue when a rate-limited user needs more
+    // attempts; each grant adds one batch on top of MAX_REQUESTS_PER_WINDOW.
+    private static final Map<String, Integer> bonusAttemptsByUid = new ConcurrentHashMap<>();
 
     private static final byte[] secret = loadSecret();
+
+    // Ticket creation is unauthenticated and uid-idempotent (one open ticket per uid), so
+    // that alone doesn't stop a caller from paging through many *different* uids to spam the
+    // admin queue -- rate-limit by caller IP instead, separately from the uid-keyed limits
+    // above.
+    private static final long TICKET_RATE_WINDOW_SECONDS = 15 * 60;
+    private static final int MAX_TICKET_REQUESTS_PER_WINDOW = 5;
+    private static final Map<String, Deque<Long>> ticketRequestTimesByIp = new ConcurrentHashMap<>();
+
+    public static synchronized boolean canRequestTicket(String ip) {
+        long now = Instant.now().getEpochSecond();
+        Deque<Long> requestTimes = ticketRequestTimesByIp.computeIfAbsent(ip, key -> new ArrayDeque<>());
+        while (!requestTimes.isEmpty() && requestTimes.peekFirst() <= now - TICKET_RATE_WINDOW_SECONDS) {
+            requestTimes.removeFirst();
+        }
+        if (requestTimes.size() >= MAX_TICKET_REQUESTS_PER_WINDOW) {
+            return false;
+        }
+        requestTimes.addLast(now);
+        return true;
+    }
 
     private static class ResetTokenRecord {
         private final String token;
@@ -89,7 +113,8 @@ public class ResetCode {
         }
 
         Deque<Long> requestTimes = resetRequestTimesByUid.computeIfAbsent(uid, key -> new ArrayDeque<>());
-        if (requestTimes.size() >= MAX_REQUESTS_PER_WINDOW) {
+        int allowedRequests = MAX_REQUESTS_PER_WINDOW + bonusAttemptsByUid.getOrDefault(uid, 0);
+        if (requestTimes.size() >= allowedRequests) {
             lastIssueReasonByUid.put(uid, "rate-limit");
             return false;
         }
@@ -100,6 +125,14 @@ public class ResetCode {
 
     public static String getLastIssueReason(String uid) {
         return lastIssueReasonByUid.get(uid);
+    }
+
+    // Called by an admin resolving a reset ticket: lifts the rate limit by one batch of
+    // extraAttempts on top of the standard window, so the user can retry immediately.
+    public static synchronized void grantBonusAttempts(String uid, int extraAttempts) {
+        bonusAttemptsByUid.merge(uid, extraAttempts, Integer::sum);
+        logger.info("AUDIT reset_bonus_attempts_granted uid={} extraAttempts={} totalBonus={}",
+                uid, extraAttempts, bonusAttemptsByUid.get(uid));
     }
 
     public static synchronized String GenerateResetCode(String uid){
