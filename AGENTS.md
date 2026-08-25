@@ -32,6 +32,12 @@ Entity-removal helpers (run before any large cleanup):
 - Frontend templates/static assets: [src/main/resources/templates/](src/main/resources/templates/) (per-domain + layouts) and [src/main/resources/static/](src/main/resources/static/); Backend UI notes in [README.md](README.md)
 - Testing/build verification: commands above + Verification section; run `./mvnw clean compile` and `./mvnw test` before schema or auth changes
 
+## Groups & realtime chat
+
+- Course groups are the canonical uppercase list `CSA, CSP, CSH, CSSE`, defined in `CLASS_GROUP_NAMES` inside [ClassGroupMembershipService.java](src/main/java/com/open/spring/mvc/groups/ClassGroupMembershipService.java) — despite comments/tests referencing `CourseGroupInitializer` as its owner. Profile class selection syncs via `PUT /api/groups/class-memberships` (`GroupsApiController` → `ClassGroupMembershipService.syncMemberships`), which only adds/removes membership in those four groups and leaves all other groups untouched.
+- Realtime chat uses STOMP over a **second connector on port 8589**: broker config in `WebSocketBrokerConfig.java` (`/ws-chat`, `/app`, `/topic`), port gating in `ChatWebSocketPortFilter.java`, presence in `GroupChatPresenceService.java`. The native `/websocket` endpoint in `mvc/mortevision/nativesocket/WebSocketConfig.java` is separate.
+- Gotcha: Java package is `mvc.groups` (plural) but templates live in `templates/group/` (singular); static JS exists both as legacy files in `static/js/group-*.js` and packaged versions in `static/js/group/*.js` — prefer the latter.
+
 ## Architecture
 
 Single Spring Boot app, root package `com.open.spring`, three layers:
