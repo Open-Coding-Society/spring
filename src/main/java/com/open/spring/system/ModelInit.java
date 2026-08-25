@@ -36,6 +36,8 @@ import com.open.spring.mvc.comment.CommentJPA;
 import com.open.spring.mvc.hardAssets.HardAssetsRepository;
 import com.open.spring.mvc.jokes.Jokes;
 import com.open.spring.mvc.jokes.JokesJpaRepository;
+import com.open.spring.mvc.groups.Groups;
+import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.media.MediaJpaRepository;
 import com.open.spring.mvc.media.Score;
 import com.open.spring.mvc.note.Note;
@@ -93,6 +95,7 @@ public class ModelInit {
     @Autowired BankService bankService;
     
     @Autowired MediaJpaRepository mediaJpaRepository;
+    @Autowired GroupsJpaRepository groupsJpaRepository;
     @Autowired QuizScoreRepository quizScoreRepository;
     @Autowired ResumeJpaRepository resumeJpaRepository;
     @Autowired StatsRepository statsRepository; // curators - stats
@@ -200,6 +203,23 @@ public class ModelInit {
                     String text = "Test " + person.getEmail();
                     Note n = new Note(text, person);
                     noteRepo.save(n);
+                }
+            }
+
+            String[][] defaultGroups = {
+                {"CSA", "CSA", "2"},
+                {"CSP", "CSP", "3"},
+                {"CSH", "CSH", "2"},
+                {"CSSE", "CSSE", "1"}
+            };
+            for (String[] defaultGroup : defaultGroups) {
+                String groupName = defaultGroup[0];
+                if (groupsJpaRepository.findByName(groupName).isEmpty()) {
+                    Groups group = new Groups();
+                    group.setName(groupName);
+                    group.setCourse(defaultGroup[1]);
+                    group.setPeriod(defaultGroup[2]);
+                    groupsJpaRepository.save(group);
                 }
             }
             
