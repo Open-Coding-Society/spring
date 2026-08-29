@@ -88,8 +88,6 @@ public class MvcSecurityConfig {
                 .requestMatchers("/mvc/bathroom/**").authenticated()
                 .requestMatchers(HttpMethod.GET, "/login").permitAll()
                 .requestMatchers(HttpMethod.POST, "/login").permitAll()
-                .requestMatchers("/authenticateForm").permitAll()
-                .requestMatchers(HttpMethod.POST, "/authenticateForm").permitAll()
                 .requestMatchers("/mvc/synergy/**").authenticated()
                 .requestMatchers(HttpMethod.GET, "/mvc/synergy/gradebook").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN", "ROLE_STUDENT")
                 .requestMatchers(HttpMethod.GET, "/mvc/synergy/view-grade-requests").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
@@ -179,7 +177,6 @@ public class MvcSecurityConfig {
     public Map<String, String> mvcEndpointRolePolicy() {
         Map<String, String> policy = new LinkedHashMap<>();
         policy.put("GET/POST /login", "permitAll");
-        policy.put("/authenticateForm", "permitAll");
         policy.put("GET/POST /mvc/person/create", "permitAll");
         policy.put("GET /mvc/person/reset", "permitAll");
         policy.put("GET /mvc/person/reset/check", "permitAll");
