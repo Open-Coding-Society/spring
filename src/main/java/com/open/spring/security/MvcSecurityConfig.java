@@ -90,9 +90,6 @@ public class MvcSecurityConfig {
                 .requestMatchers(HttpMethod.POST, "/login").permitAll()
                 .requestMatchers("/authenticate", "/authenticateForm").permitAll()
                 .requestMatchers(HttpMethod.POST, "/authenticateForm").permitAll()
-                .requestMatchers("/api/person/create", "/api/person/create/").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/person/create").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/person/create/").permitAll()
                 .requestMatchers("/mvc/synergy/**").authenticated()
                 .requestMatchers(HttpMethod.GET, "/mvc/synergy/gradebook").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN", "ROLE_STUDENT")
                 .requestMatchers(HttpMethod.GET, "/mvc/synergy/view-grade-requests").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
@@ -184,8 +181,6 @@ public class MvcSecurityConfig {
         policy.put("GET/POST /login", "permitAll");
         policy.put("/authenticate", "permitAll");
         policy.put("/authenticateForm", "permitAll");
-        policy.put("/api/person/create", "permitAll");
-        policy.put("/api/person/create/", "permitAll");
         policy.put("GET/POST /mvc/person/create", "permitAll");
         policy.put("GET /mvc/person/reset", "permitAll");
         policy.put("GET /mvc/person/reset/check", "permitAll");
