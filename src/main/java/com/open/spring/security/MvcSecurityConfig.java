@@ -44,6 +44,9 @@ import org.springframework.security.web.SecurityFilterChain;
 @Configuration
 public class MvcSecurityConfig {
 
+    private static final String JWT_COOKIE_NAME = "jwt_java_spring";
+    private static final String JWT_COOKIE_PATH = "/api";
+
     @Value("${jwt.cookie.secure:true}")
     private boolean cookieSecure;
 
@@ -52,6 +55,15 @@ public class MvcSecurityConfig {
 
     @Value("${server.servlet.session.cookie.name:sess_java_spring}")
     private String sessionCookieName;
+
+    @Value("${server.servlet.session.cookie.secure:true}")
+    private boolean sessionCookieSecure;
+
+    @Value("${server.servlet.session.cookie.same-site:None}")
+    private String sessionCookieSameSite;
+
+    @Value("${server.servlet.session.cookie.domain:}")
+    private String sessionCookieDomain;
 
     @Autowired
     private JwtTokenUtil jwtTokenUtil;
@@ -126,21 +138,14 @@ public class MvcSecurityConfig {
                     }
 
                     // Build JWT cookie with domain support for cross-subdomain requests
-                    ResponseCookie.ResponseCookieBuilder jwtCookieBuilder = ResponseCookie.from("jwt_java_spring", token)
+                    ResponseCookie.ResponseCookieBuilder jwtCookieBuilder = ResponseCookie.from(JWT_COOKIE_NAME, token)
                         .httpOnly(true)
                         .secure(cookieSecure)
-                        .path("/api")
+                        .path(JWT_COOKIE_PATH)
                         .maxAge(-1)
                         .sameSite(cookieSameSite);
-                    
-                    // Add domain for cross-subdomain sharing (production and localhost)
-                    if (cookieSecure) {
-                        // Production: use .opencodingsociety.com domain
-                        jwtCookieBuilder.domain(".opencodingsociety.com");
-                    } else {
-                        // Development: use localhost domain
-                        jwtCookieBuilder.domain("localhost");
-                    }
+
+                    applyJwtCookieScope(jwtCookieBuilder);
                     
                     ResponseCookie jwtCookie = jwtCookieBuilder.build();
 
@@ -151,22 +156,49 @@ public class MvcSecurityConfig {
                 .invalidateHttpSession(true)
                 .clearAuthentication(true)
                 .logoutSuccessHandler((request, response, authentication) -> {
-                    ResponseCookie sessionCookie = ResponseCookie.from(sessionCookieName, "")
+                    ResponseCookie.ResponseCookieBuilder sessionCookieBuilder = ResponseCookie.from(sessionCookieName, "")
                         .httpOnly(true)
-                        .secure(cookieSecure)
+                        .secure(sessionCookieSecure)
                         .path("/")
                         .maxAge(0)
-                        .sameSite(cookieSameSite)
-                        .build();
-                    ResponseCookie jwtCookie = ResponseCookie.from("jwt_java_spring", "")
+                        .sameSite(sessionCookieSameSite);
+                    if (!sessionCookieDomain.isBlank()) {
+                        sessionCookieBuilder.domain(sessionCookieDomain);
+                    }
+                    ResponseCookie sessionCookie = sessionCookieBuilder.build();
+
+                    ResponseCookie.ResponseCookieBuilder jwtCookieBuilder = ResponseCookie.from(JWT_COOKIE_NAME, "")
                         .httpOnly(true)
                         .secure(cookieSecure)
-                        .path("/api")
+                        .path(JWT_COOKIE_PATH)
+                        .maxAge(0)
+                        .sameSite(cookieSameSite);
+                    applyJwtCookieScope(jwtCookieBuilder);
+                    ResponseCookie jwtCookie = jwtCookieBuilder.build();
+                    ResponseCookie jwtHostOnlyCookie = ResponseCookie.from(JWT_COOKIE_NAME, "")
+                        .httpOnly(true)
+                        .secure(cookieSecure)
+                        .path(JWT_COOKIE_PATH)
                         .maxAge(0)
                         .sameSite(cookieSameSite)
                         .build();
+
+                    if (!cookieSecure) {
+                        // Cleanup for legacy local dev cookies that were created with Domain=localhost.
+                        ResponseCookie jwtLegacyLocalhostCookie = ResponseCookie.from(JWT_COOKIE_NAME, "")
+                            .httpOnly(true)
+                            .secure(false)
+                            .path(JWT_COOKIE_PATH)
+                            .maxAge(0)
+                            .sameSite(cookieSameSite)
+                            .domain("localhost")
+                            .build();
+                        response.addHeader(HttpHeaders.SET_COOKIE, jwtLegacyLocalhostCookie.toString());
+                    }
+
                     response.addHeader(HttpHeaders.SET_COOKIE, sessionCookie.toString());
                     response.addHeader(HttpHeaders.SET_COOKIE, jwtCookie.toString());
+                    response.addHeader(HttpHeaders.SET_COOKIE, jwtHostOnlyCookie.toString());
                     response.sendRedirect("/login?logout");
                 }));
 
@@ -188,5 +220,11 @@ public class MvcSecurityConfig {
         policy.put("POST /mvc/person/update/roles", "ROLE_ADMIN");
         policy.put("/mvc/person/delete/**", "ROLE_ADMIN");
         return Map.copyOf(policy);
+    }
+
+    private void applyJwtCookieScope(ResponseCookie.ResponseCookieBuilder cookieBuilder) {
+        if (cookieSecure) {
+            cookieBuilder.domain(".opencodingsociety.com");
+        }
     }
 }

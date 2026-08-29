@@ -10,6 +10,7 @@ import org.json.JSONObject;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -72,6 +73,9 @@ public class PersonApiController {
 
     @Autowired
     private TinkleJPARepository tinkleRepository;
+
+    @Value("${DEFAULT_PASSWORD:defaultPassword123}")
+    private String defaultPassword;
 
     /**
      * Retrieves a Person entity by current user of JWT token.
@@ -336,9 +340,32 @@ public class PersonApiController {
             return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.INTERNAL_SERVER_ERROR);
         }
 
+        String rawPassword = personDto.getPassword();
+        if (rawPassword == null || rawPassword.isBlank()) {
+            rawPassword = defaultPassword;
+        }
+        if (rawPassword == null || rawPassword.isBlank()) {
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            JSONObject responseObject = new JSONObject();
+            responseObject.put("error", "Password is required and no DEFAULT_PASSWORD is configured");
+            return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+
+        String profilePicture = personDto.getPfp();
+        if (profilePicture != null) {
+            profilePicture = profilePicture.trim();
+        }
+        if (profilePicture == null) {
+            profilePicture = "";
+        }
+
+        // Transitional behavior: keep legacy default until kasm is removed from schema.
+        boolean kasmServerNeeded = true;
+
         // A person object WITHOUT ID will create a new record in the database
-        Person person = new Person(personDto.getEmail(), personDto.getUid(), personDto.getPassword(),
-                personDto.getSid(), personDto.getName(), "/images/default.png", true, defaultRole);
+        Person person = new Person(personDto.getEmail(), personDto.getUid(), rawPassword,
+                personDto.getSid(), personDto.getName(), profilePicture, kasmServerNeeded, defaultRole);
 
         try {
             personDetailsService.save(person);
