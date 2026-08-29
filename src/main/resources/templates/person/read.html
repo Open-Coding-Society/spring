@@ -194,7 +194,7 @@
     <script>
         function exportRow(btn) {
             const id = btn.getAttribute('data-id');
-            fetch('/person/' + id)
+            fetch('/api/person/' + id)
                 .then(res => res.json())
                 .then(data => {
                     const s = JSON.stringify(data, null, 2);
@@ -282,7 +282,7 @@
                     });
 
                     // Send to backend API
-                    const promise = fetch('/person/create', {
+                    const promise = fetch('/api/person/create', {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
