@@ -409,10 +409,21 @@ public class PersonApiController {
         while (attempts < maxCreateAttempts) {
             attempts++;
             // Build a fresh object each attempt so password hashing isn't applied multiple times.
-            Person person = new Person(email, uid, rawPassword,
-                    sid, name, profilePicture, kasmServerNeeded, defaultRole);
-                // Bank is non-critical for signup; avoid blocking person creation on bank PK drift.
-                person.setBanks(null);
+            // Intentionally avoid constructor side effects (Bank/Tinkle creation) during signup.
+            Person person = new Person();
+            person.setEmail(email);
+            person.setUid(uid);
+            person.setPassword(rawPassword);
+            person.setSid(sid);
+            person.setName(name);
+            person.setPfp(profilePicture);
+            person.setKasmServerNeeded(kasmServerNeeded);
+            person.getRoles().add(defaultRole);
+
+            // Non-critical feature entities should be created lazily in their own flows.
+            person.setBanks(null);
+            person.setTimeEntries(null);
+
             try {
                 personDetailsService.save(person);
                 break;
