@@ -25,7 +25,7 @@ import lombok.NoArgsConstructor;
 @JsonIgnoreProperties({"submissions"})
 public abstract class Submitter {
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
 
     @OneToMany(mappedBy = "submitter", cascade = CascadeType.ALL, orphanRemoval = true)
