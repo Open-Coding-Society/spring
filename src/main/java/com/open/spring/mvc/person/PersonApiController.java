@@ -21,7 +21,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -74,9 +73,6 @@ public class PersonApiController {
 
     @Autowired
     private TinkleJPARepository tinkleRepository;
-
-    @Autowired
-    private JdbcTemplate jdbcTemplate;
 
     @Value("${DEFAULT_PASSWORD:defaultPassword123}")
     private String defaultPassword;
@@ -404,72 +400,37 @@ public class PersonApiController {
         // Transitional behavior: keep legacy default until kasm is removed from schema.
         boolean kasmServerNeeded = true;
 
-        final int maxCreateAttempts = 5;
-        int attempts = 0;
-        while (attempts < maxCreateAttempts) {
-            attempts++;
-            // Build a fresh object each attempt so password hashing isn't applied multiple times.
-            // Intentionally avoid constructor side effects (Bank/Tinkle creation) during signup.
-            Person person = new Person();
-            person.setEmail(email);
-            person.setUid(uid);
-            person.setPassword(rawPassword);
-            person.setSid(sid);
-            person.setName(name);
-            person.setPfp(profilePicture);
-            person.setKasmServerNeeded(kasmServerNeeded);
-            person.getRoles().add(defaultRole);
+        // Build core person only; feature entities are initialized lazily in their own flows.
+        Person person = new Person();
+        person.setEmail(email);
+        person.setUid(uid);
+        person.setPassword(rawPassword);
+        person.setSid(sid);
+        person.setName(name);
+        person.setPfp(profilePicture);
+        person.setKasmServerNeeded(kasmServerNeeded);
+        person.getRoles().add(defaultRole);
 
-            // Non-critical feature entities should be created lazily in their own flows.
-            person.setBanks(null);
-            person.setTimeEntries(null);
+        // Non-critical feature entities should be created lazily in their own flows.
+        person.setBanks(null);
+        person.setTimeEntries(null);
 
-            try {
-                personDetailsService.save(person);
-                break;
-            } catch (DataIntegrityViolationException e) {
-                String errorText = (e.getMostSpecificCause() != null && e.getMostSpecificCause().getMessage() != null)
-                        ? e.getMostSpecificCause().getMessage()
-                        : e.getMessage();
-                if (isSubmitterPrimaryKeyConflict(errorText) && attempts < maxCreateAttempts) {
-                    resyncSubmitterIdGenerator();
-                    logger.warn("Retrying person create after submitter.id conflict for uid={} attempt={}/{}", uid, attempts, maxCreateAttempts);
-                    continue;
-                }
-
-                HttpHeaders responseHeaders = new HttpHeaders();
-                responseHeaders.setContentType(MediaType.APPLICATION_JSON);
-                JSONObject responseObject = new JSONObject();
-                if (isSubmitterPrimaryKeyConflict(errorText)) {
-                    responseObject.put("error", "Unable to create user due to submitter ID generator conflict");
-                    responseObject.put("message", "submitter.id primary key collision persisted after retries");
-                } else {
-                    responseObject.put("error", "Unable to create user due to duplicate constrained fields (likely uid/email/sid)");
-                }
-                return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.CONFLICT);
-            } catch (Exception e) {
-                String errorText = (e.getCause() != null && e.getCause().getMessage() != null)
-                        ? e.getCause().getMessage()
-                        : e.getMessage();
-                if (isSubmitterPrimaryKeyConflict(errorText) && attempts < maxCreateAttempts) {
-                    resyncSubmitterIdGenerator();
-                    logger.warn("Retrying person create after submitter.id conflict (generic path) for uid={} attempt={}/{}", uid, attempts, maxCreateAttempts);
-                    continue;
-                }
-
-                logger.error("Person create failed for uid={} email={}", uid, email, e);
-                HttpHeaders responseHeaders = new HttpHeaders();
-                responseHeaders.setContentType(MediaType.APPLICATION_JSON);
-                JSONObject responseObject = new JSONObject();
-                if (isSubmitterPrimaryKeyConflict(errorText)) {
-                    responseObject.put("error", "Unable to create user due to submitter ID generator conflict");
-                    responseObject.put("message", "submitter.id primary key collision persisted after retries");
-                    return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.CONFLICT);
-                }
-                responseObject.put("error", "Unable to create user");
-                responseObject.put("message", e.getMessage());
-                return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.INTERNAL_SERVER_ERROR);
-            }
+        try {
+            personDetailsService.save(person);
+        } catch (DataIntegrityViolationException e) {
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            JSONObject responseObject = new JSONObject();
+            responseObject.put("error", "Unable to create user due to duplicate constrained fields (likely uid/email/sid)");
+            return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.CONFLICT);
+        } catch (Exception e) {
+            logger.error("Person create failed for uid={} email={}", uid, email, e);
+            HttpHeaders responseHeaders = new HttpHeaders();
+            responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+            JSONObject responseObject = new JSONObject();
+            responseObject.put("error", "Unable to create user");
+            responseObject.put("message", e.getMessage());
+            return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.INTERNAL_SERVER_ERROR);
         }
 
         HttpHeaders responseHeaders = new HttpHeaders();
@@ -479,42 +440,6 @@ public class PersonApiController {
         responseObject.put("response", email + " is created successfully");
 
         return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.OK);
-    }
-
-    private boolean isSubmitterPrimaryKeyConflict(String errorText) {
-        if (errorText == null) {
-            return false;
-        }
-        String normalized = errorText.toLowerCase();
-        return normalized.contains("submitter.id")
-                || normalized.contains("submitter (id)")
-                || normalized.contains("unique constraint failed: submitter.id");
-    }
-
-    private void resyncSubmitterIdGenerator() {
-        try {
-            Long nextId = jdbcTemplate.queryForObject(
-                    "SELECT COALESCE(MAX(id), 0) + 1 FROM submitter",
-                    Long.class);
-            if (nextId == null || nextId < 1) {
-                nextId = 1L;
-            }
-
-            // Legacy Hibernate table generator path (submitter_seq).
-            jdbcTemplate.update("INSERT INTO submitter_seq (next_val) SELECT ? WHERE NOT EXISTS (SELECT 1 FROM submitter_seq)", nextId);
-            jdbcTemplate.update("UPDATE submitter_seq SET next_val = ?", nextId);
-
-            // MySQL auto-increment path. Ignored by SQLite and other dialects.
-            try {
-                jdbcTemplate.execute("ALTER TABLE submitter AUTO_INCREMENT = " + nextId);
-            } catch (Exception ignored) {
-                // Not all databases support AUTO_INCREMENT syntax.
-            }
-
-            logger.warn("Resynced submitter ID generator to nextId={}", nextId);
-        } catch (Exception ex) {
-            logger.error("Failed to resync submitter ID generator", ex);
-        }
     }
 
     @Autowired
