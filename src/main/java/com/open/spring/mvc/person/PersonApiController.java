@@ -411,6 +411,8 @@ public class PersonApiController {
             // Build a fresh object each attempt so password hashing isn't applied multiple times.
             Person person = new Person(email, uid, rawPassword,
                     sid, name, profilePicture, kasmServerNeeded, defaultRole);
+                // Bank is non-critical for signup; avoid blocking person creation on bank PK drift.
+                person.setBanks(null);
             try {
                 personDetailsService.save(person);
                 break;
