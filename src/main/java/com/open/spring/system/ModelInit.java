@@ -294,7 +294,7 @@ public class ModelInit {
             for (Assignment assignment : assignmentArray) {
                 Assignment assignmentFound = assignmentJpaRepository.findByName(assignment.getName());
                 if (assignmentFound == null) { // if the assignment doesn't exist
-                    Assignment newAssignment = new Assignment(assignment.getName(), assignment.getType(), assignment.getDescription(), assignment.getPoints(), assignment.getDueDate());
+                    Assignment newAssignment = new Assignment(assignment.getName(), assignment.getType(), assignment.getDescription(), assignment.getPoints(), assignment.getDueDate(), assignment.getAssignmentType());
                     assignmentJpaRepository.save(newAssignment);
 
                     // create sample submission

@@ -74,6 +74,7 @@ public class AssignmentsApiController {
         public Long id;
         public String name;
         public String type;
+        public String assignmentType;
         public String description;
         public Double points;
         public String dueDate;
@@ -88,6 +89,7 @@ public class AssignmentsApiController {
             this.id = assignment.getId();
             this.name = assignment.getName();
             this.type = assignment.getType();
+            this.assignmentType = assignment.getAssignmentType();
             this.description = assignment.getDescription();
             this.points = assignment.getPoints();
             this.dueDate = assignment.getDueDate();
@@ -145,11 +147,12 @@ public class AssignmentsApiController {
             @RequestParam String description,
             @RequestParam Double points,
             @RequestParam String dueDate,
+            @RequestParam String assignmentType,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         requireTeacherOrAdmin(userDetails);
-        logger.debug("createAssignment called with name='{}' type='{}' points={} dueDate='{}' by user={}", name, type, points, dueDate, userDetails==null?"<anon>":userDetails.getUsername());
-        Assignment newAssignment = new Assignment(name, type, description, points, dueDate);
+        logger.debug("createAssignment called with name='{}' type='{}' points={} dueDate='{}' by user={}", name, type, assignmentType, points, dueDate, userDetails==null?"<anon>":userDetails.getUsername());
+        Assignment newAssignment = new Assignment(name, type, description, points, dueDate, assignmentType);
         normalizeAssignmentSequenceForSqlite();
         Assignment savedAssignment = assignmentRepo.save(newAssignment);
         return new ResponseEntity<>(new AssignmentDto(savedAssignment), HttpStatus.CREATED);
@@ -172,6 +175,7 @@ public class AssignmentsApiController {
             map.put("dueDate", a.getDueDate());
             map.put("points", String.valueOf(a.getPoints()));
             map.put("type", a.getType());
+            map.put("assignmentType", a.getAssignmentType());
             map.put("resourceType", String.valueOf(a.getResourceType()));
             map.put("resourceUrl", String.valueOf(a.getResourceUrl()));
             map.put("resourceFilename", String.valueOf(a.getResourceFilename()));
@@ -258,7 +262,8 @@ public class AssignmentsApiController {
                 "auto-created",  // type - identifies this as auto-created from frontmatter
                 finalDescription,
                 resolvedPoints,
-                resolvedDueDate
+                resolvedDueDate,
+                "File" // Default file type to a file upload
             );
             
             normalizeAssignmentSequenceForSqlite();
@@ -871,7 +876,8 @@ public class AssignmentsApiController {
                     assignmentDto.type, 
                     assignmentDto.description, 
                     assignmentDto.points, 
-                    assignmentDto.dueDate
+                    assignmentDto.dueDate,
+                    assignmentDto.assignmentType
                 );
                 
                 // Save the new assignment

@@ -85,6 +85,7 @@ public class AssignmentViewController {
             @RequestParam(required = false, defaultValue = "") String description,
             @RequestParam Double points,
             @RequestParam String dueDate,
+            @RequestParam String assignmentType,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         if (userDetails == null) {
@@ -105,7 +106,7 @@ public class AssignmentViewController {
             normalizedDueDate = parts[1] + "/" + parts[2] + "/" + parts[0];
         }
 
-        Assignment assignment = new Assignment(name, type, description, points, normalizedDueDate);
+        Assignment assignment = new Assignment(name, type, description, points, normalizedDueDate, assignmentType);
         // Assignment.id is @GeneratedValue; setting it manually causes merge/stale-state issues.
         // Keep customId as a tolerated input for backward-compatible form posts, but ignore it.
 

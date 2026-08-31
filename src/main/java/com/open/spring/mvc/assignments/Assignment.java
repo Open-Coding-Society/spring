@@ -14,7 +14,6 @@ import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
-import jakarta.persistence.Table;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -22,6 +21,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.Table;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
@@ -46,6 +46,8 @@ public class Assignment {
 
     @NotEmpty
     private String type;
+
+    private String assignmentType;
 
     private String description;
 
@@ -118,9 +120,10 @@ public class Assignment {
     }
 
     // Constructor.
-    public Assignment(String name, String type, String description, Double points, String dueDate) {
+    public Assignment(String name, String type, String description, Double points, String dueDate, String assignmentType) {
         this.name = name;
         this.type = type;
+        this.assignmentType = (assignmentType == null || assignmentType.isBlank()) ? "File" : assignmentType;
         this.description = description;
         this.points = points;
         this.dueDate = dueDate; 
@@ -157,9 +160,9 @@ public class Assignment {
 
     public static Assignment[] init() {
         return new Assignment[] {
-            new Assignment("Assignment 1", "Class Homework", "Unit 1 Homework", 1.0, "10/25/2024"),
-            new Assignment("Sprint 1 Live Review", "Live Review", "The final review for sprint 1", 1.0, "11/2/2024"),
-            new Assignment("Seed", "Seed", "The student's seed grade", 1.0, "11/2/2080"),
+            new Assignment("Assignment 1", "Class Homework", "Unit 1 Homework", 1.0, "10/25/2024", "File"),
+            new Assignment("Sprint 1 Live Review", "Live Review", "The final review for sprint 1", 1.0, "11/2/2024", "File"),
+            new Assignment("Seed", "Seed", "The student's seed grade", 1.0, "11/2/2080", "File"),
         };
     }
 
@@ -187,6 +190,10 @@ public class Assignment {
     
     public String getType() {
         return type;
+    }
+
+    public String getAssignmentType(){
+        return assignmentType;
     }
     
     public String getDescription() {
