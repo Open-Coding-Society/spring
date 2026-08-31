@@ -36,6 +36,7 @@ import com.open.spring.mvc.comment.CommentJPA;
 import com.open.spring.mvc.hardAssets.HardAssetsRepository;
 import com.open.spring.mvc.jokes.Jokes;
 import com.open.spring.mvc.jokes.JokesJpaRepository;
+import com.open.spring.mvc.groups.CourseGroupProperties;
 import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.media.MediaJpaRepository;
@@ -96,6 +97,7 @@ public class ModelInit {
     
     @Autowired MediaJpaRepository mediaJpaRepository;
     @Autowired GroupsJpaRepository groupsJpaRepository;
+    @Autowired CourseGroupProperties courseGroupProperties;
     @Autowired QuizScoreRepository quizScoreRepository;
     @Autowired ResumeJpaRepository resumeJpaRepository;
     @Autowired StatsRepository statsRepository; // curators - stats
@@ -206,19 +208,12 @@ public class ModelInit {
                 }
             }
 
-            String[][] defaultGroups = {
-                {"CSA", "CSA", "2"},
-                {"CSP", "CSP", "3"},
-                {"CSH", "CSH", "2"},
-                {"CSSE", "CSSE", "1"}
-            };
-            for (String[] defaultGroup : defaultGroups) {
-                String groupName = defaultGroup[0];
+            for (String groupName : courseGroupProperties.getGroupNames()) {
                 if (groupsJpaRepository.findByName(groupName).isEmpty()) {
                     Groups group = new Groups();
                     group.setName(groupName);
-                    group.setCourse(defaultGroup[1]);
-                    group.setPeriod(defaultGroup[2]);
+                    group.setCourse(courseGroupProperties.courseFor(groupName));
+                    group.setPeriod(courseGroupProperties.periodFor(groupName));
                     groupsJpaRepository.save(group);
                 }
             }

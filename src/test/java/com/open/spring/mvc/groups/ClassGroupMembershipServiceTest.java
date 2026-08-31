@@ -70,7 +70,11 @@ class ClassGroupMembershipServiceTest {
                 throw new UnsupportedOperationException(methodName);
             }
         );
-        service = new ClassGroupMembershipService(groupsRepository, personRepository);
+        service = new ClassGroupMembershipService(
+            groupsRepository,
+            personRepository,
+            courseGroupProperties("CSA", "CSP", "CSH", "CSSE")
+        );
     }
 
     @Test
@@ -129,10 +133,32 @@ class ClassGroupMembershipServiceTest {
         assertTrue(savedGroupBatches.isEmpty());
     }
 
+    @Test
+    void syncMembershipsRejectsClassesThatAreNotInTheConfiguredCourseGroups() {
+        ClassGroupMembershipService narrowedService = new ClassGroupMembershipService(
+            groupsRepository,
+            personRepository,
+            courseGroupProperties("CSA", "CSP")
+        );
+
+        assertEquals(List.of("CSA"), narrowedService.syncMemberships("student", List.of("CSA")));
+        assertThrows(
+            IllegalArgumentException.class,
+            () -> narrowedService.syncMemberships("student", List.of("CSH"))
+        );
+        assertFalse(csh.getGroupMembers().contains(person));
+    }
+
     private Groups group(String name) {
         Groups group = new Groups();
         group.setName(name);
         return group;
+    }
+
+    private CourseGroupProperties courseGroupProperties(String... names) {
+        CourseGroupProperties properties = new CourseGroupProperties();
+        properties.setClassGroups(List.of(names));
+        return properties;
     }
 
     @SuppressWarnings("unchecked")

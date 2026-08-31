@@ -17,16 +17,17 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 
 @Service
 public class ClassGroupMembershipService {
-    static final List<String> CLASS_GROUP_NAMES = List.of("CSA", "CSP", "CSH", "CSSE");
-
     private final GroupsJpaRepository groupsRepository;
     private final PersonJpaRepository personRepository;
+    private final List<String> classGroupNames;
 
     public ClassGroupMembershipService(
             GroupsJpaRepository groupsRepository,
-            PersonJpaRepository personRepository) {
+            PersonJpaRepository personRepository,
+            CourseGroupProperties courseGroupProperties) {
         this.groupsRepository = groupsRepository;
         this.personRepository = personRepository;
+        this.classGroupNames = List.copyOf(courseGroupProperties.getGroupNames());
     }
 
     /**
@@ -56,7 +57,7 @@ public class ClassGroupMembershipService {
         }
 
         List<Groups> changedGroups = new ArrayList<>();
-        for (String groupName : CLASS_GROUP_NAMES) {
+        for (String groupName : classGroupNames) {
             Groups group = courseGroups.get(groupName);
             if (group == null) {
                 continue;
@@ -78,7 +79,7 @@ public class ClassGroupMembershipService {
             groupsRepository.saveAll(changedGroups);
         }
 
-        return CLASS_GROUP_NAMES.stream()
+        return classGroupNames.stream()
             .filter(requestedGroups::contains)
             .toList();
     }
@@ -95,7 +96,7 @@ public class ClassGroupMembershipService {
             }
 
             String normalizedClass = className.trim().toUpperCase(Locale.ROOT);
-            if (!CLASS_GROUP_NAMES.contains(normalizedClass)) {
+            if (!classGroupNames.contains(normalizedClass)) {
                 throw new IllegalArgumentException(
                     "Unsupported class '" + className + "'"
                 );
@@ -108,7 +109,7 @@ public class ClassGroupMembershipService {
 
     private Map<String, Groups> loadCourseGroups() {
         Map<String, Groups> courseGroups = new LinkedHashMap<>();
-        for (String groupName : CLASS_GROUP_NAMES) {
+        for (String groupName : classGroupNames) {
             courseGroups.put(groupName, groupsRepository.findByName(groupName).orElse(null));
         }
         return courseGroups;
