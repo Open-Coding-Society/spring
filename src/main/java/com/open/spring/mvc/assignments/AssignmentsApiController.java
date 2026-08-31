@@ -147,7 +147,7 @@ public class AssignmentsApiController {
             @RequestParam String description,
             @RequestParam Double points,
             @RequestParam String dueDate,
-            @RequestParam String assignmentType,
+            @RequestParam(required = false, defaultValue = "File") String assignmentType,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         requireTeacherOrAdmin(userDetails);

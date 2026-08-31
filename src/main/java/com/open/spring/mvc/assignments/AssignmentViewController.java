@@ -85,7 +85,7 @@ public class AssignmentViewController {
             @RequestParam(required = false, defaultValue = "") String description,
             @RequestParam Double points,
             @RequestParam String dueDate,
-            @RequestParam String assignmentType,
+            @RequestParam(required = false, defaultValue = "File") String assignmentType,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         if (userDetails == null) {
