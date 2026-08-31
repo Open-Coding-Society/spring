@@ -533,7 +533,10 @@ public class PersonViewController {
 
         Person personToReset = repository.getByUid(requestBody.getUid());
         if (personToReset == null) {
-            return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+            // Same 200 as a real ticket creation -- an unknown uid must not be
+            // distinguishable from a known one on this unauthenticated endpoint.
+            logger.warn("AUDIT reset_ticket_unknown_uid uid={}", requestBody.getUid());
+            return new ResponseEntity<>(HttpStatus.OK);
         }
 
         if (ticketRepository.findByUidAndResolvedFalse(personToReset.getUid()).isEmpty()) {
