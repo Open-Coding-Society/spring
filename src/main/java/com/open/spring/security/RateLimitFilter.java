@@ -21,10 +21,10 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
 
-    @Value("${security.rate-limit.requests-per-minute:20}")
+    @Value("${security.rate-limit.requests-per-minute:1000}")
     private int requestsPerMinute;
 
-    @Value("${security.rate-limit.admin-requests-per-minute:1000}")
+    @Value("${security.rate-limit.admin-requests-per-minute:5000}")
     private int adminRequestsPerMinute;
 
     private final Map<String, Bucket> cache = new ConcurrentHashMap<>();
