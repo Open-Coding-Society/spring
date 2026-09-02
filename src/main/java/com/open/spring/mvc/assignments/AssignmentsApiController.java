@@ -447,6 +447,7 @@ public class AssignmentsApiController {
         snippet.append("assignment_id: ").append(assignment.getId()).append("\n");
         snippet.append("assignment_name: \"").append(escapeYaml(assignment.getName())).append("\"\n");
         snippet.append("assignment_type: \"").append(escapeYaml(assignment.getType())).append("\"\n");
+        snippet.append("assignment_submission_type: \"").append(escapeYaml(assignment.getAssignmentType())).append("\"\n");
         snippet.append("assignment_due_date: \"").append(escapeYaml(assignment.getDueDate())).append("\"\n");
         snippet.append("assignment_resource_type: \"").append(escapeYaml(defaultString(assignment.getResourceType(), "none"))).append("\"\n");
         snippet.append("assignment_resource_url: \"").append(escapeYaml(defaultString(assignment.getResourceUrl(), ""))).append("\"\n");
