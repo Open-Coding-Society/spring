@@ -205,6 +205,7 @@ public class AssignmentsApiController {
             @RequestParam(required = false, defaultValue = "") String description,
             @RequestParam(required = false) Double points,
             @RequestParam(required = false) String dueDate,
+            @RequestParam(required = false) String assignmentType,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         // Debug log input
@@ -222,6 +223,11 @@ public class AssignmentsApiController {
         if (contentUrl == null || contentUrl.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Content URL is required"));
         }
+
+        if (assignmentType == null){
+            assignmentType = "File";
+        }
+
 
         double resolvedPoints = points != null ? points : 1.0;
         String resolvedDueDate = (dueDate != null && !dueDate.trim().isEmpty())
@@ -263,7 +269,7 @@ public class AssignmentsApiController {
                 finalDescription,
                 resolvedPoints,
                 resolvedDueDate,
-                "File" // Default file type to a file upload
+                assignmentType
             );
             
             normalizeAssignmentSequenceForSqlite();
