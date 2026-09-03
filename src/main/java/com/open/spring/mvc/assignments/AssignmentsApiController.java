@@ -1,11 +1,11 @@
 package com.open.spring.mvc.assignments;
 
 import java.nio.file.Paths;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.time.Instant;
-import java.util.Base64;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -17,10 +17,11 @@ import java.util.stream.Stream;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.dao.DataAccessException;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,9 +32,8 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.multipart.MultipartFile;
-import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.open.spring.mvc.S3uploads.FileHandler;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
@@ -147,7 +147,7 @@ public class AssignmentsApiController {
             @RequestParam String description,
             @RequestParam Double points,
             @RequestParam String dueDate,
-            @RequestParam(required = false, defaultValue = "File") String assignmentType,
+            @RequestParam(required = false, defaultValue = "file") String assignmentType,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         requireTeacherOrAdmin(userDetails);
@@ -209,7 +209,7 @@ public class AssignmentsApiController {
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         // Debug log input
-        logger.debug("autoCreateAssignment called with name='{}' contentUrl='{}' description='{}' points={} dueDate='{}' userDetails={}", name, contentUrl, description, points, dueDate, userDetails==null?"<anon>":userDetails.getUsername());
+        logger.debug("autoCreateAssignment called with name='{}' contentUrl='{}' description='{}' points={} dueDate='{}' assignmentType='{}' userDetails={}", name, contentUrl, description, points, dueDate, assignmentType, userDetails==null?"<anon>":userDetails.getUsername());
 
         // Check authentication - any authenticated user can create assignments from frontmatter
         if (userDetails == null) {
@@ -225,7 +225,7 @@ public class AssignmentsApiController {
         }
 
         if (assignmentType == null){
-            assignmentType = "File";
+            assignmentType = "file";
         }
 
 
@@ -248,8 +248,14 @@ public class AssignmentsApiController {
         if (!existing.isEmpty()) {
             // Return existing assignment (already has auto-generated ID)
             // This avoids duplicate assignments for the same page
-            logger.info("Assignment already exists for contentUrl: " + contentUrl + ", ID: " + existing.get(0).getId());
-            AssignmentDto dto = new AssignmentDto(existing.get(0));
+            Assignment existingAssignment = existing.get(0);
+            if (assignmentType != null && !assignmentType.isBlank()
+                    && !assignmentType.equalsIgnoreCase(existingAssignment.getAssignmentType())) {
+                existingAssignment.setAssignmentType(assignmentType.trim());
+                existingAssignment = assignmentRepo.save(existingAssignment);
+            }
+            logger.info("Assignment already exists for contentUrl: " + contentUrl + ", ID: " + existingAssignment.getId());
+            AssignmentDto dto = new AssignmentDto(existingAssignment);
             return ResponseEntity.ok(dto);
         }
         

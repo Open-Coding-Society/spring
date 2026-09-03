@@ -14,8 +14,6 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-// content is now Map<String,Object> — plain strings from old rows are handled by SubmissionContentConverter fallback
-
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -28,13 +26,13 @@ import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
-import org.springframework.web.server.ResponseStatusException;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
 
 import com.open.spring.mvc.S3uploads.FileHandler;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
@@ -166,6 +164,9 @@ public class AssignmentSubmissionAPIController {
         }
         
         if (assignment != null) {
+            if (!hasSubmissionType(submissionInfo.content, assignment)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
+            }
             AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, submissionInfo.content, submissionInfo.comment, submissionInfo.isLate);
             AssignmentSubmission savedSubmission = submissionRepo.save(submission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
@@ -225,6 +226,10 @@ public class AssignmentSubmissionAPIController {
                 return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
             }
 
+            if (!hasSubmissionType(requestData.content, assignment)) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
+            }
+
             AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, requestData.content, requestData.comment,requestData.isLate);
             AssignmentSubmission savedSubmission = submissionRepo.save(submission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
@@ -270,6 +275,10 @@ public class AssignmentSubmissionAPIController {
 
         String normalizedContentType = contentType == null ? "" : contentType.trim().toLowerCase(Locale.ROOT);
         Map<String, Object> updatedContent;
+
+        if (!isAllowedSubmissionType(submission.getAssignment(), normalizedContentType)) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
+        }
 
         if ("link".equals(normalizedContentType)) {
             if (url == null || url.trim().isEmpty()) {
@@ -557,6 +566,21 @@ public class AssignmentSubmissionAPIController {
 
     private boolean canGradeOrDeleteSubmission(Person currentUser) {
         return currentUser.hasRoleWithName("ROLE_ADMIN") || currentUser.hasRoleWithName("ROLE_TEACHER");
+    }
+
+    private boolean hasSubmissionType(Map<String, Object> content, Assignment assignment) {
+        if (content == null) {
+            return false;
+        }
+        Object contentType = content.get("type");
+        return contentType != null && isAllowedSubmissionType(assignment, String.valueOf(contentType));
+    }
+
+    private boolean isAllowedSubmissionType(Assignment assignment, String contentType) {
+        return assignment != null
+                && assignment.getAssignmentType() != null
+                && contentType != null
+                && assignment.getAssignmentType().trim().equalsIgnoreCase(contentType.trim());
     }
 
     private Person getAuthenticatedPerson(UserDetails userDetails) {

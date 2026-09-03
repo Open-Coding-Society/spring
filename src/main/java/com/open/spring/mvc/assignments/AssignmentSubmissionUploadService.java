@@ -14,8 +14,8 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
-import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.S3uploads.FileHandler;
+import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
@@ -53,6 +53,10 @@ public class AssignmentSubmissionUploadService {
         Person authenticatedUser = getAuthenticatedUser(userDetails);
         Person targetUser = getTargetUser(userId);
         Assignment assignment = resolveAssignment(assignmentId, assignmentName);
+
+        if (!isAllowedSubmissionType(assignment, "file")) {
+            throw new UploadException(HttpStatus.BAD_REQUEST, "This assignment does not accept file submissions");
+        }
 
         validateUsernameMatchesTarget(username, targetUser);
         validateSubmitPermission(authenticatedUser, userId);
@@ -195,7 +199,7 @@ public class AssignmentSubmissionUploadService {
             String storedFilename) {
 
         Map<String, Object> content = new HashMap<>();
-        content.put("type", "file");
+        content.put("type", assignment.getAssignmentType());
         content.put("filename", originalFilename);
         content.put("storedFilename", storedFilename);
         content.put("storagePath", targetUser.getUid() + "/" + s3Filename);
@@ -260,6 +264,13 @@ public class AssignmentSubmissionUploadService {
         }
         String normalized = value.trim().toLowerCase(Locale.ROOT);
         return "null".equals(normalized) || "undefined".equals(normalized);
+    }
+
+    private boolean isAllowedSubmissionType(Assignment assignment, String contentType) {
+        return assignment != null
+                && assignment.getAssignmentType() != null
+                && contentType != null
+                && assignment.getAssignmentType().trim().equalsIgnoreCase(contentType.trim());
     }
 
     public static class UploadException extends RuntimeException {
