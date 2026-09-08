@@ -26,8 +26,35 @@ public class ResetCode {
     private static final Map<String, ResetTokenRecord> activeTokensByUid = new ConcurrentHashMap<>();
     private static final Map<String, Deque<Long>> resetRequestTimesByUid = new ConcurrentHashMap<>();
     private static final Map<String, String> lastIssueReasonByUid = new ConcurrentHashMap<>();
+    // Bumped by an admin from the reset-ticket queue when a rate-limited user needs more
+    // attempts; each grant adds one batch on top of MAX_REQUESTS_PER_WINDOW.
+    private static final Map<String, Integer> bonusAttemptsByUid = new ConcurrentHashMap<>();
 
     private static final byte[] secret = loadSecret();
+
+    // Ticket creation is unauthenticated, so this exists to stop one uid from being spammed
+    // with repeat requests -- it is NOT the security boundary against ticket spam in general.
+    // That boundary is the admin: a ticket does nothing on its own, it only grants bonus
+    // attempts once a human clicks "Grant" on it, so a burst of tickets for many different
+    // uids is queue noise for the admin to dismiss, not an actual bypass of anything. Keyed
+    // by uid (not caller IP) so testing/admin tooling running from one machine against many
+    // different uids in a short window doesn't trip this at all.
+    private static final long TICKET_RATE_WINDOW_SECONDS = 15 * 60;
+    private static final int MAX_TICKET_REQUESTS_PER_WINDOW = 5;
+    private static final Map<String, Deque<Long>> ticketRequestTimesByUid = new ConcurrentHashMap<>();
+
+    public static synchronized boolean canRequestTicket(String uid) {
+        long now = Instant.now().getEpochSecond();
+        Deque<Long> requestTimes = ticketRequestTimesByUid.computeIfAbsent(uid, key -> new ArrayDeque<>());
+        while (!requestTimes.isEmpty() && requestTimes.peekFirst() <= now - TICKET_RATE_WINDOW_SECONDS) {
+            requestTimes.removeFirst();
+        }
+        if (requestTimes.size() >= MAX_TICKET_REQUESTS_PER_WINDOW) {
+            return false;
+        }
+        requestTimes.addLast(now);
+        return true;
+    }
 
     private static class ResetTokenRecord {
         private final String token;
@@ -89,9 +116,22 @@ public class ResetCode {
         }
 
         Deque<Long> requestTimes = resetRequestTimesByUid.computeIfAbsent(uid, key -> new ArrayDeque<>());
-        if (requestTimes.size() >= MAX_REQUESTS_PER_WINDOW) {
+        int bonus = bonusAttemptsByUid.getOrDefault(uid, 0);
+        int allowedRequests = MAX_REQUESTS_PER_WINDOW + bonus;
+        if (requestTimes.size() >= allowedRequests) {
             lastIssueReasonByUid.put(uid, "rate-limit");
             return false;
+        }
+
+        // This request only succeeds because of a bonus grant if the base window is already
+        // exhausted -- consume one bonus attempt in that case, so a grant is a one-time batch
+        // that runs out, not a permanent raise of the per-window ceiling.
+        if (requestTimes.size() >= MAX_REQUESTS_PER_WINDOW && bonus > 0) {
+            if (bonus <= 1) {
+                bonusAttemptsByUid.remove(uid);
+            } else {
+                bonusAttemptsByUid.put(uid, bonus - 1);
+            }
         }
 
         lastIssueReasonByUid.remove(uid);
@@ -100,6 +140,16 @@ public class ResetCode {
 
     public static String getLastIssueReason(String uid) {
         return lastIssueReasonByUid.get(uid);
+    }
+
+    // Called by an admin resolving a reset ticket: lifts the rate limit by one batch of
+    // extraAttempts on top of the standard window. Each attempt drawn from this batch (i.e.
+    // each issuance beyond MAX_REQUESTS_PER_WINDOW) is consumed one at a time in
+    // canIssueResetCode, so this is a one-time allowance, not a permanent ceiling raise.
+    public static synchronized void grantBonusAttempts(String uid, int extraAttempts) {
+        bonusAttemptsByUid.merge(uid, extraAttempts, Integer::sum);
+        logger.info("AUDIT reset_bonus_attempts_granted uid={} extraAttempts={} totalBonus={}",
+                uid, extraAttempts, bonusAttemptsByUid.get(uid));
     }
 
     public static synchronized String GenerateResetCode(String uid){
