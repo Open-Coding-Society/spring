@@ -426,6 +426,22 @@
             fetch(`/api/assignments/delete/${id}`, { method: 'POST' }).then(fetchAssignments);
         };
 
+        function formatSubmissionContent(content) {
+            if (!content) {
+                return 'No content';
+            }
+            if (typeof content === 'string') {
+                return content;
+            }
+            if (content.type === 'link' && content.url) {
+                return content.url;
+            }
+            if (content.type === 'file') {
+                return content.filename || content.fileName || content.path || 'File submission';
+            }
+            return JSON.stringify(content);
+        }
+
         window.viewSubmissions = function (id) {
             fetch(`/api/submissions/assignment/${id}`)
                 .then(response => response.json())
@@ -437,7 +453,7 @@
                         submissions.forEach(submission => {
                             submissionsTable.row.add([
                                 submission.submitter?.name || 'Unknown',
-                                submission.content || 'No content',
+                                formatSubmissionContent(submission.content),
                                 submission.comment || 'No comments',
                                 submission.grade || 'Not graded',
                                 `<button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Grade</button>`
@@ -461,7 +477,7 @@
                         submissions.forEach(submission => {
                             submissionsTable.row.add([
                                 submission.assignment?.name || 'Unknown Assignment',
-                                submission.content || 'No content',
+                                formatSubmissionContent(submission.content),
                                 submission.comment || 'No comments',
                                 submission.grade || 'Not graded',
                                 `<button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Grade</button>`
@@ -581,7 +597,7 @@
                             submission.assignment?.name || '',
                             submission.submitter?.id || '',
                             submission.submitter?.name || '',
-                            submission.content || '',
+                            formatSubmissionContent(submission.content),
                             submission.comment || '',
                             submission.grade || '',
                             submission.feedback || '',
