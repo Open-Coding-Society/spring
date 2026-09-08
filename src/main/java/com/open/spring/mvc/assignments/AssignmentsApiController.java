@@ -76,6 +76,7 @@ public class AssignmentsApiController {
         public String type;
         public String assignmentType;
         public String description;
+        public String aiRubric;
         public Double points;
         public String dueDate;
         public String timestamp;
@@ -91,6 +92,7 @@ public class AssignmentsApiController {
             this.type = assignment.getType();
             this.assignmentType = assignment.getAssignmentType();
             this.description = assignment.getDescription();
+            this.aiRubric = assignment.getAiRubric();
             this.points = assignment.getPoints();
             this.dueDate = assignment.getDueDate();
             this.timestamp = assignment.getTimestamp();
@@ -145,6 +147,7 @@ public class AssignmentsApiController {
             @RequestParam String name,
             @RequestParam String type,
             @RequestParam String description,
+            @RequestParam(required = false) String aiRubric,
             @RequestParam Double points,
             @RequestParam String dueDate,
             @RequestParam(required = false, defaultValue = "file") String assignmentType,
@@ -153,9 +156,30 @@ public class AssignmentsApiController {
         requireTeacherOrAdmin(userDetails);
         logger.debug("createAssignment called with name='{}' type='{}' points={} dueDate='{}' by user={}", name, type, assignmentType, points, dueDate, userDetails==null?"<anon>":userDetails.getUsername());
         Assignment newAssignment = new Assignment(name, type, description, points, dueDate, assignmentType);
+        if (aiRubric != null && !aiRubric.isBlank()) {
+            newAssignment.setAiRubric(aiRubric.trim());
+        }
         normalizeAssignmentSequenceForSqlite();
         Assignment savedAssignment = assignmentRepo.save(newAssignment);
         return new ResponseEntity<>(new AssignmentDto(savedAssignment), HttpStatus.CREATED);
+    }
+
+    @PutMapping("/{id}/ai-rubric")
+    public ResponseEntity<?> updateAiRubric(
+            @PathVariable Long id,
+            @RequestBody Map<String, String> request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        Assignment assignment = assignmentRepo.findById(id).orElse(null);
+        if (assignment == null) {
+            return ResponseEntity.notFound().build();
+        }
+        String rubric = request == null ? null : request.get("rubric");
+        if (rubric == null || rubric.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "rubric is required"));
+        }
+        assignment.setAiRubric(rubric.trim());
+        return ResponseEntity.ok(new AssignmentDto(assignmentRepo.save(assignment)));
     }
 
     /**

@@ -36,6 +36,14 @@ import lombok.Setter;
 @Setter
 @NoArgsConstructor
 public class Assignment {
+    public static final String DEFAULT_AI_RUBRIC = """
+            5 (Exceptional): The submission is thorough, accurate, well structured, and provides specific evidence and actionable insight.
+            4 (Strong): The submission is clear and mostly complete, with several relevant details and useful reasoning.
+            3 (Adequate): The submission addresses the main requirement with reasonable context, but important detail or clarity is missing.
+            2 (Limited): The submission provides only partial information, shallow reasoning, or little supporting context.
+            1 (Minimal): The submission is missing, mostly unclear, unsupported, or provides no meaningful response.
+            """;
+
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
@@ -50,6 +58,9 @@ public class Assignment {
     private String assignmentType;
 
     private String description;
+
+    @Column(columnDefinition = "TEXT")
+    private String aiRubric;
 
     @NotEmpty
     private String dueDate;
@@ -125,6 +136,7 @@ public class Assignment {
         this.type = type;
         this.assignmentType = (assignmentType == null || assignmentType.isBlank()) ? "File" : assignmentType;
         this.description = description;
+        this.aiRubric = DEFAULT_AI_RUBRIC;
         this.points = points;
         this.dueDate = dueDate; 
         this.timestamp = LocalDateTime.now().format(formatter); // fixed formatting ahhh

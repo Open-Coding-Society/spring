@@ -75,6 +75,24 @@
             max-width: 980px;
         }
 
+        .rubric-modal-content {
+            max-width: 760px;
+        }
+
+        #editAiRubricText {
+            width: 100%;
+            min-height: 280px;
+            box-sizing: border-box;
+            resize: vertical;
+            font-family: inherit;
+            padding: 10px;
+        }
+
+        #editAiRubricStatus {
+            min-height: 20px;
+            margin: 8px 0;
+        }
+
         .close-btn {
             color: #aaa;
             float: right;
@@ -122,6 +140,7 @@
                     <div class="stack"><label>Name</label><input type="text" id="assignmentName"></div>
                     <div class="stack"><label>Type</label><input type="text" id="assignmentType"></div>
                     <div class="stack"><label>Description</label><input type="text" id="assignmentDescription"></div>
+                    <div class="stack"><label>AI Grading Rubric</label><textarea id="assignmentAiRubric" rows="6" placeholder="Leave blank to use the generic 1-5 rubric."></textarea></div>
                     <div class="stack"><label>Points</label><input type="number" id="assignmentPoints"></div>
                     <div class="stack"><label>Due Date</label><input type="date" id="assignmentDueDate"></div>
 
@@ -151,6 +170,19 @@
 
                     <button class="btn" onclick="createAssignment()">Submit</button>
                     <button class="btn" onclick="closeAddAssignmentModal()">Cancel</button>
+                </div>
+            </div>
+
+            <div id="editAiRubricModal" class="modal">
+                <div class="modal-content rubric-modal-content">
+                    <span class="close-btn" onclick="closeEditAiRubricModal()">&times;</span>
+                    <h2>Edit AI Grading Rubric</h2>
+                    <p id="editAiRubricAssignmentName"></p>
+                    <label for="editAiRubricText">Rubric used to score eligible GitHub issue submissions from 1 to 5</label>
+                    <textarea id="editAiRubricText"></textarea>
+                    <div id="editAiRubricStatus" role="status" aria-live="polite"></div>
+                    <button class="btn btn-grade" onclick="saveAiRubric()">Save Rubric</button>
+                    <button class="btn" onclick="closeEditAiRubricModal()">Cancel</button>
                 </div>
             </div>
 
@@ -272,8 +304,12 @@
         async function fetchAssignments() {
             const response = await fetch('/api/assignments/debug');
             const assignments = await response.json();
+            window.assignmentRubrics = {};
+            window.assignmentRows = {};
             assignmentTable.clear();
             assignments.forEach(assignment => {
+                window.assignmentRubrics[assignment.id] = assignment.aiRubric || '';
+                window.assignmentRows[assignment.id] = assignment;
                 assignmentTable.row.add([
                     assignment.id,
                     assignment.name,
@@ -284,6 +320,7 @@
                     renderResource(assignment),
                     `
                         <button class="btn btn-view-submissions" onclick="viewSubmissions(${assignment.id})">View Submissions</button>
+                        <button class="btn btn-grade" onclick="editAiRubric(${assignment.id})">Edit AI Rubric</button>
                         <button class="btn btn-delete" onclick="deleteAssignment(${assignment.id})">Delete</button>
                         <button class="btn btn-grade" onclick="showAssignToGradeModal(${assignment.id})">Assign to Grade</button>
                         <button class="btn btn-randomize" onclick="showRandomizeGradersModal(${assignment.id})">Randomize Graders</button>
@@ -363,6 +400,7 @@
             const name = document.getElementById('assignmentName').value;
             const type = document.getElementById('assignmentType').value;
             const description = document.getElementById('assignmentDescription').value;
+            const aiRubric = document.getElementById('assignmentAiRubric').value;
             const points = document.getElementById('assignmentPoints').value;
             const dueDateRaw = document.getElementById('assignmentDueDate').value;
             const mode = document.getElementById('assignmentResourceMode').value;
@@ -388,6 +426,7 @@
                 name,
                 type,
                 description,
+                aiRubric,
                 points,
                 dueDate: toMDY(dueDateRaw)
             });
@@ -417,6 +456,44 @@
                 console.error(error);
                 alert('Create failed: ' + error.message);
             }
+        };
+
+        window.editAiRubric = async function (assignmentId) {
+            const currentRubric = window.assignmentRubrics?.[assignmentId] || '';
+            const assignment = window.assignmentRows?.[assignmentId];
+            document.getElementById('editAiRubricAssignmentName').textContent = assignment
+                ? `Assignment: ${assignment.name}`
+                : `Assignment ID: ${assignmentId}`;
+            document.getElementById('editAiRubricText').value = currentRubric;
+            document.getElementById('editAiRubricText').dataset.assignmentId = assignmentId;
+            document.getElementById('editAiRubricStatus').textContent = '';
+            document.getElementById('editAiRubricModal').style.display = 'block';
+            document.getElementById('editAiRubricText').focus();
+        };
+
+        window.saveAiRubric = async function () {
+            const rubricField = document.getElementById('editAiRubricText');
+            const status = document.getElementById('editAiRubricStatus');
+            const assignmentId = rubricField.dataset.assignmentId;
+            const rubric = rubricField.value;
+            if (!rubric.trim()) {
+                status.textContent = 'A rubric is required.';
+                return;
+            }
+            status.textContent = 'Saving...';
+            const response = await fetch(`/api/assignments/${assignmentId}/ai-rubric`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rubric })
+            });
+            if (!response.ok) {
+                status.textContent = 'Failed to update the AI rubric.';
+                return;
+            }
+            window.assignmentRubrics[assignmentId] = rubric.trim();
+            await fetchAssignments();
+            status.textContent = 'Rubric saved.';
+            window.setTimeout(closeEditAiRubricModal, 400);
         };
 
         window.deleteAssignment = function (id) {
@@ -456,7 +533,8 @@
                                 formatSubmissionContent(submission.content),
                                 submission.comment || 'No comments',
                                 submission.grade || 'Not graded',
-                                `<button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Grade</button>`
+                                `<button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Grade</button>
+                                 <button class="btn btn-grade" onclick="aiGradeSubmission(${submission.id})">AI Grade</button>`
                             ]);
                         });
                     }
@@ -480,7 +558,8 @@
                                 formatSubmissionContent(submission.content),
                                 submission.comment || 'No comments',
                                 submission.grade || 'Not graded',
-                                `<button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Grade</button>`
+                                `<button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Grade</button>
+                                 <button class="btn btn-grade" onclick="aiGradeSubmission(${submission.id})">AI Grade</button>`
                             ]);
                         });
                     }
@@ -543,6 +622,16 @@
                 method: 'POST',
                 body: params
             });
+        };
+
+        window.aiGradeSubmission = async function (submissionId) {
+            const response = await fetch(`/api/submissions/ai-grade/${submissionId}`, { method: 'POST' });
+            const result = await response.json();
+            if (!response.ok) {
+                alert(result.message || result.error || 'AI grading did not complete.');
+                return;
+            }
+            alert(`AI score: ${result.qualityScore}/5\n${result.feedback}`);
         };
 
         window.exportAssignments = function () {
@@ -635,6 +724,10 @@
 
         window.closeAddAssignmentModal = function () {
             document.getElementById('addAssignmentModal').style.display = 'none';
+        };
+
+        window.closeEditAiRubricModal = function () {
+            document.getElementById('editAiRubricModal').style.display = 'none';
         };
 
         window.closeSubmissionsModal = function () {

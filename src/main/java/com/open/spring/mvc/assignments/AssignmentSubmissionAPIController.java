@@ -70,6 +70,9 @@ public class AssignmentSubmissionAPIController {
 
     @Autowired
     private FileHandler fileHandler;
+
+    @Autowired
+    private AssignmentAiGradingService aiGradingService;
     
     /**
      * A DTO class for returning only necessary assignment submission details.
@@ -359,6 +362,41 @@ public class AssignmentSubmissionAPIController {
         submission.setFeedback(feedback);
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
         return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
+    }
+
+    @PostMapping("/ai-grade/{submissionId}")
+    @Transactional
+    public ResponseEntity<?> aiGradeSubmission(
+            @PathVariable Long submissionId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required"));
+        }
+        if (!canGradeOrDeleteSubmission(currentUser)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Admin or teacher access required"));
+        }
+
+        AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
+        if (submission == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Submission not found"));
+        }
+
+        try {
+            AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
+            if (!"graded".equals(result.status())) {
+                return ResponseEntity.unprocessableEntity().body(result);
+            }
+            submission.setQualityScore(result.score());
+            submission.setGrade(result.score().doubleValue());
+            submission.setFeedback(result.feedback());
+            submission.setAiSummary(result.feedback());
+            return ResponseEntity.ok(new AssignmentSubmissionReturnDto(submissionRepo.save(submission)));
+        } catch (Exception e) {
+            logger.error("AI grading failed for submission {}", submissionId, e);
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(Map.of("status", "failed", "message", "The AI grader could not complete this submission."));
+        }
     }
 
     /**
