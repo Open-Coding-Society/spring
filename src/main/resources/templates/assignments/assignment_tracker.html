@@ -115,6 +115,115 @@
             min-height: 140px;
             font-family: monospace;
         }
+
+        #submissionsModal .modal-content {
+            width: min(92%, 980px);
+            box-sizing: border-box;
+        }
+
+        #submissionsTable {
+            width: 100% !important;
+            table-layout: fixed;
+        }
+
+        #submissionsTable th,
+        #submissionsTable td {
+            overflow-wrap: anywhere;
+            vertical-align: middle;
+        }
+
+        #submissionsTable th:nth-child(1),
+        #submissionsTable td:nth-child(1) {
+            width: 34%;
+        }
+
+        #submissionsTable th:nth-child(2),
+        #submissionsTable td:nth-child(2) {
+            width: 18%;
+        }
+
+        #submissionsTable th:nth-child(3),
+        #submissionsTable td:nth-child(3) {
+            width: 48%;
+        }
+
+        .submission-actions {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .submission-actions .btn {
+            margin: 0;
+            padding: 8px 10px;
+            white-space: nowrap;
+        }
+
+        #submissionDetailView {
+            display: none;
+        }
+
+        .submission-detail-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .submission-detail-header h3 {
+            margin: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .submission-detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 12px;
+        }
+
+        .submission-detail-field {
+            min-width: 0;
+            padding: 12px;
+            background: #252725;
+            border: 1px solid #3a3d3a;
+            border-radius: 4px;
+        }
+
+        .submission-detail-field.full-width {
+            grid-column: 1 / -1;
+        }
+
+        .submission-detail-field strong {
+            display: block;
+            margin-bottom: 6px;
+            color: #b9d7ff;
+        }
+
+        .submission-detail-field pre {
+            margin: 0;
+            max-height: 280px;
+            overflow: auto;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            font: inherit;
+            color: #f1f1f1;
+        }
+
+        @media (max-width: 640px) {
+            #submissionsModal .modal-content {
+                margin: 3% auto;
+                padding: 14px;
+            }
+
+            .submission-actions {
+                flex-direction: column;
+            }
+
+            .submission-actions .btn {
+                width: 100%;
+            }
+        }
     </style>
 </th:block>
 
@@ -241,17 +350,24 @@
             <div class="modal-content">
                 <span class="close-btn" onclick="closeSubmissionsModal()">&times;</span>
                 <h2 id="studentNameHeader">Submissions</h2>
-                <table id="submissionsTable" class="display">
-                    <thead>
-                        <tr>
-                            <th>Student/Group</th>
-                            <th>Content</th>
-                            <th>Comments</th>
-                            <th>Grade</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                </table>
+                <div id="submissionListView">
+                    <table id="submissionsTable" class="display">
+                        <thead>
+                            <tr>
+                                <th>Submitter</th>
+                                <th>Grade</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                    </table>
+                </div>
+                <div id="submissionDetailView">
+                    <div class="submission-detail-header">
+                        <h3 id="submissionDetailTitle">Submission Details</h3>
+                        <button class="btn btn-view-submissions" onclick="backToSubmissionList()">Back</button>
+                    </div>
+                    <div id="submissionDetailContent" class="submission-detail-grid"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -519,26 +635,35 @@
             return JSON.stringify(content);
         }
 
+        function renderSubmissionRows(submissions) {
+            window.submissionDetails = {};
+            if (submissions.length === 0) {
+                submissionsTable.row.add(['No submissions found', '', '']);
+                return;
+            }
+
+            submissions.forEach(submission => {
+                window.submissionDetails[submission.id] = submission;
+                submissionsTable.row.add([
+                    submission.submitter?.name || 'Unknown',
+                    submission.grade ?? 'Not graded',
+                    `<div class="submission-actions">
+                        <button class="btn btn-view-submissions" onclick="viewSubmissionDetails(${submission.id})">View</button>
+                        <button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Manual Grade</button>
+                        <button class="btn btn-grade" onclick="aiGradeSubmission(${submission.id}, this)">AI Grade</button>
+                    </div>`
+                ]);
+            });
+        }
+
         window.viewSubmissions = function (id) {
             fetch(`/api/submissions/assignment/${id}`)
                 .then(response => response.json())
                 .then(submissions => {
                     submissionsTable.clear();
-                    if (submissions.length === 0) {
-                        submissionsTable.row.add(['No submissions found', '', '', '', '']);
-                    } else {
-                        submissions.forEach(submission => {
-                            submissionsTable.row.add([
-                                submission.submitter?.name || 'Unknown',
-                                formatSubmissionContent(submission.content),
-                                submission.comment || 'No comments',
-                                submission.grade || 'Not graded',
-                                `<button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Grade</button>
-                                 <button class="btn btn-grade" onclick="aiGradeSubmission(${submission.id})">AI Grade</button>`
-                            ]);
-                        });
-                    }
+                    renderSubmissionRows(submissions);
                     submissionsTable.draw();
+                    backToSubmissionList();
                     document.getElementById('submissionsModal').style.display = 'block';
                 });
         };
@@ -549,23 +674,63 @@
                 .then(submissions => {
                     submissionsTable.clear();
                     document.getElementById('studentNameHeader').textContent = `${studentName}'s Submissions`;
-                    if (submissions.length === 0) {
-                        submissionsTable.row.add(['No submissions found', '', '', '', '']);
-                    } else {
-                        submissions.forEach(submission => {
-                            submissionsTable.row.add([
-                                submission.assignment?.name || 'Unknown Assignment',
-                                formatSubmissionContent(submission.content),
-                                submission.comment || 'No comments',
-                                submission.grade || 'Not graded',
-                                `<button class="btn btn-grade" onclick="gradeSubmission(${submission.id})">Grade</button>
-                                 <button class="btn btn-grade" onclick="aiGradeSubmission(${submission.id})">AI Grade</button>`
-                            ]);
-                        });
-                    }
+                    renderSubmissionRows(submissions);
                     submissionsTable.draw();
+                    backToSubmissionList();
                     document.getElementById('submissionsModal').style.display = 'block';
                 });
+        };
+
+        window.viewSubmissionDetails = function (submissionId) {
+            const submission = window.submissionDetails?.[submissionId];
+            if (!submission) {
+                return;
+            }
+
+            const detailFields = [
+                ['Submission ID', submission.id],
+                ['Submitter', submission.submitter],
+                ['Group submission', submission.isGroup],
+                ['Assignment', submission.assignment],
+                ['Content', submission.content],
+                ['Comment', submission.comment],
+                ['Grade', submission.grade],
+                ['Feedback', submission.feedback],
+                ['AI summary / reasoning', submission.aiSummary],
+                ['AI quality score', submission.qualityScore],
+                ['Late submission', submission.isLate]
+            ];
+            const detailContent = document.getElementById('submissionDetailContent');
+            detailContent.replaceChildren();
+            document.getElementById('submissionDetailTitle').textContent =
+                `Submission ${submission.id} Details`;
+
+            detailFields.forEach(([label, value]) => {
+                const field = document.createElement('div');
+                field.className = 'submission-detail-field';
+                if (value && typeof value === 'object') {
+                    field.classList.add('full-width');
+                }
+
+                const heading = document.createElement('strong');
+                heading.textContent = label;
+                const valueElement = document.createElement('pre');
+                valueElement.textContent = value == null
+                    ? 'Not provided'
+                    : typeof value === 'object'
+                        ? JSON.stringify(value, null, 2)
+                        : String(value);
+                field.append(heading, valueElement);
+                detailContent.appendChild(field);
+            });
+
+            document.getElementById('submissionListView').style.display = 'none';
+            document.getElementById('submissionDetailView').style.display = 'block';
+        };
+
+        window.backToSubmissionList = function () {
+            document.getElementById('submissionDetailView').style.display = 'none';
+            document.getElementById('submissionListView').style.display = 'block';
         };
 
         window.showAssignToGradeModal = function (assignmentId) {
@@ -624,14 +789,39 @@
             });
         };
 
-        window.aiGradeSubmission = async function (submissionId) {
-            const response = await fetch(`/api/submissions/ai-grade/${submissionId}`, { method: 'POST' });
-            const result = await response.json();
-            if (!response.ok) {
-                alert(result.message || result.error || 'AI grading did not complete.');
+        window.aiGradeSubmission = async function (submissionId, button) {
+            if (button?.disabled) {
                 return;
             }
-            alert(`AI score: ${result.qualityScore}/5\n${result.feedback}`);
+
+            const originalText = button?.textContent || 'AI Grade';
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Grading...';
+            }
+
+            try {
+                const response = await fetch(`/api/submissions/ai-grade/${submissionId}`, { method: 'POST' });
+                const result = await response.json();
+                if (!response.ok) {
+                    alert(result.message || result.error || 'AI grading did not complete.');
+                    return;
+                }
+                const row = button?.closest('tr');
+                if (row && result.status === 'graded') {
+                    row.cells[1].textContent = result.qualityScore ?? 'Not graded';
+                }
+                alert(result.status === 'graded'
+                    ? `AI score: ${result.qualityScore}/5\n${result.feedback}`
+                    : result.message || 'AI grading did not produce a score.');
+            } catch (error) {
+                alert(`AI grading failed: ${error.message}`);
+            } finally {
+                if (button) {
+                    button.disabled = false;
+                    button.textContent = originalText;
+                }
+            }
         };
 
         window.exportAssignments = function () {
@@ -770,11 +960,9 @@
                 info: true,
                 autoWidth: false,
                 columns: [
-                    { title: 'Student/Group' },
-                    { title: 'Content' },
-                    { title: 'Comments' },
+                    { title: 'Submitter' },
                     { title: 'Grade' },
-                    { title: 'Actions', orderable: false }
+                    { title: 'Actions', orderable: false, searchable: false }
                 ]
             });
 

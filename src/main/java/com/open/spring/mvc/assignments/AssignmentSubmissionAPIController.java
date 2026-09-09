@@ -395,7 +395,8 @@ public class AssignmentSubmissionAPIController {
         } catch (Exception e) {
             logger.error("AI grading failed for submission {}", submissionId, e);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(Map.of("status", "failed", "message", "The AI grader could not complete this submission."));
+                    .body(Map.of("status", "failed", "message", "The AI grader could not complete this submission: "
+                            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())));
         }
     }
 

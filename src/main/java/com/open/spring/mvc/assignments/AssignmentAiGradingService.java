@@ -18,6 +18,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Service
 public class AssignmentAiGradingService {
+    private static final int MAX_GEMINI_ATTEMPTS = 5;
     private static final Pattern GITHUB_ISSUE_URL = Pattern.compile(
             "^https?://github\\.com/([^/]+)/([^/#?]+)/issues/(\\d+)/?$",
             Pattern.CASE_INSENSITIVE);
@@ -32,7 +33,7 @@ public class AssignmentAiGradingService {
     public AssignmentAiGradingService(
             ObjectMapper objectMapper,
             @Value("${gemini.api.key:}") String geminiApiKey,
-            @Value("${gemini.api.url:https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent}") String geminiApiUrl,
+            @Value("${gemini.api.url:https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent}") String geminiApiUrl,
             @Value("${github.api.base-url:https://api.github.com}") String githubApiBaseUrl,
             @Value("${github.api.token:}") String githubApiToken) {
         this.objectMapper = objectMapper;
@@ -85,8 +86,7 @@ public class AssignmentAiGradingService {
         if (text.isBlank()) {
             return GradeResult.failed("The AI returned no grading result.");
         }
-        text = text.replaceFirst("^```(?:json)?\\s*", "").replaceFirst("\\s*```$", "").trim();
-        JsonNode result = objectMapper.readTree(text);
+        JsonNode result = parseJsonResult(text);
         int score = result.path("score").asInt(0);
         String feedback = result.path("feedback").asText("").trim();
         if (score < 1 || score > 5 || feedback.isBlank()) {
@@ -95,17 +95,29 @@ public class AssignmentAiGradingService {
         return GradeResult.graded(score, limitToTwoSentences(feedback));
     }
 
+    private JsonNode parseJsonResult(String text) throws Exception {
+        String normalized = text.replaceFirst("^```(?:json)?\\s*", "")
+                .replaceFirst("\\s*```$", "")
+                .trim();
+        int objectStart = normalized.indexOf('{');
+        int objectEnd = normalized.lastIndexOf('}');
+        if (objectStart >= 0 && objectEnd > objectStart) {
+            normalized = normalized.substring(objectStart, objectEnd + 1);
+        }
+        return objectMapper.readTree(normalized);
+    }
+
     private String fetchGithubIssue(String owner, String repository, String number) throws Exception {
         String apiUrl = githubApiBaseUrl.replaceAll("/$", "") + "/repos/" + owner + "/" + repository + "/issues/" + number;
-        HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(apiUrl))
-                .timeout(Duration.ofSeconds(15))
-                .header("Accept", "application/vnd.github+json")
-                .header("User-Agent", "OpenCodingSociety-assignment-grader")
-                .GET();
+        HttpRequest.Builder request = githubIssueRequest(apiUrl);
         if (githubApiToken != null && !githubApiToken.isBlank()) {
             request.header("Authorization", "Bearer " + githubApiToken);
         }
         HttpResponse<String> response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        if ((response.statusCode() == 401 || response.statusCode() == 403)
+                && githubApiToken != null && !githubApiToken.isBlank()) {
+            response = httpClient.send(githubIssueRequest(apiUrl).build(), HttpResponse.BodyHandlers.ofString());
+        }
         if (response.statusCode() != 200) {
             return null;
         }
@@ -120,19 +132,60 @@ public class AssignmentAiGradingService {
                 + "\nLabels: " + issue.path("labels").toString();
     }
 
+    private HttpRequest.Builder githubIssueRequest(String apiUrl) {
+        return HttpRequest.newBuilder(URI.create(apiUrl))
+                .timeout(Duration.ofSeconds(15))
+                .header("Accept", "application/vnd.github+json")
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "OpenCodingSociety-assignment-grader")
+                .GET();
+    }
+
     private String callGemini(String prompt) throws Exception {
         Map<String, Object> part = Map.of("text", prompt);
-        Map<String, Object> requestBody = Map.of("contents", List.of(Map.of("parts", List.of(part))));
-        HttpRequest request = HttpRequest.newBuilder(URI.create(geminiApiUrl + "?key=" + geminiApiKey))
-                .timeout(Duration.ofSeconds(30))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(requestBody)))
-                .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-        if (response.statusCode() != 200) {
-            throw new IllegalStateException("Gemini returned HTTP " + response.statusCode());
+        Map<String, Object> requestBody = Map.of(
+            "contents", List.of(Map.of("parts", List.of(part))),
+            "generationConfig", Map.of(
+                "responseMimeType", "application/json",
+                "temperature", 0.2));
+        String requestBodyJson = objectMapper.writeValueAsString(requestBody);
+        for (int attempt = 0; attempt < MAX_GEMINI_ATTEMPTS; attempt++) {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(geminiApiUrl + "?key=" + geminiApiKey))
+                    .timeout(Duration.ofSeconds(30))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() == 200) {
+                return response.body();
+            }
+            if (!isRetryableGeminiStatus(response.statusCode()) || attempt == MAX_GEMINI_ATTEMPTS - 1) {
+                throw new IllegalStateException("Gemini returned HTTP " + response.statusCode());
+            }
+            waitBeforeRetry(attempt, response);
         }
-        return response.body();
+        throw new IllegalStateException("Gemini request was not completed");
+    }
+
+    private void waitBeforeRetry(int attempt, HttpResponse<String> response) throws InterruptedException {
+        long retryAfter = response.headers().firstValue("Retry-After")
+                .map(this::parseRetryAfterMillis)
+                .orElse(0L);
+        long exponentialDelay = Math.min(8000L, 1000L << attempt);
+        Thread.sleep(retryAfter > 0 ? Math.min(retryAfter, 8000L) : exponentialDelay);
+    }
+
+    private long parseRetryAfterMillis(String value) {
+        try {
+            return Long.parseLong(value.trim()) * 1000L;
+        } catch (NumberFormatException exception) {
+            return 0L;
+        }
+    }
+
+    private boolean isRetryableGeminiStatus(int statusCode) {
+        return statusCode == 429 || statusCode == 500 || statusCode == 502
+                || statusCode == 503 || statusCode == 504;
     }
 
     private String limitToTwoSentences(String feedback) {
