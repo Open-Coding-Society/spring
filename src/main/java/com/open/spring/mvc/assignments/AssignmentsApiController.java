@@ -182,6 +182,46 @@ public class AssignmentsApiController {
         return ResponseEntity.ok(new AssignmentDto(assignmentRepo.save(assignment)));
     }
 
+    @PutMapping("/{id}/details")
+    public ResponseEntity<?> updateAssignmentDetails(
+            @PathVariable Long id,
+            @RequestBody AssignmentUpdateRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        Assignment assignment = assignmentRepo.findById(id).orElse(null);
+        if (assignment == null) {
+            return ResponseEntity.notFound().build();
+        }
+        if (request == null || request.name == null || request.name.isBlank()
+                || request.type == null || request.type.isBlank()
+                || request.points == null || request.points < 0
+                || request.dueDate == null || request.dueDate.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of(
+                    "error", "Name, type, points, and due date are required"));
+        }
+
+        assignment.setName(request.name.trim());
+        assignment.setType(request.type.trim());
+        assignment.setDescription(request.description == null ? "" : request.description.trim());
+        assignment.setPoints(request.points);
+        assignment.setDueDate(request.dueDate.trim());
+        if (request.assignmentType != null && !request.assignmentType.isBlank()) {
+            assignment.setAssignmentType(request.assignmentType.trim());
+        }
+        return ResponseEntity.ok(new AssignmentDto(assignmentRepo.save(assignment)));
+    }
+
+    @Getter
+    @Setter
+    public static class AssignmentUpdateRequest {
+        public String name;
+        public String type;
+        public String description;
+        public Double points;
+        public String dueDate;
+        public String assignmentType;
+    }
+
     /**
      * A GET endpoint to retrieve all the assignments.
      * @return A list of all the assignments.

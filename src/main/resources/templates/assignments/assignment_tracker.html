@@ -79,6 +79,49 @@
             max-width: 760px;
         }
 
+        .assignment-edit-form {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px 16px;
+        }
+
+        .assignment-edit-form .full-width {
+            grid-column: 1 / -1;
+        }
+
+        .assignment-edit-form label {
+            display: block;
+            margin-bottom: 5px;
+            color: #c8d0d9;
+        }
+
+        .assignment-edit-form input,
+        .assignment-edit-form textarea,
+        .assignment-edit-form select {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px;
+            color: #f1f1f1;
+            background: #252725;
+            border: 1px solid #4a4d4a;
+            border-radius: 4px;
+        }
+
+        .assignment-edit-form textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        @media (max-width: 640px) {
+            .assignment-edit-form {
+                grid-template-columns: 1fr;
+            }
+
+            .assignment-edit-form .full-width {
+                grid-column: auto;
+            }
+        }
+
         #editAiRubricText {
             width: 100%;
             min-height: 280px;
@@ -472,7 +515,7 @@
                     <div class="stack"><label>Type</label><input type="text" id="assignmentType"></div>
                     <div class="stack"><label>Description</label><input type="text" id="assignmentDescription"></div>
                     <div class="stack"><label>AI Grading Rubric</label><textarea id="assignmentAiRubric" rows="6" placeholder="Leave blank to use the generic 1-5 rubric."></textarea></div>
-                    <div class="stack"><label>Points</label><input type="number" id="assignmentPoints"></div>
+                    <div class="stack"><label>Points available</label><input type="number" id="assignmentPoints"></div>
                     <div class="stack"><label>Due Date</label><input type="date" id="assignmentDueDate"></div>
 
                     <div class="stack">
@@ -514,6 +557,43 @@
                     <div id="editAiRubricStatus" role="status" aria-live="polite"></div>
                     <button class="btn btn-grade" onclick="saveAiRubric()">Save Rubric</button>
                     <button class="btn" onclick="closeEditAiRubricModal()">Cancel</button>
+                </div>
+            </div>
+
+            <div id="editAssignmentModal" class="modal">
+                <div class="modal-content rubric-modal-content">
+                    <span class="close-btn" onclick="closeEditAssignmentModal()">&times;</span>
+                    <h2>Edit Assignment</h2>
+                    <p id="editAssignmentNameLabel"></p>
+                    <div class="assignment-edit-form">
+                        <div>
+                            <label for="editAssignmentName">Name</label>
+                            <input id="editAssignmentName" type="text">
+                        </div>
+                        <div>
+                            <label for="editAssignmentType">Type</label>
+                            <input id="editAssignmentType" type="text">
+                        </div>
+                        <div>
+                            <label for="editAssignmentPoints">Points available</label>
+                            <input id="editAssignmentPoints" type="number" min="0" step="0.01">
+                        </div>
+                        <div>
+                            <label for="editAssignmentDueDate">Due date</label>
+                            <input id="editAssignmentDueDate" type="text" placeholder="MM/DD/YYYY">
+                        </div>
+                        <div>
+                            <label for="editAssignmentSubmissionType">Submission type</label>
+                            <input id="editAssignmentSubmissionType" type="text">
+                        </div>
+                        <div class="full-width">
+                            <label for="editAssignmentDescription">Description</label>
+                            <textarea id="editAssignmentDescription"></textarea>
+                        </div>
+                    </div>
+                    <div id="editAssignmentStatus" role="status" aria-live="polite"></div>
+                    <button class="btn btn-grade" onclick="saveAssignmentDetails()">Save changes</button>
+                    <button class="btn" onclick="closeEditAssignmentModal()">Cancel</button>
                 </div>
             </div>
 
@@ -559,6 +639,7 @@
 
                 <div class="assignment-dashboard-actions">
                     <button class="btn btn-view-submissions" onclick="viewDashboardSubmissions()">View submissions</button>
+                    <button class="btn btn-grade" onclick="editDashboardAssignment()">Edit assignment</button>
                     <button class="btn btn-grade" onclick="editDashboardRubric()">Edit AI rubric</button>
                     <button class="btn btn-grade" onclick="assignDashboardGraders()">Assign graders</button>
                     <button class="btn btn-randomize" onclick="randomizeDashboardGraders()">Randomize graders</button>
@@ -729,7 +810,7 @@
             document.getElementById('assignmentDashboardDescription').textContent = assignment.description || 'No description provided.';
             document.getElementById('assignmentDashboardRubric').textContent = assignment.aiRubric || 'No rubric provided.';
             document.getElementById('assignmentDashboardDetails').innerHTML = `
-                <span><strong>Points:</strong> ${escapeHtml(assignment.points ?? 'Not specified')}</span>
+                <span><strong>Points available:</strong> ${escapeHtml(assignment.points ?? 'Not specified')}</span>
                 <span><strong>Submission:</strong> ${escapeHtml(assignment.assignmentType || 'Not specified')}</span>
                 <span><strong>Created:</strong> ${escapeHtml(assignment.timestamp || 'Not specified')}</span>
             `;
@@ -770,6 +851,62 @@
         window.viewDashboardSubmissions = function () {
             if (window.currentAssignmentId != null) {
                 viewSubmissions(window.currentAssignmentId);
+            }
+        };
+
+        window.editDashboardAssignment = function () {
+            const assignment = currentDashboardAssignment();
+            if (!assignment) {
+                return;
+            }
+            document.getElementById('editAssignmentNameLabel').textContent = `Editing: ${assignment.name || 'Assignment'}`;
+            document.getElementById('editAssignmentName').value = assignment.name || '';
+            document.getElementById('editAssignmentType').value = assignment.type || '';
+            document.getElementById('editAssignmentPoints').value = assignment.points ?? '';
+            document.getElementById('editAssignmentDueDate').value = assignment.dueDate || '';
+            document.getElementById('editAssignmentSubmissionType').value = assignment.assignmentType || '';
+            document.getElementById('editAssignmentDescription').value = assignment.description || '';
+            document.getElementById('editAssignmentStatus').textContent = '';
+            document.getElementById('editAssignmentModal').style.display = 'block';
+            document.getElementById('editAssignmentName').focus();
+        };
+
+        window.saveAssignmentDetails = async function () {
+            const assignment = currentDashboardAssignment();
+            const status = document.getElementById('editAssignmentStatus');
+            if (!assignment) {
+                return;
+            }
+
+            const payload = {
+                name: document.getElementById('editAssignmentName').value.trim(),
+                type: document.getElementById('editAssignmentType').value.trim(),
+                points: Number(document.getElementById('editAssignmentPoints').value),
+                dueDate: document.getElementById('editAssignmentDueDate').value.trim(),
+                assignmentType: document.getElementById('editAssignmentSubmissionType').value.trim(),
+                description: document.getElementById('editAssignmentDescription').value.trim()
+            };
+            if (!payload.name || !payload.type || !payload.dueDate || !Number.isFinite(payload.points) || payload.points < 0) {
+                status.textContent = 'Name, type, points, and due date are required.';
+                return;
+            }
+
+            status.textContent = 'Saving...';
+            try {
+                const response = await fetch(`/api/assignments/${assignment.id}/details`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                const result = await response.json();
+                if (!response.ok) {
+                    throw new Error(result.error || 'Failed to update assignment');
+                }
+                closeEditAssignmentModal();
+                await fetchAssignments();
+                openAssignmentDashboard(result.id);
+            } catch (error) {
+                status.textContent = error.message;
             }
         };
 
@@ -1310,6 +1447,10 @@
 
         window.closeEditAiRubricModal = function () {
             document.getElementById('editAiRubricModal').style.display = 'none';
+        };
+
+        window.closeEditAssignmentModal = function () {
+            document.getElementById('editAssignmentModal').style.display = 'none';
         };
 
         window.closeSubmissionsModal = function () {
