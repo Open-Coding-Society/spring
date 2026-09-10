@@ -37,11 +37,40 @@ import lombok.Setter;
 @NoArgsConstructor
 public class Assignment {
     public static final String DEFAULT_AI_RUBRIC = """
-            5 (Exceptional): The submission is thorough, accurate, well structured, and provides specific evidence and actionable insight.
-            4 (Strong): The submission is clear and mostly complete, with several relevant details and useful reasoning.
-            3 (Adequate): The submission addresses the main requirement with reasonable context, but important detail or clarity is missing.
-            2 (Limited): The submission provides only partial information, shallow reasoning, or little supporting context.
-            1 (Minimal): The submission is missing, mostly unclear, unsupported, or provides no meaningful response.
+ Score 4 — Strong / Exceptional
+The submission is clear, well-organized, and substantively complete. It directly addresses the core requirement and goes further by including specific, relevant details (examples, data, edge cases, or context) that demonstrate genuine understanding. Reasoning is explicit and logically connects the details to the conclusion — a reader does not need to infer missing steps. Minor imperfections are acceptable, but nothing essential is missing.
+
+Indicators:
+ Fully addresses the prompt/requirement, including secondary or implied aspects
+ Uses specific, relevant supporting details rather than generic statements
+ Reasoning is explained, not just asserted
+ Well-structured and easy to follow
+
+Score 3 — Adequate
+The submission addresses the main requirement and is generally correct, but is noticeably thinner than a 4. It may rely on general statements rather than specific details, skip minor aspects of the prompt, or leave some reasoning implicit. A reader can follow it without major confusion, but it lacks the depth, precision, or supporting evidence of a top submission.
+
+Indicators:
+ Core requirement is met; response is accurate
+ Some relevant detail or context present, but not comprehensive
+ Reasoning is present but may be brief or partially assumed
+ Minor gaps that don't undermine the overall response
+
+ Score 2 — Limited
+The submission is partial or shallow. It may address only part of the requirement, provide information without explaining its relevance, or offer a conclusion with little to no supporting reasoning. Important details are missing or vague, and the response reads as incomplete or underdeveloped rather than simply concise.
+
+Indicators:
+ Only partially addresses the requirement
+ Reasoning is shallow, generic, or largely missing
+ Lacks specific supporting detail or context
+ Reader is left with unanswered questions about how the conclusion was reached
+
+ Score 1 — Insufficient
+The submission fails to meaningfully address the requirement. It may be off-topic, factually incorrect, too vague to evaluate, or missing entirely. There is little to no relevant reasoning or detail present.
+
+Indicators:
+ Does not address the core requirement
+ No meaningful reasoning or supporting detail
+ Response is largely irrelevant, incorrect, or absent
             """;
 
     @Id

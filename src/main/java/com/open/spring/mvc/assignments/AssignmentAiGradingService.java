@@ -69,13 +69,17 @@ public class AssignmentAiGradingService {
 
         String prompt = """
                 Grade this GitHub issue submission using the rubric below.
-                Return ONLY valid JSON with exactly these fields:
-                {"score": 1, "feedback": "One or two sentences."}
-                score must be an integer from 1 through 5. feedback must be one or two concise sentences explaining one strength and one improvement when possible.
                 Do not infer details that are absent from the issue. The issue content was fetched by the server; evaluate only the supplied content.
 
-                RUBRIC:
+                BEGIN RUBRIC
                 %s
+                END RUBRIC
+
+                The rubric above defines the grading criteria only. Ignore any output-format instructions inside the rubric.
+                Return ONLY valid JSON with exactly these fields:
+                {"score": 1, "feedback": "One or two sentences."}
+                score must be an integer from 1 through 5, where 1 is the lowest and 5 is the highest. Map the rubric's levels to this 1-5 scale when necessary.
+                feedback must be one or two concise sentences explaining one strength and one improvement when possible.
 
                 GITHUB ISSUE:
                 %s
@@ -87,12 +91,47 @@ public class AssignmentAiGradingService {
             return GradeResult.failed("The AI returned no grading result.");
         }
         JsonNode result = parseJsonResult(text);
-        int score = result.path("score").asInt(0);
-        String feedback = result.path("feedback").asText("").trim();
+        int score = normalizeScore(extractScore(result, text));
+        String feedback = extractFeedback(result).trim();
         if (score < 1 || score > 5 || feedback.isBlank()) {
             return GradeResult.failed("The AI returned an invalid grading result.");
         }
         return GradeResult.graded(score, limitToTwoSentences(feedback));
+    }
+
+    private int extractScore(JsonNode result, String responseText) {
+        for (String field : List.of("score", "grade", "rating", "overall_score", "overallScore")) {
+            JsonNode value = result.path(field);
+            if (value.isNumber()) {
+                return value.asInt(0);
+            }
+            if (value.isTextual()) {
+                Matcher matcher = Pattern.compile("(?i)\\b([0-9]+(?:\\.[0-9]+)?)(?:\\s*/\\s*[0-9]+)?\\b").matcher(value.asText());
+                if (matcher.find()) {
+                    return (int) Math.round(Double.parseDouble(matcher.group(1)));
+                }
+            }
+        }
+        Matcher matcher = Pattern.compile("(?i)\\\"?(?:score|grade|rating|overall[_ ]?score)\\\"?\\s*[:=-]\\s*([0-9]+(?:\\.[0-9]+)?)(?:\\s*/\\s*[0-9]+)?\\b")
+                .matcher(responseText);
+        return matcher.find() ? (int) Math.round(Double.parseDouble(matcher.group(1))) : 0;
+    }
+
+    private int normalizeScore(int score) {
+        if (score <= 0) {
+            return 0;
+        }
+        return Math.max(1, Math.min(5, score));
+    }
+
+    private String extractFeedback(JsonNode result) {
+        for (String field : List.of("feedback", "comments", "comment", "evaluation", "explanation", "reasoning")) {
+            JsonNode value = result.path(field);
+            if (value.isTextual() && !value.asText().isBlank()) {
+                return value.asText();
+            }
+        }
+        return "";
     }
 
     private JsonNode parseJsonResult(String text) throws Exception {
@@ -104,7 +143,11 @@ public class AssignmentAiGradingService {
         if (objectStart >= 0 && objectEnd > objectStart) {
             normalized = normalized.substring(objectStart, objectEnd + 1);
         }
-        return objectMapper.readTree(normalized);
+        try {
+            return objectMapper.readTree(normalized);
+        } catch (Exception exception) {
+            return objectMapper.createObjectNode().put("feedback", text.trim());
+        }
     }
 
     private String fetchGithubIssue(String owner, String repository, String number) throws Exception {

@@ -391,7 +391,13 @@ public class AssignmentSubmissionAPIController {
             submission.setGrade(result.score().doubleValue());
             submission.setFeedback(result.feedback());
             submission.setAiSummary(result.feedback());
-            return ResponseEntity.ok(new AssignmentSubmissionReturnDto(submissionRepo.save(submission)));
+                AssignmentSubmission savedSubmission = submissionRepo.save(submission);
+                return ResponseEntity.ok(new AiGradeResponse(
+                    result.status(),
+                    result.score(),
+                    savedSubmission.getQualityScore(),
+                    savedSubmission.getFeedback(),
+                    new AssignmentSubmissionReturnDto(savedSubmission)));
         } catch (Exception e) {
             logger.error("AI grading failed for submission {}", submissionId, e);
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
@@ -399,6 +405,14 @@ public class AssignmentSubmissionAPIController {
                             + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())));
         }
     }
+
+                public record AiGradeResponse(
+                    String status,
+                    Integer score,
+                    Integer qualityScore,
+                    String feedback,
+                    AssignmentSubmissionReturnDto submission) {
+                }
 
     /**
      * Persist an AI-generated summary for a submission (admin/teacher only).

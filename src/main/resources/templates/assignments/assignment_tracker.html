@@ -813,7 +813,7 @@
                 }
                 alert(result.status === 'graded'
                     ? `AI score: ${result.qualityScore}/5\n${result.feedback}`
-                    : result.message || 'AI grading did not produce a score.');
+                    : result.message || result.error || `AI grading did not produce a score (status: ${result.status || 'unknown'}).`);
             } catch (error) {
                 alert(`AI grading failed: ${error.message}`);
             } finally {
