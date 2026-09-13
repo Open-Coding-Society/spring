@@ -58,6 +58,9 @@ public class AssignmentSubmissionAPIController {
 
     private Logger logger = LoggerFactory.getLogger(getClass());
 
+    private static final String MANAGE_DENIED_MESSAGE =
+            "You do not have permission to manage this submission";
+
     @Autowired
     private AssignmentSubmissionJPA submissionRepo;
 
@@ -72,6 +75,9 @@ public class AssignmentSubmissionAPIController {
 
     @Autowired
     private FileHandler fileHandler;
+
+    @Autowired
+    private AssignmentAuthorizationService assignmentAuthorizationService;
     
     /**
      * A DTO class for returning only necessary assignment submission details.
@@ -333,16 +339,16 @@ public class AssignmentSubmissionAPIController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Authentication required"));
         }
-        if (!canGradeOrDeleteSubmission(currentUser)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Admin or teacher access required"));
-        }
 
         AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
         if (submission == null) {
             Map<String, String> error = new HashMap<>();
             error.put("error", "Submission not found");
             return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);    
+        }
+        if (!canManageSubmission(currentUser, submission)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", MANAGE_DENIED_MESSAGE));
         }
 
         // we have a correct submission
@@ -372,15 +378,15 @@ public class AssignmentSubmissionAPIController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Authentication required"));
         }
-        if (!canGradeOrDeleteSubmission(currentUser)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Admin or teacher access required"));
-        }
 
         AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
         if (submission == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", "Submission not found"));
+        }
+        if (!canManageSubmission(currentUser, submission)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", MANAGE_DENIED_MESSAGE));
         }
 
         submission.setAiSummary(summary);
@@ -408,15 +414,15 @@ public class AssignmentSubmissionAPIController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Authentication required"));
         }
-        if (!canGradeOrDeleteSubmission(currentUser)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Admin or teacher access required"));
-        }
 
         AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
         if (submission == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", "Submission not found"));
+        }
+        if (!canManageSubmission(currentUser, submission)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", MANAGE_DENIED_MESSAGE));
         }
 
         submissionRepo.delete(submission);
@@ -555,8 +561,13 @@ public class AssignmentSubmissionAPIController {
                 .anyMatch(group -> Objects.equals(group.getId(), submitter.getId()));
     }
 
-    private boolean canGradeOrDeleteSubmission(Person currentUser) {
-        return currentUser.hasRoleWithName("ROLE_ADMIN") || currentUser.hasRoleWithName("ROLE_TEACHER");
+    /**
+     * Teachers and admins keep their existing reach; a creator may only manage submissions
+     * belonging to an assignment they own. The denial message is deliberately generic so a
+     * failed attempt never confirms anything about another assignment's submissions.
+     */
+    private boolean canManageSubmission(Person currentUser, AssignmentSubmission submission) {
+        return assignmentAuthorizationService.canManage(currentUser, submission.getAssignment());
     }
 
     private Person getAuthenticatedPerson(UserDetails userDetails) {
