@@ -16,6 +16,15 @@ public interface AssignmentJpaRepository extends JpaRepository<Assignment, Long>
     // hello this is a test commit
 
     /**
+     * The assignment auto-created for a lesson page, looked up on the indexed content_url
+     * column instead of scanning every row for a description prefix.
+     *
+     * Ordered by id so deployments that accumulated duplicate rows before the column
+     * existed keep resolving to the same (oldest) assignment every time.
+     */
+    Assignment findFirstByContentUrlOrderByIdAsc(String contentUrl);
+
+    /**
      * Assignments owned by a creator. Matches on the stable Person id rather than the
      * entity itself because Person inherits identity equality from Submitter.
      */

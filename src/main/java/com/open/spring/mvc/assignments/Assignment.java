@@ -52,6 +52,18 @@ public class Assignment {
 
     private String description;
 
+    /**
+     * Canonical URL of the lesson page this assignment was auto-created from, and the key
+     * /api/assignments/auto-create dedups on. Null for assignments created by a teacher
+     * through /api/assignments/create, which have no page behind them.
+     *
+     * Always written through {@link AssignmentContentUrls#canonicalize(String)} so the
+     * browser and the Pages sync script resolve to the same row. Not unique: deployments
+     * that already accumulated duplicate rows would fail to add the constraint.
+     */
+    @Column(name = "content_url")
+    private String contentUrl;
+
     @NotEmpty
     private String dueDate;
 

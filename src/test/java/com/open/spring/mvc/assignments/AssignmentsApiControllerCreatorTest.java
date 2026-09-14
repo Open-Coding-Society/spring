@@ -17,6 +17,7 @@ import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 import org.springframework.http.ResponseEntity;
@@ -34,7 +35,15 @@ import com.open.spring.mvc.person.PersonJpaRepository;
  */
 class AssignmentsApiControllerCreatorTest {
 
-    private static final String CONTENT_URL = "csa/assignment-creator-permissions-pilot/";
+    /**
+     * What a caller actually sends. Deliberately not canonical - the browser posts Jekyll's
+     * page.url, which is leading- and trailing-slashed - so these tests exercise the
+     * normalization that makes both callers land on one assignment.
+     */
+    private static final String CONTENT_URL = "/csa/assignment-creator-permissions-pilot/";
+
+    /** The form that gets stored in, and looked up from, the content_url column. */
+    private static final String CANONICAL_CONTENT_URL = "csa/assignment-creator-permissions-pilot";
 
     @Mock
     private AssignmentJpaRepository assignmentRepo;
@@ -73,7 +82,6 @@ class AssignmentsApiControllerCreatorTest {
         when(personRepo.findByUid("pages-bot")).thenReturn(bot);
         when(personRepo.findByUid("AdityaS-2010")).thenReturn(firstCreator);
         when(personRepo.findByUid("second-creator")).thenReturn(secondCreator);
-        when(assignmentRepo.findAll()).thenReturn(List.of());
         when(assignmentRepo.save(any(Assignment.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
     }
@@ -90,6 +98,29 @@ class AssignmentsApiControllerCreatorTest {
     @SuppressWarnings("unchecked")
     private Map<String, Object> errorBody(ResponseEntity<?> response) {
         return (Map<String, Object>) response.getBody();
+    }
+
+    @Test
+    void aPageWithNoDescriptionStoresNullSoAiGradingFallsBackToTheName() {
+        // GeminiFeedbackService uses `description == null ? name : description` as the
+        // rubric it sends to the model; storing "" here would defeat that fallback.
+        autoCreate(caller("pages-bot", "ROLE_ASSIGNMENT_SYNC"), List.of("AdityaS-2010"));
+
+        ArgumentCaptor<Assignment> saved = ArgumentCaptor.forClass(Assignment.class);
+        verify(assignmentRepo).save(saved.capture());
+        assertNull(saved.getValue().getDescription());
+    }
+
+    @Test
+    void aPageDescriptionIsStoredWithoutTheLegacyContentUrlMarker() {
+        controller.autoCreateAssignment(
+            "Assignment Creator Permissions Pilot", CONTENT_URL, "  Play the game  ",
+            null, null, null, caller("admin", "ROLE_ADMIN"));
+
+        ArgumentCaptor<Assignment> saved = ArgumentCaptor.forClass(Assignment.class);
+        verify(assignmentRepo).save(saved.capture());
+        assertEquals("Play the game", saved.getValue().getDescription());
+        assertEquals(CANONICAL_CONTENT_URL, saved.getValue().getContentUrl());
     }
 
     @Test
@@ -134,8 +165,8 @@ class AssignmentsApiControllerCreatorTest {
     @Test
     void aFailedCreatorUpdatePersistsNothing() {
         Assignment existing = assignment(10L, "pilot", firstCreator);
-        existing.setDescription("[CONTENT_URL: " + CONTENT_URL + "]");
-        when(assignmentRepo.findAll()).thenReturn(List.of(existing));
+        existing.setContentUrl(CANONICAL_CONTENT_URL);
+        when(assignmentRepo.findFirstByContentUrlOrderByIdAsc(CANONICAL_CONTENT_URL)).thenReturn(existing);
         when(personRepo.findByUid("ghost")).thenReturn(null);
 
         ResponseEntity<?> response = autoCreate(
@@ -172,8 +203,8 @@ class AssignmentsApiControllerCreatorTest {
     @Test
     void resynchronizingAnExistingAssignmentUpdatesItsCreators() {
         Assignment existing = assignment(10L, "pilot", firstCreator);
-        existing.setDescription("[CONTENT_URL: " + CONTENT_URL + "]");
-        when(assignmentRepo.findAll()).thenReturn(List.of(existing));
+        existing.setContentUrl(CANONICAL_CONTENT_URL);
+        when(assignmentRepo.findFirstByContentUrlOrderByIdAsc(CANONICAL_CONTENT_URL)).thenReturn(existing);
 
         ResponseEntity<?> response = autoCreate(
             caller("pages-bot", "ROLE_ASSIGNMENT_SYNC"), List.of("second-creator"));
@@ -186,8 +217,8 @@ class AssignmentsApiControllerCreatorTest {
     @Test
     void resynchronizingTheSameListIsIdempotent() {
         Assignment existing = assignment(10L, "pilot", firstCreator);
-        existing.setDescription("[CONTENT_URL: " + CONTENT_URL + "]");
-        when(assignmentRepo.findAll()).thenReturn(List.of(existing));
+        existing.setContentUrl(CANONICAL_CONTENT_URL);
+        when(assignmentRepo.findFirstByContentUrlOrderByIdAsc(CANONICAL_CONTENT_URL)).thenReturn(existing);
 
         ResponseEntity<?> response = autoCreate(
             caller("pages-bot", "ROLE_ASSIGNMENT_SYNC"), List.of("AdityaS-2010"));
