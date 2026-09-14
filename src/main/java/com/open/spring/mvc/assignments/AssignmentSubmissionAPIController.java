@@ -135,6 +135,11 @@ public class AssignmentSubmissionAPIController {
         public Map<String, Object> content;
         public String comment;
         public Boolean isLate;
+        public Integer technicalExcellence;
+        public Integer communication;
+        public Integer workHabits;
+        public Integer aiOrchestration;
+        public String selfAssessmentReflection;
     }
 
     /**
@@ -164,9 +169,24 @@ public class AssignmentSubmissionAPIController {
             error.put("error", "Submitter not found");
             return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
         }
-        
+
+        String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
+                submissionInfo.technicalExcellence,
+                submissionInfo.communication,
+                submissionInfo.workHabits,
+                submissionInfo.aiOrchestration,
+                submissionInfo.selfAssessmentReflection);
+        if (selfAssessmentError != null) {
+            return new ResponseEntity<>(Map.of("error", selfAssessmentError), HttpStatus.BAD_REQUEST);
+        }
+
         if (assignment != null) {
             AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, submissionInfo.content, submissionInfo.comment, submissionInfo.isLate);
+            submission.setTechnicalExcellence(submissionInfo.technicalExcellence);
+            submission.setCommunication(submissionInfo.communication);
+            submission.setWorkHabits(submissionInfo.workHabits);
+            submission.setAiOrchestration(submissionInfo.aiOrchestration);
+            submission.setSelfAssessmentReflection(submissionInfo.selfAssessmentReflection);
             AssignmentSubmission savedSubmission = submissionRepo.save(submission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
         }
@@ -184,6 +204,11 @@ public class AssignmentSubmissionAPIController {
         public Map<String, Object> content;
         public String comment;
         public Boolean isLate;
+        public Integer technicalExcellence;
+        public Integer communication;
+        public Integer workHabits;
+        public Integer aiOrchestration;
+        public String selfAssessmentReflection;
     }
 
     /**
@@ -225,7 +250,22 @@ public class AssignmentSubmissionAPIController {
                 return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
             }
 
+            String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
+                    requestData.technicalExcellence,
+                    requestData.communication,
+                    requestData.workHabits,
+                    requestData.aiOrchestration,
+                    requestData.selfAssessmentReflection);
+            if (selfAssessmentError != null) {
+                return new ResponseEntity<>(Map.of("error", selfAssessmentError), HttpStatus.BAD_REQUEST);
+            }
+
             AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, requestData.content, requestData.comment,requestData.isLate);
+            submission.setTechnicalExcellence(requestData.technicalExcellence);
+            submission.setCommunication(requestData.communication);
+            submission.setWorkHabits(requestData.workHabits);
+            submission.setAiOrchestration(requestData.aiOrchestration);
+            submission.setSelfAssessmentReflection(requestData.selfAssessmentReflection);
             AssignmentSubmission savedSubmission = submissionRepo.save(submission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
         }
