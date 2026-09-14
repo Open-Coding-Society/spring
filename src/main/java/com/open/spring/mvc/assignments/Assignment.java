@@ -67,8 +67,6 @@ public class Assignment {
     )
     private List<Person> assignedGraders;
 
-
-
     @OneToMany(mappedBy="assignment", cascade=CascadeType.ALL, orphanRemoval=true)
     @JsonIgnore
     private List<SynergyGrade> grades;
@@ -86,6 +84,10 @@ public class Assignment {
 
     @Convert(converter = AssignmentQueueConverter.class)
     private AssignmentQueue assignmentQueue;
+
+    // NEW: Assignment type field (all_assignments or sprints)
+    @Column(length = 50)
+    private String assignmentType = "all_assignments";
 
     private static DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -129,8 +131,24 @@ public class Assignment {
         this.resourceUrl = null;
         this.resourceFilename = null;
         this.resourceStoragePath = null;
+        this.assignmentType = "all_assignments"; // Default to all_assignments
         // This line is not needed as converter will reset to null after it takes in an empty queue 
         // this.assignmentQueue = new AssignmentQueue();
+    }
+
+    // Constructor with assignmentType
+    public Assignment(String name, String type, String description, Double points, String dueDate, String assignmentType) {
+        this.name = name;
+        this.type = type;
+        this.description = description;
+        this.points = points;
+        this.dueDate = dueDate; 
+        this.timestamp = LocalDateTime.now().format(formatter);
+        this.resourceType = "none";
+        this.resourceUrl = null;
+        this.resourceFilename = null;
+        this.resourceStoragePath = null;
+        this.assignmentType = assignmentType;
     }
 
     public void setUrlResource(String url) {
@@ -157,9 +175,9 @@ public class Assignment {
 
     public static Assignment[] init() {
         return new Assignment[] {
-            new Assignment("Assignment 1", "Class Homework", "Unit 1 Homework", 1.0, "10/25/2024"),
-            new Assignment("Sprint 1 Live Review", "Live Review", "The final review for sprint 1", 1.0, "11/2/2024"),
-            new Assignment("Seed", "Seed", "The student's seed grade", 1.0, "11/2/2080"),
+            new Assignment("Assignment 1", "Class Homework", "Unit 1 Homework", 1.0, "10/25/2024", "all_assignments"),
+            new Assignment("Sprint 1 Live Review", "Live Review", "The final review for sprint 1", 1.0, "11/2/2024", "sprints"),
+            new Assignment("Seed", "Seed", "The student's seed grade", 1.0, "11/2/2080", "all_assignments"),
         };
     }
 

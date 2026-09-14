@@ -11,5 +11,6 @@ import com.open.spring.mvc.person.Person;
 public interface AssignmentJpaRepository extends JpaRepository<Assignment, Long> {
     Assignment findByName(String name);
     List<Assignment> findByAssignedGraders(Person grader);
+    List<Assignment> findByAssignmentType(String assignmentType);  // NEW: Filter by assignment type
     // hello this is a test commit
 }

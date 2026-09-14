@@ -83,6 +83,7 @@ public class AssignmentsApiController {
         public String resourceFilename;
         public String resourceStoragePath;
         public String resourceUploadedBy;
+        public String assignmentType;  // ADD THIS
 
         public AssignmentDto(Assignment assignment) {
             this.id = assignment.getId();
@@ -97,6 +98,7 @@ public class AssignmentsApiController {
             this.resourceFilename = assignment.getResourceFilename();
             this.resourceStoragePath = assignment.getResourceStoragePath();
             this.resourceUploadedBy = extractResourceUploader(assignment);
+            this.assignmentType = assignment.getAssignmentType();  // ADD THIS
         }
 
         private static String extractResourceUploader(Assignment assignment) {
@@ -375,6 +377,20 @@ public class AssignmentsApiController {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                     .body(Map.of("error", "Invalid file upload: " + e.getMessage()));
         }
+    }
+
+    /**
+     * A GET endpoint to retrieve assignments by type.
+     * @param type The type of assignment (e.g., "sprints", "all_assignments")
+     * @return A list of assignments of the specified type.
+     */
+    @GetMapping("/type/{type}")
+    public ResponseEntity<?> getAssignmentsByType(@PathVariable String type) {
+        List<Assignment> assignments = assignmentRepo.findByAssignmentType(type);
+        List<AssignmentDto> dtos = assignments.stream()
+            .map(AssignmentDto::new)
+            .collect(Collectors.toList());
+        return ResponseEntity.ok(dtos);
     }
 
     /**
