@@ -26,16 +26,19 @@ public class AssignmentSubmissionUploadService {
     private final PersonJpaRepository personRepo;
     private final AssignmentJpaRepository assignmentRepo;
     private final AssignmentSubmissionJPA submissionRepo;
+    private final AssignmentAiGradingService aiGradingService;
 
     public AssignmentSubmissionUploadService(
             FileHandler fileHandler,
             PersonJpaRepository personRepo,
             AssignmentJpaRepository assignmentRepo,
-            AssignmentSubmissionJPA submissionRepo) {
+            AssignmentSubmissionJPA submissionRepo,
+            AssignmentAiGradingService aiGradingService) {
         this.fileHandler = fileHandler;
         this.personRepo = personRepo;
         this.assignmentRepo = assignmentRepo;
         this.submissionRepo = submissionRepo;
+        this.aiGradingService = aiGradingService;
     }
 
     public Map<String, Object> upload(
@@ -77,6 +80,8 @@ public class AssignmentSubmissionUploadService {
             s3Filename,
             storedFilename);
 
+        savedSubmission = tryAutoGrade(savedSubmission);
+
         return buildResponse(
             assignment,
                 notes,
@@ -87,6 +92,27 @@ public class AssignmentSubmissionUploadService {
                 s3Filename,
             storedFilename,
             savedSubmission);
+    }
+
+    /**
+     * Attempts to AI-grade a freshly uploaded submission immediately (e.g. a .ipynb
+     * notebook), best-effort. Grading failures never fail the upload itself.
+     */
+    private AssignmentSubmission tryAutoGrade(AssignmentSubmission submission) {
+        try {
+            AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
+            if ("graded".equals(result.status())) {
+                submission.setQualityScore(result.score());
+                submission.setGrade(result.score().doubleValue());
+                submission.setFeedback(result.feedback());
+                submission.setAiSummary(result.feedback());
+                return submissionRepo.save(submission);
+            }
+        } catch (Exception e) {
+            // Best-effort: the upload already succeeded, so a grading failure is logged, not thrown.
+            System.err.println("Auto-grade failed for submission " + submission.getId() + ": " + e.getMessage());
+        }
+        return submission;
     }
 
     private void validateAuthentication(UserDetails userDetails) {
@@ -245,6 +271,11 @@ public class AssignmentSubmissionUploadService {
         response.put("size", file.getSize());
         response.put("notes", notes);
         response.put("uploadedBy", authenticatedUser.getUid());
+        if (savedSubmission.getGrade() != null) {
+            response.put("grade", savedSubmission.getGrade());
+            response.put("feedback", savedSubmission.getFeedback());
+            response.put("qualityScore", savedSubmission.getQualityScore());
+        }
         return response;
     }
 

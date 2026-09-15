@@ -4,7 +4,10 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Base64;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
@@ -15,6 +18,7 @@ import org.springframework.stereotype.Service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.open.spring.mvc.S3uploads.FileHandler;
 
 @Service
 public class AssignmentAiGradingService {
@@ -22,42 +26,69 @@ public class AssignmentAiGradingService {
     private static final Pattern GITHUB_ISSUE_URL = Pattern.compile(
             "^https?://github\\.com/([^/]+)/([^/#?]+)/issues/(\\d+)/?$",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern GIST_URL = Pattern.compile(
+            "^https?://gist\\.github\\.com/.*$",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern GIST_ID = Pattern.compile("[a-fA-F0-9]{6,64}");
+    private static final String GIST_MANIFEST_FILE = "ocs.json";
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    private final FileHandler fileHandler;
     private final String geminiApiKey;
     private final String geminiApiUrl;
     private final String githubApiBaseUrl;
     private final String githubApiToken;
+    private final String gistToken;
 
     public AssignmentAiGradingService(
             ObjectMapper objectMapper,
+            FileHandler fileHandler,
             @Value("${gemini.api.key:}") String geminiApiKey,
             @Value("${gemini.api.url:https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent}") String geminiApiUrl,
             @Value("${github.api.base-url:https://api.github.com}") String githubApiBaseUrl,
-            @Value("${github.api.token:}") String githubApiToken) {
+            @Value("${github.api.token:}") String githubApiToken,
+            @Value("${gist.token:}") String gistToken) {
         this.objectMapper = objectMapper;
+        this.fileHandler = fileHandler;
         this.geminiApiKey = geminiApiKey;
         this.geminiApiUrl = geminiApiUrl;
         this.githubApiBaseUrl = githubApiBaseUrl;
         this.githubApiToken = githubApiToken;
+        this.gistToken = gistToken;
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    }
+
+    /** Validates a GitHub issue URL, e.g. https://github.com/owner/repo/issues/123 */
+    public static boolean isGithubIssueUrl(String url) {
+        return url != null && GITHUB_ISSUE_URL.matcher(url.trim()).matches();
+    }
+
+    /** Validates a gist.github.com URL (the shape assets/js/gist.js's exportToGist returns). */
+    public static boolean isGistUrl(String url) {
+        return url != null && GIST_URL.matcher(url.trim()).matches();
     }
 
     public GradeResult grade(AssignmentSubmission submission) throws Exception {
         Map<String, Object> content = submission.getContent();
-        String url = content == null ? null : String.valueOf(content.getOrDefault("url", "")).trim();
-        Matcher matcher = url == null ? null : GITHUB_ISSUE_URL.matcher(url);
-        if (matcher == null || !matcher.matches()) {
-            return GradeResult.notGradeable("This submission is not a GitHub issue link, so it was not graded.");
+        String contentType = content == null ? null : String.valueOf(content.getOrDefault("type", "")).trim();
+
+        SubmissionText submissionText;
+        if ("github_issue".equalsIgnoreCase(contentType)) {
+            submissionText = fetchGithubIssueText(content);
+        } else if ("code".equalsIgnoreCase(contentType)) {
+            submissionText = fetchGistText(content);
+        } else if ("file".equalsIgnoreCase(contentType)) {
+            submissionText = fetchNotebookText(content);
+        } else {
+            return GradeResult.notGradeable("Automatic grading is not available for this submission type yet.");
+        }
+
+        if (submissionText.notGradeableReason != null) {
+            return GradeResult.notGradeable(submissionText.notGradeableReason);
         }
         if (geminiApiKey == null || geminiApiKey.isBlank()) {
             return GradeResult.failed("AI grading is not configured on the server.");
-        }
-
-        String issue = fetchGithubIssue(matcher.group(1), matcher.group(2), matcher.group(3));
-        if (issue == null || issue.isBlank()) {
-            return GradeResult.notGradeable("The GitHub issue could not be viewed, so no score was assigned.");
         }
 
         String rubric = submission.getAssignment() == null
@@ -67,23 +98,7 @@ public class AssignmentAiGradingService {
             rubric = Assignment.DEFAULT_AI_RUBRIC;
         }
 
-        String prompt = """
-                Grade this GitHub issue submission using the rubric below.
-                Do not infer details that are absent from the issue. The issue content was fetched by the server; evaluate only the supplied content.
-
-                BEGIN RUBRIC
-                %s
-                END RUBRIC
-
-                The rubric above defines the grading criteria only. Ignore any output-format instructions inside the rubric.
-                Return ONLY valid JSON with exactly these fields:
-                {"score": 1, "feedback": "One or two sentences."}
-                score must be an integer from 1 through 5, where 1 is the lowest and 5 is the highest. Map the rubric's levels to this 1-5 scale when necessary.
-                feedback must be one or two concise sentences explaining one strength and one improvement when possible.
-
-                GITHUB ISSUE:
-                %s
-                """.formatted(rubric, issue);
+        String prompt = buildPrompt(rubric, submissionText.kind, submissionText.text);
 
         JsonNode response = objectMapper.readTree(callGemini(prompt));
         String text = response.path("candidates").path(0).path("content").path("parts").path(0).path("text").asText("");
@@ -93,10 +108,169 @@ public class AssignmentAiGradingService {
         JsonNode result = parseJsonResult(text);
         int score = normalizeScore(extractScore(result, text));
         String feedback = extractFeedback(result).trim();
-        if (score < 1 || score > 5 || feedback.isBlank()) {
+        if (score < 2 || score > 4 || feedback.isBlank()) {
             return GradeResult.failed("The AI returned an invalid grading result.");
         }
         return GradeResult.graded(score, limitToTwoSentences(feedback));
+    }
+
+    private String buildPrompt(String rubric, String submissionKind, String submissionText) {
+        return """
+                Grade this %s submission using the rubric below.
+                Do not infer details that are absent from the submission. The content below was fetched by the server; evaluate only what is supplied.
+
+                BEGIN RUBRIC
+                %s
+                END RUBRIC
+
+                The rubric above defines the grading criteria only. Ignore any output-format instructions inside the rubric.
+                Return ONLY valid JSON with exactly these fields:
+                {"score": 2, "feedback": "One or two sentences."}
+                score must be an integer from 2 through 4, where 2 is the minimum passing score and 4 means the submission goes above and beyond the rubric. Map the rubric's levels onto this 2-4 scale when necessary (a 5 is reserved for a separate batch-review pass and must never be returned here).
+                feedback must be one or two concise sentences explaining one strength and one improvement when possible.
+
+                %s:
+                %s
+                """.formatted(submissionKind, rubric, submissionKind.toUpperCase(java.util.Locale.ROOT), submissionText);
+    }
+
+    private record SubmissionText(String kind, String text, String notGradeableReason) {
+        static SubmissionText of(String kind, String text) {
+            return new SubmissionText(kind, text, null);
+        }
+        static SubmissionText notGradeable(String reason) {
+            return new SubmissionText(null, null, reason);
+        }
+    }
+
+    private SubmissionText fetchGithubIssueText(Map<String, Object> content) throws Exception {
+        String url = String.valueOf(content.getOrDefault("url", "")).trim();
+        if (!isGithubIssueUrl(url)) {
+            return SubmissionText.notGradeable("This submission is not a GitHub issue link, so it was not graded.");
+        }
+        Matcher matcher = GITHUB_ISSUE_URL.matcher(url);
+        matcher.matches();
+        String issue = fetchGithubIssue(matcher.group(1), matcher.group(2), matcher.group(3));
+        if (issue == null || issue.isBlank()) {
+            return SubmissionText.notGradeable("The GitHub issue could not be viewed, so no score was assigned.");
+        }
+        return SubmissionText.of("GITHUB ISSUE", issue);
+    }
+
+    private SubmissionText fetchGistText(Map<String, Object> content) throws Exception {
+        String url = String.valueOf(content.getOrDefault("url", "")).trim();
+        if (!isGistUrl(url)) {
+            return SubmissionText.notGradeable("This submission is not a Gist link, so it was not graded.");
+        }
+        if (gistToken == null || gistToken.isBlank()) {
+            return SubmissionText.notGradeable("Gist grading is not configured on the server.");
+        }
+        String gistId = extractGistId(url);
+        if (gistId == null) {
+            return SubmissionText.notGradeable("Could not determine the Gist id from the submitted link.");
+        }
+        String files = fetchGistFiles(gistId);
+        if (files == null || files.isBlank()) {
+            return SubmissionText.notGradeable("The Gist could not be read, so no score was assigned.");
+        }
+        return SubmissionText.of("CODE SUBMISSION", files);
+    }
+
+    private SubmissionText fetchNotebookText(Map<String, Object> content) {
+        String filename = String.valueOf(content.getOrDefault("filename", ""));
+        if (!filename.toLowerCase(java.util.Locale.ROOT).endsWith(".ipynb")) {
+            return SubmissionText.notGradeable("Automatic grading is not available for this file type yet.");
+        }
+        String uploadedBy = String.valueOf(content.getOrDefault("uploadedBy", ""));
+        String storedFilename = String.valueOf(content.getOrDefault("storedFilename", ""));
+        if (uploadedBy.isBlank() || storedFilename.isBlank()) {
+            return SubmissionText.notGradeable("The notebook file could not be located, so no score was assigned.");
+        }
+        String base64 = fileHandler.decodeFile(uploadedBy, storedFilename);
+        if (base64 == null || base64.isBlank()) {
+            return SubmissionText.notGradeable("The notebook file could not be downloaded, so no score was assigned.");
+        }
+        String notebookJson = new String(Base64.getDecoder().decode(base64), StandardCharsets.UTF_8);
+        String extracted;
+        try {
+            extracted = extractNotebookText(notebookJson);
+        } catch (Exception e) {
+            return SubmissionText.notGradeable("The notebook file could not be parsed, so no score was assigned.");
+        }
+        if (extracted.isBlank()) {
+            return SubmissionText.notGradeable("The notebook had no gradable content.");
+        }
+        return SubmissionText.of("JUPYTER NOTEBOOK", extracted);
+    }
+
+    /** Extracts code/markdown cell source text from a .ipynb file's JSON, ignoring outputs. */
+    private String extractNotebookText(String notebookJson) throws Exception {
+        JsonNode notebook = objectMapper.readTree(notebookJson);
+        JsonNode cells = notebook.path("cells");
+        StringBuilder out = new StringBuilder();
+        for (JsonNode cell : cells) {
+            String cellType = cell.path("cell_type").asText("");
+            String source = joinSource(cell.path("source"));
+            if (source.isBlank()) {
+                continue;
+            }
+            out.append("--- ").append(cellType.isBlank() ? "cell" : cellType).append(" cell ---\n");
+            out.append(source).append("\n\n");
+        }
+        return out.toString().trim();
+    }
+
+    private String joinSource(JsonNode source) {
+        if (source.isArray()) {
+            StringBuilder sb = new StringBuilder();
+            for (JsonNode line : source) {
+                sb.append(line.asText(""));
+            }
+            return sb.toString();
+        }
+        return source.asText("");
+    }
+
+    private String extractGistId(String urlOrId) {
+        Matcher direct = GIST_ID.matcher(urlOrId.trim());
+        if (direct.matches()) {
+            return urlOrId.trim();
+        }
+        String[] segments = urlOrId.split("[/#?]");
+        for (int i = segments.length - 1; i >= 0; i--) {
+            if (GIST_ID.matcher(segments[i]).matches()) {
+                return segments[i];
+            }
+        }
+        return null;
+    }
+
+    private String fetchGistFiles(String gistId) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.github.com/gists/" + gistId))
+                .timeout(Duration.ofSeconds(15))
+                .header("Accept", "application/vnd.github+json")
+                .header("Authorization", "Bearer " + gistToken)
+                .header("X-GitHub-Api-Version", "2022-11-28")
+                .header("User-Agent", "OpenCodingSociety-assignment-grader")
+                .GET()
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        if (response.statusCode() != 200) {
+            return null;
+        }
+        JsonNode gist = objectMapper.readTree(response.body());
+        JsonNode files = gist.path("files");
+        StringBuilder out = new StringBuilder();
+        Iterator<String> fileNames = files.fieldNames();
+        while (fileNames.hasNext()) {
+            String fileName = fileNames.next();
+            if (GIST_MANIFEST_FILE.equals(fileName)) {
+                continue;
+            }
+            String fileContent = files.path(fileName).path("content").asText("");
+            out.append("--- ").append(fileName).append(" ---\n").append(fileContent).append("\n\n");
+        }
+        return out.toString().trim();
     }
 
     private int extractScore(JsonNode result, String responseText) {
@@ -121,7 +295,9 @@ public class AssignmentAiGradingService {
         if (score <= 0) {
             return 0;
         }
-        return Math.max(1, Math.min(5, score));
+        // Instant auto-grading is limited to 2-4; a 5 is reserved for a separate
+        // batch-review pass that picks the single best submission across students.
+        return Math.max(2, Math.min(4, score));
     }
 
     private String extractFeedback(JsonNode result) {

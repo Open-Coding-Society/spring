@@ -170,8 +170,13 @@ public class AssignmentSubmissionAPIController {
             if (!hasSubmissionType(submissionInfo.content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
             }
+            String linkValidationError = validateLinkContent(submissionInfo.content);
+            if (linkValidationError != null) {
+                return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
+            }
             AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, submissionInfo.content, submissionInfo.comment, submissionInfo.isLate);
             AssignmentSubmission savedSubmission = submissionRepo.save(submission);
+            savedSubmission = tryAutoGrade(savedSubmission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
         }
         Map<String, String> error = new HashMap<>();
@@ -232,9 +237,14 @@ public class AssignmentSubmissionAPIController {
             if (!hasSubmissionType(requestData.content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
             }
+            String linkValidationError = validateLinkContent(requestData.content);
+            if (linkValidationError != null) {
+                return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
+            }
 
             AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, requestData.content, requestData.comment,requestData.isLate);
             AssignmentSubmission savedSubmission = submissionRepo.save(submission);
+            savedSubmission = tryAutoGrade(savedSubmission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
         }
         Map<String, String> error = new HashMap<>();
@@ -387,10 +397,7 @@ public class AssignmentSubmissionAPIController {
             if (!"graded".equals(result.status())) {
                 return ResponseEntity.unprocessableEntity().body(result);
             }
-            submission.setQualityScore(result.score());
-            submission.setGrade(result.score().doubleValue());
-            submission.setFeedback(result.feedback());
-            submission.setAiSummary(result.feedback());
+            applyAiGradeResult(submission, result);
                 AssignmentSubmission savedSubmission = submissionRepo.save(submission);
                 return ResponseEntity.ok(new AiGradeResponse(
                     result.status(),
@@ -634,6 +641,51 @@ public class AssignmentSubmissionAPIController {
                 && assignment.getAssignmentType() != null
                 && contentType != null
                 && assignment.getAssignmentType().trim().equalsIgnoreCase(contentType.trim());
+    }
+
+    /**
+     * Rejects github_issue/code submissions whose url isn't actually a GitHub issue
+     * or Gist link, so a bad link is caught at submit time rather than only surfacing
+     * later as "not gradeable" once auto-grading runs.
+     */
+    private String validateLinkContent(Map<String, Object> content) {
+        if (content == null) {
+            return null;
+        }
+        String type = String.valueOf(content.getOrDefault("type", "")).trim();
+        String url = String.valueOf(content.getOrDefault("url", "")).trim();
+        if ("github_issue".equalsIgnoreCase(type) && !AssignmentAiGradingService.isGithubIssueUrl(url)) {
+            return "A github_issue submission must be a public GitHub issue link (github.com/owner/repo/issues/N)";
+        }
+        if ("code".equalsIgnoreCase(type) && !AssignmentAiGradingService.isGistUrl(url)) {
+            return "A code submission must include a valid Gist link";
+        }
+        return null;
+    }
+
+    /**
+     * Attempts to AI-grade a freshly created submission immediately, best-effort.
+     * Grading failures never fail the submission itself — the student's work is
+     * saved either way, ungraded if the AI grader can't produce a result.
+     */
+    private AssignmentSubmission tryAutoGrade(AssignmentSubmission submission) {
+        try {
+            AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
+            if ("graded".equals(result.status())) {
+                applyAiGradeResult(submission, result);
+                return submissionRepo.save(submission);
+            }
+        } catch (Exception e) {
+            logger.warn("Auto-grade failed for submission {}: {}", submission.getId(), e.getMessage());
+        }
+        return submission;
+    }
+
+    private void applyAiGradeResult(AssignmentSubmission submission, AssignmentAiGradingService.GradeResult result) {
+        submission.setQualityScore(result.score());
+        submission.setGrade(result.score().doubleValue());
+        submission.setFeedback(result.feedback());
+        submission.setAiSummary(result.feedback());
     }
 
     private Person getAuthenticatedPerson(UserDetails userDetails) {
