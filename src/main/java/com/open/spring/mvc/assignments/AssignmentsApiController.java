@@ -68,6 +68,9 @@ public class AssignmentsApiController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private AssignmentRubricService rubricService;
+
     @Getter
     @Setter
     public static class AssignmentDto {
@@ -148,6 +151,7 @@ public class AssignmentsApiController {
             @RequestParam String type,
             @RequestParam String description,
             @RequestParam(required = false) String aiRubric,
+            @RequestParam(required = false) String pageContent,
             @RequestParam Double points,
             @RequestParam String dueDate,
             @RequestParam(required = false, defaultValue = "file") String assignmentType,
@@ -158,6 +162,8 @@ public class AssignmentsApiController {
         Assignment newAssignment = new Assignment(name, type, description, points, dueDate, assignmentType);
         if (aiRubric != null && !aiRubric.isBlank()) {
             newAssignment.setAiRubric(aiRubric.trim());
+        } else {
+            applyGeneratedRubric(newAssignment, name, description, pageContent);
         }
         normalizeAssignmentSequenceForSqlite();
         Assignment savedAssignment = assignmentRepo.save(newAssignment);
@@ -270,6 +276,7 @@ public class AssignmentsApiController {
             @RequestParam(required = false) Double points,
             @RequestParam(required = false) String dueDate,
             @RequestParam(required = false) String assignmentType,
+            @RequestParam(required = false) String pageContent,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         // Debug log input
@@ -341,7 +348,8 @@ public class AssignmentsApiController {
                 resolvedDueDate,
                 assignmentType
             );
-            
+            applyGeneratedRubric(newAssignment, name, description, pageContent);
+
             normalizeAssignmentSequenceForSqlite();
             Assignment savedAssignment = assignmentRepo.save(newAssignment);
             logger.info("Auto-created assignment with ID: " + savedAssignment.getId() + " for contentUrl: " + contentUrl);
@@ -358,6 +366,26 @@ public class AssignmentsApiController {
     @Setter
     public static class AssignmentResourceUrlDto {
         public String url;
+    }
+
+    /**
+     * Generates a thorough, page-grounded AI rubric for a brand-new assignment when the
+     * caller supplied the assignment page's content and didn't already set an explicit
+     * rubric. Best-effort: any failure (no API key, bad response) leaves the assignment's
+     * constructor-assigned {@link Assignment#DEFAULT_AI_RUBRIC} in place.
+     */
+    private void applyGeneratedRubric(Assignment assignment, String name, String description, String pageContent) {
+        if (pageContent == null || pageContent.isBlank()) {
+            return;
+        }
+        try {
+            String generated = rubricService.generateRubric(name, description, pageContent);
+            if (generated != null && !generated.isBlank()) {
+                assignment.setAiRubric(generated);
+            }
+        } catch (Exception e) {
+            logger.warn("Rubric generation failed for assignment '{}': {}", name, e.getMessage());
+        }
     }
 
     /**
