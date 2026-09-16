@@ -93,7 +93,6 @@ public class AssignmentsApiController {
         public String resourceFilename;
         public String resourceStoragePath;
         public String resourceUploadedBy;
-        public String assignmentType;  // ADD THIS
         /** Owner uids; null on endpoints that do not load the creator relationship. */
         public List<String> creatorUids;
 
@@ -297,6 +296,7 @@ public class AssignmentsApiController {
             @RequestParam(required = false) String dueDate,
             @RequestParam(required = false) String assignmentType,
             @RequestParam(required = false) String pageContent,
+            @RequestParam(required = false) List<String> creatorUids,
             @AuthenticationPrincipal UserDetails userDetails
     ) {
         // Debug log input
@@ -365,21 +365,16 @@ public class AssignmentsApiController {
         Assignment existing = assignmentRepo.findFirstByContentUrlOrderByIdAsc(canonicalUrl);
 
         if (existing != null) {
-            // Return existing assignment (already has auto-generated ID)
-            // This avoids duplicate assignments for the same page
-            Assignment existingAssignment = existing.get(0);
+            Assignment existingAssignment = existing;
             if (assignmentType != null && !assignmentType.isBlank()
                     && !assignmentType.equalsIgnoreCase(existingAssignment.getAssignmentType())) {
                 existingAssignment.setAssignmentType(assignmentType.trim());
                 existingAssignment = assignmentRepo.save(existingAssignment);
             }
-            logger.info("Assignment already exists for contentUrl: " + contentUrl + ", ID: " + existingAssignment.getId());
-            AssignmentDto dto = new AssignmentDto(existingAssignment);
-            return ResponseEntity.ok(dto);
             // This avoids duplicate assignments for the same page.
             // Ownership still has to be resynchronized here, otherwise frontmatter edits
             // would only ever reach assignments on their very first deploy.
-            Assignment assignment = existing;
+            Assignment assignment = existingAssignment;
             if (synchronizeCreators
                     && assignmentCreatorSyncService.applyCreators(assignment, resolvedCreators)) {
                 assignment = assignmentRepo.save(assignment);
@@ -424,6 +419,18 @@ public class AssignmentsApiController {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(Map.of("error", "Failed to create assignment: " + e.getMessage()));
         }
+    }
+
+    public ResponseEntity<?> autoCreateAssignment(
+            String name,
+            String contentUrl,
+            String description,
+            Double points,
+            String dueDate,
+            List<String> creatorUids,
+            UserDetails userDetails) {
+        return autoCreateAssignment(
+            name, contentUrl, description, points, dueDate, null, null, creatorUids, userDetails);
     }
 
     /**

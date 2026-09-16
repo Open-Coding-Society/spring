@@ -86,8 +86,6 @@ Indicators:
     @NotEmpty
     private String type;
 
-    private String assignmentType;
-
     private String description;
 
     @Column(columnDefinition = "TEXT")
@@ -153,6 +151,9 @@ Indicators:
     @Column(length = 50)
     private String assignmentType = "all_assignments";
 
+    @Column(name = "content_url", unique = true)
+    private String contentUrl;
+
     private static DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     public void resetQueue() {
@@ -197,24 +198,12 @@ Indicators:
         this.resourceUrl = null;
         this.resourceFilename = null;
         this.resourceStoragePath = null;
-        this.assignmentType = "all_assignments"; // Default to all_assignments
         // This line is not needed as converter will reset to null after it takes in an empty queue 
         // this.assignmentQueue = new AssignmentQueue();
     }
 
-    // Constructor with assignmentType
-    public Assignment(String name, String type, String description, Double points, String dueDate, String assignmentType) {
-        this.name = name;
-        this.type = type;
-        this.description = description;
-        this.points = points;
-        this.dueDate = dueDate; 
-        this.timestamp = LocalDateTime.now().format(formatter);
-        this.resourceType = "none";
-        this.resourceUrl = null;
-        this.resourceFilename = null;
-        this.resourceStoragePath = null;
-        this.assignmentType = assignmentType;
+    public Assignment(String name, String type, String description, Double points, String dueDate) {
+        this(name, type, description, points, dueDate, "File");
     }
 
     public void setUrlResource(String url) {

@@ -76,6 +76,9 @@ public class AssignmentSubmissionAPIController {
 
     @Autowired
     private AssignmentAiGradingService aiGradingService;
+
+    @Autowired
+    private AssignmentAuthorizationService assignmentAuthorizationService;
     
     /**
      * A DTO class for returning only necessary assignment submission details.
@@ -162,7 +165,7 @@ public class AssignmentSubmissionAPIController {
         
         // TODO: A better way to do this would be to have this be part of some sort of SubmitterService
         Submitter submitter;
-        if (submissionInfo.isGroup) {
+        if (Boolean.TRUE.equals(submissionInfo.isGroup)) {
             submitter = groupRepo.findById(submissionInfo.submitterId).orElse(null);
         } else {
             submitter = personRepo.findById(submissionInfo.submitterId).orElse(null);
@@ -416,7 +419,7 @@ public class AssignmentSubmissionAPIController {
         if (currentUser == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required"));
         }
-        if (!canGradeOrDeleteSubmission(currentUser)) {
+        if (!assignmentAuthorizationService.isTeacherOrAdmin(currentUser)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Admin or teacher access required"));
         }
 
