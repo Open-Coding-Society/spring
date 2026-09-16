@@ -3,10 +3,9 @@ package com.open.spring.mvc.assignments;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Date;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.open.spring.mvc.person.Person;
@@ -90,7 +89,7 @@ public class Assignment {
      * (assignment_creator_uids) and is never cascaded to Person, so removing a creator
      * only drops the join row. Excluded from equals/hashCode because Person inherits
      * identity equality from Submitter, which makes whole-entity comparison unreliable
-     * and would force the lazy set to load.
+     * and would force the lazy collection to load.
      */
     @ManyToMany
     @JoinTable(
@@ -100,7 +99,7 @@ public class Assignment {
     )
     @JsonIgnore
     @EqualsAndHashCode.Exclude
-    private Set<Person> creators = new HashSet<>();
+    private List<Person> creators = new ArrayList<>();
 
     @OneToMany(mappedBy="assignment", cascade=CascadeType.ALL, orphanRemoval=true)
     @JsonIgnore
@@ -204,9 +203,9 @@ public class Assignment {
      * Never returns null: assignments created before the creators join table existed
      * load with no collection at all, and callers treat "no creators" as legacy/unassigned.
      */
-    public Set<Person> getCreators() {
+    public List<Person> getCreators() {
         if (creators == null) {
-            creators = new HashSet<>();
+            creators = new ArrayList<>();
         }
         return creators;
     }

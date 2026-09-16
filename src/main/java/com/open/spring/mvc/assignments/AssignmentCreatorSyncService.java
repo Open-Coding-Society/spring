@@ -104,8 +104,8 @@ public class AssignmentCreatorSyncService {
     /**
      * Creator uids currently stored on the assignment.
      *
-     * Sorted, because the entity holds creators in a Set whose iteration order is
-     * arbitrary; callers and API responses need a deterministic list.
+     * Sorted so callers and API responses receive a deterministic list regardless of
+     * database retrieval order.
      */
     public Set<String> currentCreatorUids(Assignment assignment) {
         return assignment.getCreators().stream()

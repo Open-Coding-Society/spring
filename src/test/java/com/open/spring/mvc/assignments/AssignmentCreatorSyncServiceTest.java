@@ -81,8 +81,8 @@ class AssignmentCreatorSyncServiceTest {
     void applyingCreatorsStoresEveryResolvedPersonInADeterministicOrder() {
         Assignment target = assignment(10L, "pilot");
 
-        // The entity stores creators in a Set, so the reported order is sorted rather
-        // than frontmatter order - what matters is that it never varies between reads.
+        // The reported order is sorted rather than depending on database retrieval
+        // order - what matters is that it never varies between reads.
         assertTrue(service.applyCreators(target, List.of(second, first)));
         assertEquals(List.of("AdityaS-2010", "second-creator"), service.creatorUidsOf(target));
     }
