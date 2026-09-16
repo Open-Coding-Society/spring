@@ -26,6 +26,9 @@ public class AssignmentAiGradingService {
     private static final Pattern GITHUB_ISSUE_URL = Pattern.compile(
             "^https?://github\\.com/([^/]+)/([^/#?]+)/issues/(\\d+)/?$",
             Pattern.CASE_INSENSITIVE);
+    private static final Pattern GITHUB_BLOB_URL = Pattern.compile(
+            "^https?://github\\.com/([^/]+)/([^/#?]+)/blob/([^/#?]+)/(.+?)/?$",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern GIST_URL = Pattern.compile(
             "^https?://gist\\.github\\.com/.*$",
             Pattern.CASE_INSENSITIVE);
@@ -64,6 +67,11 @@ public class AssignmentAiGradingService {
         return url != null && GITHUB_ISSUE_URL.matcher(url.trim()).matches();
     }
 
+    /** Validates a GitHub file URL, e.g. https://github.com/owner/repo/blob/main/src/Main.java. */
+    public static boolean isGithubBlobUrl(String url) {
+        return url != null && GITHUB_BLOB_URL.matcher(url.trim()).matches();
+    }
+
     /** Validates a gist.github.com URL (the shape assets/js/gist.js's exportToGist returns). */
     public static boolean isGistUrl(String url) {
         return url != null && GIST_URL.matcher(url.trim()).matches();
@@ -74,8 +82,8 @@ public class AssignmentAiGradingService {
         String contentType = content == null ? null : String.valueOf(content.getOrDefault("type", "")).trim();
 
         SubmissionText submissionText;
-        if ("github_issue".equalsIgnoreCase(contentType)) {
-            submissionText = fetchGithubIssueText(content);
+        if ("github_issue".equalsIgnoreCase(contentType) || "link".equalsIgnoreCase(contentType)) {
+            submissionText = fetchGithubLinkText(content);
         } else if ("code".equalsIgnoreCase(contentType)) {
             submissionText = fetchGistText(content);
         } else if ("file".equalsIgnoreCase(contentType)) {
@@ -155,6 +163,41 @@ public class AssignmentAiGradingService {
             return SubmissionText.notGradeable("The GitHub issue could not be viewed, so no score was assigned.");
         }
         return SubmissionText.of("GITHUB ISSUE", issue);
+    }
+
+    private SubmissionText fetchGithubLinkText(Map<String, Object> content) throws Exception {
+        String url = String.valueOf(content.getOrDefault("url", "")).trim();
+        if (isGithubIssueUrl(url)) {
+            return fetchGithubIssueText(content);
+        }
+        if (!isGithubBlobUrl(url)) {
+            return SubmissionText.notGradeable(
+                    "This submission must be a GitHub issue or GitHub file link, so it was not graded.");
+        }
+
+        Matcher matcher = GITHUB_BLOB_URL.matcher(url);
+        matcher.matches();
+        String owner = matcher.group(1);
+        String repository = matcher.group(2);
+        String reference = matcher.group(3);
+        String path = matcher.group(4).replaceFirst("/$", "");
+        String fileContent = fetchGithubFile(owner, repository, reference, path);
+        if (fileContent == null || fileContent.isBlank()) {
+            return SubmissionText.notGradeable("The GitHub file could not be viewed, so no score was assigned.");
+        }
+
+        if (path.toLowerCase(java.util.Locale.ROOT).endsWith(".ipynb")) {
+            try {
+                fileContent = extractNotebookText(fileContent);
+            } catch (Exception exception) {
+                return SubmissionText.notGradeable("The GitHub notebook could not be parsed, so no score was assigned.");
+            }
+            if (fileContent.isBlank()) {
+                return SubmissionText.notGradeable("The GitHub notebook had no gradable content.");
+            }
+            return SubmissionText.of("JUPYTER NOTEBOOK", fileContent);
+        }
+        return SubmissionText.of("CODE FILE", fileContent);
     }
 
     private SubmissionText fetchGistText(Map<String, Object> content) throws Exception {
@@ -349,6 +392,29 @@ public class AssignmentAiGradingService {
                 + "\nState: " + issue.path("state").asText("")
                 + "\nBody:\n" + issue.path("body").asText("")
                 + "\nLabels: " + issue.path("labels").toString();
+    }
+
+    private String fetchGithubFile(String owner, String repository, String reference, String path) throws Exception {
+        String apiUrl = githubApiBaseUrl.replaceAll("/$", "") + "/repos/" + owner + "/" + repository
+                + "/contents/" + path + "?ref=" + java.net.URLEncoder.encode(reference, StandardCharsets.UTF_8);
+        HttpRequest.Builder request = githubIssueRequest(apiUrl);
+        if (githubApiToken != null && !githubApiToken.isBlank()) {
+            request.header("Authorization", "Bearer " + githubApiToken);
+        }
+        HttpResponse<String> response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        if ((response.statusCode() == 401 || response.statusCode() == 403)
+                && githubApiToken != null && !githubApiToken.isBlank()) {
+            response = httpClient.send(githubIssueRequest(apiUrl).build(), HttpResponse.BodyHandlers.ofString());
+        }
+        if (response.statusCode() != 200) {
+            return null;
+        }
+        JsonNode file = objectMapper.readTree(response.body());
+        String encodedContent = file.path("content").asText("").replaceAll("\\s", "");
+        if (encodedContent.isBlank()) {
+            return null;
+        }
+        return new String(Base64.getDecoder().decode(encodedContent), StandardCharsets.UTF_8);
     }
 
     private HttpRequest.Builder githubIssueRequest(String apiUrl) {

@@ -654,8 +654,15 @@ public class AssignmentSubmissionAPIController {
         }
         String type = String.valueOf(content.getOrDefault("type", "")).trim();
         String url = String.valueOf(content.getOrDefault("url", "")).trim();
-        if ("github_issue".equalsIgnoreCase(type) && !AssignmentAiGradingService.isGithubIssueUrl(url)) {
-            return "A github_issue submission must be a public GitHub issue link (github.com/owner/repo/issues/N)";
+        if ("github_issue".equalsIgnoreCase(type)
+                && !AssignmentAiGradingService.isGithubIssueUrl(url)
+                && !AssignmentAiGradingService.isGithubBlobUrl(url)) {
+            return "A github_issue submission must be a public GitHub issue or file link";
+        }
+        if ("link".equalsIgnoreCase(type)
+                && (!AssignmentAiGradingService.isGithubIssueUrl(url)
+                && !AssignmentAiGradingService.isGithubBlobUrl(url))) {
+            return "A link submission must be a public GitHub issue or file link";
         }
         if ("code".equalsIgnoreCase(type) && !AssignmentAiGradingService.isGistUrl(url)) {
             return "A code submission must include a valid Gist link";
