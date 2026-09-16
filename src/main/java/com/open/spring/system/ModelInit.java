@@ -22,6 +22,7 @@ import com.open.spring.mvc.assignments.Assignment;
 import com.open.spring.mvc.assignments.AssignmentJpaRepository;
 import com.open.spring.mvc.assignments.AssignmentSubmission;
 import com.open.spring.mvc.assignments.AssignmentSubmissionJPA;
+import com.open.spring.mvc.assignments.AssignmentSyncAccountProvisioner;
 import com.open.spring.mvc.bank.BankJpaRepository;
 import com.open.spring.mvc.bank.BankService;
 import com.open.spring.mvc.bathroom.BathroomQueue;
@@ -90,6 +91,7 @@ public class ModelInit {
     
     @Autowired AssignmentJpaRepository assignmentJpaRepository;
     @Autowired AssignmentSubmissionJPA submissionJPA;
+    @Autowired AssignmentSyncAccountProvisioner assignmentSyncAccountProvisioner;
     @Autowired SynergyGradeJpaRepository gradeJpaRepository;
     @Autowired StudentQueueJPARepository studentQueueJPA;
     @Autowired BankJpaRepository bankJpaRepository;
@@ -173,7 +175,10 @@ public class ModelInit {
                 return;
             }
 
+            // Capture the count before provisioning so a bot created in an empty database
+            // does not prevent the normal sample users from being initialized.
             long personCount = personJpaRepository.count();
+            assignmentSyncAccountProvisioner.provisionIfConfigured();
             if (personCount > 0) {
                 System.out.println("Database already contains " + personCount + " persons. Skipping ModelInit...");
                 return;

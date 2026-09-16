@@ -3,6 +3,7 @@ package com.open.spring.mvc.assignments;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -25,6 +26,7 @@ import jakarta.persistence.OneToMany;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -49,6 +51,18 @@ public class Assignment {
 
     private String description;
 
+    /**
+     * Canonical URL of the lesson page this assignment was auto-created from, and the key
+     * /api/assignments/auto-create dedups on. Null for assignments created by a teacher
+     * through /api/assignments/create, which have no page behind them.
+     *
+     * Always written through {@link AssignmentContentUrls#canonicalize(String)} so the
+     * browser and the Pages sync script resolve to the same row. Not unique: deployments
+     * that already accumulated duplicate rows would fail to add the constraint.
+     */
+    @Column(name = "content_url")
+    private String contentUrl;
+
     @NotEmpty
     private String dueDate;
 
@@ -66,6 +80,26 @@ public class Assignment {
         inverseJoinColumns = @JoinColumn(name = "person_id")
     )
     private List<Person> assignedGraders;
+
+    /**
+     * People who own this assignment and may manage its submissions.
+     *
+     * Deliberately separate from assignedGraders: a grader is assigned work on an
+     * assignment, a creator owns it. The list is synchronized from Pages frontmatter
+     * (assignment_creator_uids) and is never cascaded to Person, so removing a creator
+     * only drops the join row. Excluded from equals/hashCode because Person inherits
+     * identity equality from Submitter, which makes whole-entity comparison unreliable
+     * and would force the lazy collection to load.
+     */
+    @ManyToMany
+    @JoinTable(
+        name = "assignment_creators",
+        joinColumns = @JoinColumn(name = "assignment_id"),
+        inverseJoinColumns = @JoinColumn(name = "person_id")
+    )
+    @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    private List<Person> creators = new ArrayList<>();
 
     @OneToMany(mappedBy="assignment", cascade=CascadeType.ALL, orphanRemoval=true)
     @JsonIgnore
@@ -183,6 +217,17 @@ public class Assignment {
 
     public List<Person> getAssignedGraders() {
         return assignedGraders;
+    }
+
+    /**
+     * Never returns null: assignments created before the creators join table existed
+     * load with no collection at all, and callers treat "no creators" as legacy/unassigned.
+     */
+    public List<Person> getCreators() {
+        if (creators == null) {
+            creators = new ArrayList<>();
+        }
+        return creators;
     }
 
     public void setAssignedGraders(List<com.open.spring.mvc.person.Person> persons) {
