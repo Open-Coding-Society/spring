@@ -23,6 +23,7 @@ import com.open.spring.mvc.assignments.Assignment;
 import com.open.spring.mvc.assignments.AssignmentJpaRepository;
 import com.open.spring.mvc.assignments.AssignmentSubmission;
 import com.open.spring.mvc.assignments.AssignmentSubmissionJPA;
+import com.open.spring.mvc.assignments.AssignmentSyncAccountProvisioner;
 import com.open.spring.mvc.bank.BankJpaRepository;
 import com.open.spring.mvc.bank.BankService;
 import com.open.spring.mvc.bathroom.BathroomQueue;
@@ -89,6 +90,7 @@ public class ModelInit {
     
     @Autowired AssignmentJpaRepository assignmentJpaRepository;
     @Autowired AssignmentSubmissionJPA submissionJPA;
+    @Autowired AssignmentSyncAccountProvisioner assignmentSyncAccountProvisioner;
     @Autowired SynergyGradeJpaRepository gradeJpaRepository;
     @Autowired StudentQueueJPARepository studentQueueJPA;
     @Autowired BankJpaRepository bankJpaRepository;
@@ -182,7 +184,10 @@ public class ModelInit {
                 return;
             }
 
+            // Capture the count before provisioning so a bot created in an empty database
+            // does not prevent the normal sample users from being initialized.
             long personCount = personJpaRepository.count();
+            assignmentSyncAccountProvisioner.provisionIfConfigured();
             if (personCount > 0) {
                 System.out.println("Database already contains " + personCount + " persons. Skipping ModelInit...");
                 return;
@@ -206,7 +211,7 @@ public class ModelInit {
                     
                     // Ensure password is not null or empty
                     if (person.getPassword() == null || person.getPassword().isEmpty()) {
-                        person.setPassword("defaultPassword123"); // Set a default password or handle differently
+                        person.setPassword("DefaultPassword123!"); // Must satisfy Person.checkPassword()
                     }
                     
                     personDetailsService.save(person);
@@ -304,10 +309,8 @@ public class ModelInit {
                 Assignment assignmentFound = assignmentJpaRepository.findByName(assignment.getName());
                 if (assignmentFound == null) { // if the assignment doesn't exist
                     Assignment newAssignment = new Assignment(assignment.getName(), assignment.getType(), assignment.getDescription(), assignment.getPoints(), assignment.getDueDate(), assignment.getAssignmentType());
+                Assignment newAssignment = new Assignment(assignment.getName(), assignment.getType(), assignment.getDescription(), assignment.getPoints(), assignment.getDueDate(), assignment.getAssignmentType());
                     assignmentJpaRepository.save(newAssignment);
-
-                    // create sample submission
-                    submissionJPA.save(new AssignmentSubmission(newAssignment, personJpaRepository.findByUid("madam"), java.util.Map.of("type", "link", "url", "test submission"), "test comment", false));
                 }
             }
 

@@ -56,6 +56,9 @@ public class AssignmentSubmissionAPIController {
 
     private Logger logger = LoggerFactory.getLogger(getClass());
 
+    private static final String MANAGE_DENIED_MESSAGE =
+            "You do not have permission to manage this submission";
+
     @Autowired
     private AssignmentSubmissionJPA submissionRepo;
 
@@ -136,6 +139,11 @@ public class AssignmentSubmissionAPIController {
         public Map<String, Object> content;
         public String comment;
         public Boolean isLate;
+        public Integer technicalExcellence;
+        public Integer communication;
+        public Integer workHabits;
+        public Integer aiOrchestration;
+        public String selfAssessmentReflection;
     }
 
     /**
@@ -165,7 +173,17 @@ public class AssignmentSubmissionAPIController {
             error.put("error", "Submitter not found");
             return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
         }
-        
+
+        String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
+                submissionInfo.technicalExcellence,
+                submissionInfo.communication,
+                submissionInfo.workHabits,
+                submissionInfo.aiOrchestration,
+                submissionInfo.selfAssessmentReflection);
+        if (selfAssessmentError != null) {
+            return new ResponseEntity<>(Map.of("error", selfAssessmentError), HttpStatus.BAD_REQUEST);
+        }
+
         if (assignment != null) {
             if (!hasSubmissionType(submissionInfo.content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
@@ -175,6 +193,11 @@ public class AssignmentSubmissionAPIController {
                 return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
             }
             AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, submissionInfo.content, submissionInfo.comment, submissionInfo.isLate);
+            submission.setTechnicalExcellence(submissionInfo.technicalExcellence);
+            submission.setCommunication(submissionInfo.communication);
+            submission.setWorkHabits(submissionInfo.workHabits);
+            submission.setAiOrchestration(submissionInfo.aiOrchestration);
+            submission.setSelfAssessmentReflection(submissionInfo.selfAssessmentReflection);
             AssignmentSubmission savedSubmission = submissionRepo.save(submission);
             savedSubmission = tryAutoGrade(savedSubmission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
@@ -193,6 +216,11 @@ public class AssignmentSubmissionAPIController {
         public Map<String, Object> content;
         public String comment;
         public Boolean isLate;
+        public Integer technicalExcellence;
+        public Integer communication;
+        public Integer workHabits;
+        public Integer aiOrchestration;
+        public String selfAssessmentReflection;
     }
 
     /**
@@ -243,6 +271,11 @@ public class AssignmentSubmissionAPIController {
             }
 
             AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, requestData.content, requestData.comment,requestData.isLate);
+            submission.setTechnicalExcellence(requestData.technicalExcellence);
+            submission.setCommunication(requestData.communication);
+            submission.setWorkHabits(requestData.workHabits);
+            submission.setAiOrchestration(requestData.aiOrchestration);
+            submission.setSelfAssessmentReflection(requestData.selfAssessmentReflection);
             AssignmentSubmission savedSubmission = submissionRepo.save(submission);
             savedSubmission = tryAutoGrade(savedSubmission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
@@ -355,16 +388,16 @@ public class AssignmentSubmissionAPIController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Authentication required"));
         }
-        if (!canGradeOrDeleteSubmission(currentUser)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Admin or teacher access required"));
-        }
 
         AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
         if (submission == null) {
             Map<String, String> error = new HashMap<>();
             error.put("error", "Submission not found");
             return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);    
+        }
+        if (!canManageSubmission(currentUser, submission)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", MANAGE_DENIED_MESSAGE));
         }
 
         // we have a correct submission
@@ -441,15 +474,15 @@ public class AssignmentSubmissionAPIController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Authentication required"));
         }
-        if (!canGradeOrDeleteSubmission(currentUser)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Admin or teacher access required"));
-        }
 
         AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
         if (submission == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", "Submission not found"));
+        }
+        if (!canManageSubmission(currentUser, submission)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", MANAGE_DENIED_MESSAGE));
         }
 
         submission.setAiSummary(summary);
@@ -477,15 +510,15 @@ public class AssignmentSubmissionAPIController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(Map.of("error", "Authentication required"));
         }
-        if (!canGradeOrDeleteSubmission(currentUser)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Admin or teacher access required"));
-        }
 
         AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
         if (submission == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
                     .body(Map.of("error", "Submission not found"));
+        }
+        if (!canManageSubmission(currentUser, submission)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", MANAGE_DENIED_MESSAGE));
         }
 
         submissionRepo.delete(submission);
@@ -624,8 +657,13 @@ public class AssignmentSubmissionAPIController {
                 .anyMatch(group -> Objects.equals(group.getId(), submitter.getId()));
     }
 
-    private boolean canGradeOrDeleteSubmission(Person currentUser) {
-        return currentUser.hasRoleWithName("ROLE_ADMIN") || currentUser.hasRoleWithName("ROLE_TEACHER");
+    /**
+     * Teachers and admins keep their existing reach; a creator may only manage submissions
+     * belonging to an assignment they own. The denial message is deliberately generic so a
+     * failed attempt never confirms anything about another assignment's submissions.
+     */
+    private boolean canManageSubmission(Person currentUser, AssignmentSubmission submission) {
+        return assignmentAuthorizationService.canManage(currentUser, submission.getAssignment());
     }
 
     private boolean hasSubmissionType(Map<String, Object> content, Assignment assignment) {

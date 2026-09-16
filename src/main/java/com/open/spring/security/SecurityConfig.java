@@ -189,6 +189,16 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/challenge-submission/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // ==========================================
 
+                        // ========== ASSIGNMENT CREATOR SYNC ==========
+                        // auto-create is how Pages frontmatter reaches Spring. The trusted Pages bot
+                        // is provisioned with ROLE_ASSIGNMENT_SYNC and nothing else, so it is listed
+                        // here to reach this one endpoint; the default /api/** rule below still keeps
+                        // it out of everything else. ROLE_ASSIGNMENT_SYNC is never granted to students
+                        // or teachers - only that bot account may set assignment creators.
+                        .requestMatchers(HttpMethod.POST, "/api/assignments/auto-create")
+                            .hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT", "ROLE_ASSIGNMENT_SYNC")
+                        // =============================================
+
                         // ========== ASSIGNMENT SUBMISSION ==========
                         // Assignment text/link submissions - public (student identity passed in payload)
                         .requestMatchers(HttpMethod.POST, "/api/submissions/**").permitAll()
@@ -244,6 +254,7 @@ public class SecurityConfig {
         policy.put("POST /api/face/register", "ROLE_USER|ROLE_STUDENT|ROLE_TEACHER|ROLE_ADMIN");
         policy.put("/api/face/**", "ROLE_TEACHER|ROLE_ADMIN");
         policy.put("POST /api/assignment-submissions/upload", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT");
+        policy.put("POST /api/assignments/auto-create", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT|ROLE_ASSIGNMENT_SYNC");
         policy.put("/api/pausemenu/**", "permitAll");
         policy.put("/api/leaderboard/**", "permitAll");
         policy.put("/api/exports/**", "ROLE_ADMIN");

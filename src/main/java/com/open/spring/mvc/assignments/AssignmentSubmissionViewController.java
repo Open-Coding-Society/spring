@@ -3,10 +3,12 @@ package com.open.spring.mvc.assignments;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -33,6 +35,12 @@ public class AssignmentSubmissionViewController {
 
     @Autowired
     private PersonJpaRepository personRepo;
+
+    @Autowired
+    private AssignmentJpaRepository assignmentRepo;
+
+    @Autowired
+    private AssignmentAuthorizationService assignmentAuthorizationService;
 
     /**
      * Get all submissions for current user (or all if admin)
@@ -103,6 +111,66 @@ public class AssignmentSubmissionViewController {
 
         } catch (Exception e) {
             logger.error("Unexpected error in getSubmissions", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(new ErrorResponse("Error fetching submissions"));
+        }
+    }
+
+    /**
+     * Get every submission the caller is allowed to manage.
+     *
+     * Distinct from /list, which answers "my submissions" (or all of them for staff).
+     * Here a creator sees the submissions of the assignments they own and nothing else,
+     * so the two endpoints can keep serving different views without one shadowing the other.
+     *
+     * @return List of submissions scoped to managed assignments
+     */
+    @GetMapping("/managed")
+    @Transactional(readOnly = true)
+    public ResponseEntity<?> getManagedSubmissions() {
+        try {
+            Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+            if (auth == null || !auth.isAuthenticated() || auth instanceof AnonymousAuthenticationToken) {
+                logger.warn("Unauthorized access to managed submissions endpoint");
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(new ErrorResponse("Not authenticated"));
+            }
+
+            Person person = personRepo.findByUid(auth.getName());
+            if (person == null) {
+                logger.error("User not found with uid: {}", auth.getName());
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(new ErrorResponse("Not authenticated"));
+            }
+
+            List<AssignmentSubmission> submissions;
+            if (assignmentAuthorizationService.isTeacherOrAdmin(person)) {
+                submissions = submissionRepo.findAll();
+            } else {
+                List<Long> ownedAssignmentIds = assignmentRepo.findByCreatorId(person.getId()).stream()
+                        .map(Assignment::getId)
+                        .collect(Collectors.toList());
+                // A student who owns nothing gets an empty list without hitting the submission table.
+                submissions = ownedAssignmentIds.isEmpty()
+                        ? List.of()
+                        : submissionRepo.findByAssignmentIdIn(ownedAssignmentIds);
+            }
+
+            List<SubmissionListDTO> dtos = new ArrayList<>();
+            for (AssignmentSubmission submission : submissions) {
+                try {
+                    dtos.add(SubmissionListDTO.from(submission));
+                } catch (Exception e) {
+                    logger.error("Error converting submission {} to DTO", submission.getId(), e);
+                    dtos.add(SubmissionListDTO.createFallback(submission));
+                }
+            }
+
+            logger.info("Successfully fetched {} managed submissions for {}", dtos.size(), auth.getName());
+            return ResponseEntity.ok(dtos);
+
+        } catch (Exception e) {
+            logger.error("Unexpected error in getManagedSubmissions", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(new ErrorResponse("Error fetching submissions"));
         }

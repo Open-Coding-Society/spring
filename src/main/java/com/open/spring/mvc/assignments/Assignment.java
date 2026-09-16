@@ -3,6 +3,7 @@ package com.open.spring.mvc.assignments;
 import java.text.SimpleDateFormat;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
 
@@ -25,6 +26,7 @@ import jakarta.persistence.Table;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -109,7 +111,25 @@ Indicators:
     )
     private List<Person> assignedGraders;
 
-
+    /**
+     * People who own this assignment and may manage its submissions.
+     *
+     * Deliberately separate from assignedGraders: a grader is assigned work on an
+     * assignment, a creator owns it. The list is synchronized from Pages frontmatter
+     * (assignment_creator_uids) and is never cascaded to Person, so removing a creator
+     * only drops the join row. Excluded from equals/hashCode because Person inherits
+     * identity equality from Submitter, which makes whole-entity comparison unreliable
+     * and would force the lazy collection to load.
+     */
+    @ManyToMany
+    @JoinTable(
+        name = "assignment_creators",
+        joinColumns = @JoinColumn(name = "assignment_id"),
+        inverseJoinColumns = @JoinColumn(name = "person_id")
+    )
+    @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    private List<Person> creators = new ArrayList<>();
 
     @OneToMany(mappedBy="assignment", cascade=CascadeType.ALL, orphanRemoval=true)
     @JsonIgnore
@@ -128,6 +148,10 @@ Indicators:
 
     @Convert(converter = AssignmentQueueConverter.class)
     private AssignmentQueue assignmentQueue;
+
+    // NEW: Assignment type field (all_assignments or sprints)
+    @Column(length = 50)
+    private String assignmentType = "all_assignments";
 
     private static DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
@@ -173,8 +197,24 @@ Indicators:
         this.resourceUrl = null;
         this.resourceFilename = null;
         this.resourceStoragePath = null;
+        this.assignmentType = "all_assignments"; // Default to all_assignments
         // This line is not needed as converter will reset to null after it takes in an empty queue 
         // this.assignmentQueue = new AssignmentQueue();
+    }
+
+    // Constructor with assignmentType
+    public Assignment(String name, String type, String description, Double points, String dueDate, String assignmentType) {
+        this.name = name;
+        this.type = type;
+        this.description = description;
+        this.points = points;
+        this.dueDate = dueDate; 
+        this.timestamp = LocalDateTime.now().format(formatter);
+        this.resourceType = "none";
+        this.resourceUrl = null;
+        this.resourceFilename = null;
+        this.resourceStoragePath = null;
+        this.assignmentType = assignmentType;
     }
 
     public void setUrlResource(String url) {
@@ -209,6 +249,17 @@ Indicators:
 
     public List<Person> getAssignedGraders() {
         return assignedGraders;
+    }
+
+    /**
+     * Never returns null: assignments created before the creators join table existed
+     * load with no collection at all, and callers treat "no creators" as legacy/unassigned.
+     */
+    public List<Person> getCreators() {
+        if (creators == null) {
+            creators = new ArrayList<>();
+        }
+        return creators;
     }
 
     public void setAssignedGraders(List<com.open.spring.mvc.person.Person> persons) {

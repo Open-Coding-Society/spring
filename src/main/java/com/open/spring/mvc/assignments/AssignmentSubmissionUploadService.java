@@ -48,10 +48,21 @@ public class AssignmentSubmissionUploadService {
             String username,
             MultipartFile file,
             String notes,
+            Integer technicalExcellence,
+            Integer communication,
+            Integer workHabits,
+            Integer aiOrchestration,
+            String selfAssessmentReflection,
             UserDetails userDetails) {
 
         validateAuthentication(userDetails);
         validateRequiredFields(userId, username, file);
+
+        String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
+                technicalExcellence, communication, workHabits, aiOrchestration, selfAssessmentReflection);
+        if (selfAssessmentError != null) {
+            throw new UploadException(HttpStatus.BAD_REQUEST, selfAssessmentError);
+        }
 
         Person authenticatedUser = getAuthenticatedUser(userDetails);
         Person targetUser = getTargetUser(userId);
@@ -78,7 +89,12 @@ public class AssignmentSubmissionUploadService {
             authenticatedUser,
             originalFilename,
             s3Filename,
-            storedFilename);
+            storedFilename,
+            technicalExcellence,
+            communication,
+            workHabits,
+            aiOrchestration,
+            selfAssessmentReflection);
 
         savedSubmission = tryAutoGrade(savedSubmission);
 
@@ -222,7 +238,12 @@ public class AssignmentSubmissionUploadService {
             Person authenticatedUser,
             String originalFilename,
             String s3Filename,
-            String storedFilename) {
+            String storedFilename,
+            Integer technicalExcellence,
+            Integer communication,
+            Integer workHabits,
+            Integer aiOrchestration,
+            String selfAssessmentReflection) {
 
         Map<String, Object> content = new HashMap<>();
         content.put("type", assignment.getAssignmentType());
@@ -241,6 +262,11 @@ public class AssignmentSubmissionUploadService {
                 content,
                 notes == null ? "" : notes,
                 false);
+        submission.setTechnicalExcellence(technicalExcellence);
+        submission.setCommunication(communication);
+        submission.setWorkHabits(workHabits);
+        submission.setAiOrchestration(aiOrchestration);
+        submission.setSelfAssessmentReflection(selfAssessmentReflection);
 
         return submissionRepo.save(submission);
     }
