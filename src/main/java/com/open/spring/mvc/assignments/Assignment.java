@@ -9,6 +9,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.open.spring.mvc.person.Person;
+import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.synergy.SynergyGrade;
 
 import jakarta.persistence.CascadeType;
@@ -100,6 +101,17 @@ public class Assignment {
     @JsonIgnore
     @EqualsAndHashCode.Exclude
     private List<Person> creators = new ArrayList<>();
+
+    /** Canonical course groups declared by the page's existing courses frontmatter. */
+    @ManyToMany
+    @JoinTable(
+        name = "assignment_course_groups",
+        joinColumns = @JoinColumn(name = "assignment_id"),
+        inverseJoinColumns = @JoinColumn(name = "group_id")
+    )
+    @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    private List<Groups> courseGroups = new ArrayList<>();
 
     @OneToMany(mappedBy="assignment", cascade=CascadeType.ALL, orphanRemoval=true)
     @JsonIgnore
