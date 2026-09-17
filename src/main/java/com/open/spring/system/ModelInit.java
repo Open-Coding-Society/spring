@@ -1,15 +1,16 @@
 package com.open.spring.system;
 
 import java.io.File;
+import java.sql.Connection;
+import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import javax.sql.DataSource;
-import java.sql.Connection;
-import java.sql.SQLException;
-import java.sql.Statement;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,7 +21,6 @@ import com.open.spring.mvc.announcement.Announcement;
 import com.open.spring.mvc.announcement.AnnouncementJPA;
 import com.open.spring.mvc.assignments.Assignment;
 import com.open.spring.mvc.assignments.AssignmentJpaRepository;
-import com.open.spring.mvc.assignments.AssignmentSubmission;
 import com.open.spring.mvc.assignments.AssignmentSubmissionJPA;
 import com.open.spring.mvc.assignments.AssignmentSyncAccountProvisioner;
 import com.open.spring.mvc.bank.BankJpaRepository;
@@ -34,12 +34,12 @@ import com.open.spring.mvc.bathroom.TeacherJpaRepository;
 import com.open.spring.mvc.bathroom.TinkleJPARepository;
 import com.open.spring.mvc.comment.Comment;
 import com.open.spring.mvc.comment.CommentJPA;
-import com.open.spring.mvc.hardAssets.HardAssetsRepository;
-import com.open.spring.mvc.jokes.Jokes;
-import com.open.spring.mvc.jokes.JokesJpaRepository;
 import com.open.spring.mvc.groups.CourseGroupProperties;
 import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
+import com.open.spring.mvc.hardAssets.HardAssetsRepository;
+import com.open.spring.mvc.jokes.Jokes;
+import com.open.spring.mvc.jokes.JokesJpaRepository;
 import com.open.spring.mvc.media.MediaJpaRepository;
 import com.open.spring.mvc.media.Score;
 import com.open.spring.mvc.note.Note;
@@ -49,22 +49,20 @@ import com.open.spring.mvc.person.PersonDetailsService;
 import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.person.PersonRole;
 import com.open.spring.mvc.person.PersonRoleJpaRepository;
-
-// Adventure sub-APIs have been unified into a single Adventure entity
-import com.open.spring.mvc.student.StudentQueue;
-import com.open.spring.mvc.student.StudentQueueJPARepository;
-import com.open.spring.mvc.synergy.SynergyGrade;
-import com.open.spring.mvc.synergy.SynergyGradeJpaRepository;
 import com.open.spring.mvc.quiz.QuizScore;
 import com.open.spring.mvc.quiz.QuizScoreRepository;
 import com.open.spring.mvc.resume.Resume;
 import com.open.spring.mvc.resume.ResumeJpaRepository;
-import com.open.spring.mvc.stats.Stats; // curators - stats api
-import com.open.spring.mvc.stats.StatsRepository;
 import com.open.spring.mvc.rpg.adventure.Adventure;
 import com.open.spring.mvc.rpg.adventure.AdventureJpaRepository;
 import com.open.spring.mvc.rpg.games.Game;
 import com.open.spring.mvc.rpg.games.UnifiedGameRepository;
+import com.open.spring.mvc.stats.Stats;
+import com.open.spring.mvc.stats.StatsRepository; // curators - stats api
+import com.open.spring.mvc.student.StudentQueue;
+import com.open.spring.mvc.student.StudentQueueJPARepository;
+import com.open.spring.mvc.synergy.SynergyGrade;
+import com.open.spring.mvc.synergy.SynergyGradeJpaRepository;
 
 
 @Component
@@ -121,6 +119,16 @@ public class ModelInit {
                     } catch (SQLException ignore) {
                         // column may already exist; ignore
                     }
+
+                    try {
+                        st.execute("ALTER TABLE assignment ADD COLUMN ai_rubric TEXT;");
+                        System.out.println("Added 'ai_rubric' column to 'assignment' table");
+                    } catch (SQLException ignore) {
+                        // column may already exist; ignore
+                    }
+                    String defaultAssignmentRubric = com.open.spring.mvc.assignments.Assignment.DEFAULT_AI_RUBRIC.replace("'", "''");
+                    st.executeUpdate("UPDATE assignment SET ai_rubric = '" + defaultAssignmentRubric
+                            + "' WHERE ai_rubric IS NULL OR TRIM(ai_rubric) = ''");
 
                     try {
                         Iterable<Adventure> all = adventureJpaRepository.findAll();
@@ -299,7 +307,7 @@ public class ModelInit {
             for (Assignment assignment : assignmentArray) {
                 Assignment assignmentFound = assignmentJpaRepository.findByName(assignment.getName());
                 if (assignmentFound == null) { // if the assignment doesn't exist
-                Assignment newAssignment = new Assignment(assignment.getName(), assignment.getType(), assignment.getDescription(), assignment.getPoints(), assignment.getDueDate(), assignment.getAssignmentType());
+                    Assignment newAssignment = new Assignment(assignment.getName(), assignment.getType(), assignment.getDescription(), assignment.getPoints(), assignment.getDueDate(), assignment.getAssignmentType());
                     assignmentJpaRepository.save(newAssignment);
                 }
             }

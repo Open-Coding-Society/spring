@@ -111,7 +111,7 @@ class AssignmentsApiControllerCreatorTest {
             List<String> courseCodes) {
         return controller.autoCreateAssignment(
             "Sample Assignment", CONTENT_URL, "", null, null,
-            creatorUids, courseCodes, caller);
+            null, null, creatorUids, courseCodes, caller);
     }
 
     @SuppressWarnings("unchecked")
@@ -134,7 +134,7 @@ class AssignmentsApiControllerCreatorTest {
     void aPageDescriptionIsStoredWithoutTheLegacyContentUrlMarker() {
         controller.autoCreateAssignment(
             "Sample Assignment", CONTENT_URL, "  Play the game  ",
-            null, null, null, null, caller("admin", "ROLE_ADMIN"));
+            null, null, null, null, null, null, caller("admin", "ROLE_ADMIN"));
 
         ArgumentCaptor<Assignment> saved = ArgumentCaptor.forClass(Assignment.class);
         verify(assignmentRepo).save(saved.capture());
@@ -148,6 +148,29 @@ class AssignmentsApiControllerCreatorTest {
 
         assertEquals(201, response.getStatusCode().value());
         assertEquals(List.of("AdityaS-2010"), ((AssignmentDto) response.getBody()).getCreatorUids());
+    }
+
+    @Test
+    void omittedSubmissionTypePreservesTheExistingAssignmentType() {
+        Assignment existing = assignment(10L, "sample", firstCreator);
+        existing.setContentUrl(CANONICAL_CONTENT_URL);
+        existing.setAssignmentType("github_issue");
+        when(assignmentRepo.findFirstByContentUrlOrderByIdAsc(CANONICAL_CONTENT_URL)).thenReturn(existing);
+
+        ResponseEntity<?> response = autoCreate(caller("admin", "ROLE_ADMIN"), null);
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals("github_issue", existing.getAssignmentType());
+        verify(assignmentRepo, never()).save(any(Assignment.class));
+    }
+
+    @Test
+    void newAssignmentWithoutSubmissionTypeDefaultsToFile() {
+        autoCreate(caller("admin", "ROLE_ADMIN"), null);
+
+        ArgumentCaptor<Assignment> saved = ArgumentCaptor.forClass(Assignment.class);
+        verify(assignmentRepo).save(saved.capture());
+        assertEquals("file", saved.getValue().getAssignmentType());
     }
 
     @Test
