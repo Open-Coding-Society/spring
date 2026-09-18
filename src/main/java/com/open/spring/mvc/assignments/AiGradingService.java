@@ -61,11 +61,21 @@ public class AiGradingService {
     @Autowired
     private AssignmentSubmissionJPA submissionRepo;
 
-    @Value("${GEMINI_API_KEY:}")
-    private String geminiApiKey;
+    /**
+     * Any OpenAI-shaped chat completions endpoint. Groq, OpenAI, Together,
+     * Cerebras and OpenRouter all speak this, and so does Gemini through
+     * https://generativelanguage.googleapis.com/v1beta/openai/chat/completions
+     * -- so the provider is a config line rather than a code change.
+     */
+    @Value("${ai.grading.url:https://api.groq.com/openai/v1/chat/completions}")
+    private String apiUrl;
 
-    @Value("${GEMINI_API_URL:https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent}")
-    private String geminiApiUrl;
+    /** Falls back to GEMINI_API_KEY so an existing deploy keeps working. */
+    @Value("${ai.grading.key:${GROQ_API_KEY:${GEMINI_API_KEY:}}}")
+    private String apiKey;
+
+    @Value("${ai.grading.model:llama-3.3-70b-versatile}")
+    private String model;
 
     /** Set false to leave submissions for the dashboard button instead. */
     @Value("${ai.grading.enabled:true}")
@@ -90,9 +100,10 @@ public class AiGradingService {
         if (!enabled) {
             return;
         }
-        if (geminiApiKey == null || geminiApiKey.isBlank()) {
+        if (apiKey == null || apiKey.isBlank()) {
             if (!warnedAboutMissingKey) {
-                System.out.println("[ai-grading] No GEMINI_API_KEY set; the AI check will not run automatically.");
+                System.out.println("[ai-grading] No ai.grading.key (or GROQ_API_KEY/GEMINI_API_KEY) set; "
+                        + "the AI check will not run automatically.");
                 warnedAboutMissingKey = true;
             }
             return;
@@ -106,10 +117,10 @@ public class AiGradingService {
         System.out.println("[ai-grading] Checking " + pending.size() + " submission(s).");
         Map<Long, AiVerdict> verdicts;
         try {
-            verdicts = askGemini(pending);
+            verdicts = askModel(pending);
         } catch (Exception e) {
             // A grader that is down is not a reason to disturb anything else.
-            System.out.println("[ai-grading] Gemini call failed, leaving these for the next sweep: " + e.getMessage());
+            System.out.println("[ai-grading] Model call failed, leaving these for the next sweep: " + e.getMessage());
             return;
         }
 
@@ -172,10 +183,10 @@ public class AiGradingService {
     }
 
     /**
-     * One Gemini call for the whole batch, answered as JSON so the reply can be
+     * One call for the whole batch, answered as JSON so the reply can be
      * matched back to each submission by id.
      */
-    private Map<Long, AiVerdict> askGemini(List<AssignmentSubmission> batch) throws Exception {
+    private Map<Long, AiVerdict> askModel(List<AssignmentSubmission> batch) throws Exception {
         StringBuilder work = new StringBuilder();
         for (AssignmentSubmission s : batch) {
             work.append("---\n")
@@ -195,34 +206,40 @@ public class AiGradingService {
                 You are writing a first draft for the teacher, not the grade of record. Do not
                 invent a percentage or a letter grade.
 
-                Reply with JSON only, no prose around it, in exactly this shape:
-                [{"id": <submission id>, "summary": "<your sentences>", "quality_score": <1-5>}]
+                Reply with a JSON object holding one key, "results", whose value is an array:
+                {"results": [{"id": <submission id>, "summary": "<your sentences>", "quality_score": <1-5>}]}
 
                 Submissions:
                 %s
                 """.formatted(work.toString());
 
-        // Build the payload with Jackson so quotes and newlines in student work
-        // cannot break out of the JSON string.
-        ObjectNode part = mapper.createObjectNode().put("text", prompt);
-        ArrayNode parts = mapper.createArrayNode().add(part);
-        ObjectNode content = mapper.createObjectNode().set("parts", parts);
-        ArrayNode contents = mapper.createArrayNode().add(content);
-        ObjectNode payload = mapper.createObjectNode().set("contents", contents);
+        // Built with Jackson so a quote or newline in student work cannot break
+        // out of the JSON string.
+        ObjectNode message = mapper.createObjectNode();
+        message.put("role", "user");
+        message.put("content", prompt);
+        ArrayNode messages = mapper.createArrayNode().add(message);
+
+        ObjectNode payload = mapper.createObjectNode();
+        payload.put("model", model);
+        payload.set("messages", messages);
+        // Ask for JSON directly rather than parsing it back out of prose.
+        payload.set("response_format", mapper.createObjectNode().put("type", "json_object"));
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(apiKey);
         HttpEntity<String> request = new HttpEntity<>(mapper.writeValueAsString(payload), headers);
 
         RestTemplate restTemplate = new RestTemplate();
         ResponseEntity<String> response = restTemplate.exchange(
-                geminiApiUrl + "?key=" + geminiApiKey, HttpMethod.POST, request, String.class);
+                apiUrl, HttpMethod.POST, request, String.class);
 
         return parseVerdicts(response.getBody());
     }
 
     /**
-     * Pulls the model's JSON array out of a Gemini response.
+     * Reads the verdicts out of an OpenAI-shaped reply.
      *
      * Anything unreadable -- a truncated reply, an HTML error page from a proxy,
      * prose where JSON was asked for -- yields no verdicts rather than an
@@ -238,25 +255,19 @@ public class AiGradingService {
         } catch (Exception e) {
             return Collections.emptyMap();
         }
-        JsonNode text = root.path("candidates").path(0).path("content").path("parts").path(0).path("text");
-        if (text.isMissingNode()) {
+        JsonNode content = root.path("choices").path(0).path("message").path("content");
+        if (content.isMissingNode()) {
             return Collections.emptyMap();
         }
 
-        // Models often wrap JSON in a ```json fence; take the array itself.
-        String raw = text.asText();
-        int start = raw.indexOf('[');
-        int end = raw.lastIndexOf(']');
-        if (start < 0 || end <= start) {
+        // JSON mode returns a bare object, but a model ignoring it may still
+        // fence the reply, so find the JSON rather than assume it starts at 0.
+        String raw = content.asText();
+        JsonNode items = readResults(raw);
+        if (items == null || !items.isArray()) {
             return Collections.emptyMap();
         }
 
-        JsonNode items;
-        try {
-            items = mapper.readTree(raw.substring(start, end + 1));
-        } catch (Exception e) {
-            return Collections.emptyMap();
-        }
         Map<Long, AiVerdict> out = new java.util.HashMap<>();
         for (JsonNode item : items) {
             if (!item.hasNonNull("id")) {
@@ -278,6 +289,24 @@ public class AiGradingService {
             out.put(id, new AiVerdict(item.path("summary").asText(""), score));
         }
         return out;
+    }
+
+    /** The results array, whether the model returned {"results": [...]} or a bare [...]. */
+    private JsonNode readResults(String raw) {
+        int obj = raw.indexOf('{');
+        int arr = raw.indexOf('[');
+        try {
+            if (obj >= 0 && (arr < 0 || obj < arr)) {
+                JsonNode parsed = mapper.readTree(raw.substring(obj, raw.lastIndexOf('}') + 1));
+                return parsed.path("results");
+            }
+            if (arr >= 0) {
+                return mapper.readTree(raw.substring(arr, raw.lastIndexOf(']') + 1));
+            }
+        } catch (Exception e) {
+            return null;
+        }
+        return null;
     }
 
     private String assignmentNameOf(AssignmentSubmission s) {

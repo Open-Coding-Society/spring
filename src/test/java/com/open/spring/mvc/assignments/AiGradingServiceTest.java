@@ -15,14 +15,23 @@ public class AiGradingServiceTest {
 
     private final AiGradingService service = new AiGradingService();
 
-    private static String geminiReply(String modelText) {
+    // A bare array, for a model that ignores the response_format and answers
+    // with the array on its own rather than wrapped in {"results": ...}.
+
+    /** An OpenAI-shaped reply carrying whatever text the model produced. */
+    private static String modelReply(String modelText) {
         String escaped = modelText.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n");
-        return "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"" + escaped + "\"}]}}]}";
+        return "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"" + escaped + "\"}}]}";
+    }
+
+    /** What JSON mode actually returns: an object with a results array. */
+    private static String jsonModeReply(String resultsArray) {
+        return modelReply("{\"results\": " + resultsArray + "}");
     }
 
     @Test
     public void readsSummaryAndScore() throws Exception {
-        String reply = geminiReply(
+        String reply = jsonModeReply(
                 "[{\"id\": 7, \"summary\": \"Loop bound is off by one.\", \"quality_score\": 3}]");
 
         Map<Long, AiGradingService.AiVerdict> out = service.parseVerdicts(reply);
@@ -35,7 +44,7 @@ public class AiGradingServiceTest {
     @Test
     public void readsJsonWrappedInACodeFence() throws Exception {
         // Models routinely wrap JSON in ```json even when told not to.
-        String reply = geminiReply(
+        String reply = modelReply(
                 "```json\n[{\"id\": 2, \"summary\": \"Complete and correct.\", \"quality_score\": 5}]\n```");
 
         Map<Long, AiGradingService.AiVerdict> out = service.parseVerdicts(reply);
@@ -48,7 +57,7 @@ public class AiGradingServiceTest {
     public void dropsAScoreOutsideTheScale() throws Exception {
         // The column only accepts 1-5. A model that answers 9 should leave the
         // score empty rather than be clamped into looking confident.
-        String reply = geminiReply(
+        String reply = jsonModeReply(
                 "[{\"id\": 4, \"summary\": \"Nothing to read at that link.\", \"quality_score\": 9}]");
 
         Map<Long, AiGradingService.AiVerdict> out = service.parseVerdicts(reply);
@@ -62,13 +71,13 @@ public class AiGradingServiceTest {
         assertTrue(service.parseVerdicts("not json at all").isEmpty());
         assertTrue(service.parseVerdicts("").isEmpty());
         assertTrue(service.parseVerdicts(null).isEmpty());
-        assertTrue(service.parseVerdicts(geminiReply("I could not do that.")).isEmpty(),
+        assertTrue(service.parseVerdicts(modelReply("I could not do that.")).isEmpty(),
                 "prose with no JSON array yields nothing to save");
     }
 
     @Test
     public void skipsAnEntryWithAnUnreadableId() throws Exception {
-        String reply = geminiReply(
+        String reply = jsonModeReply(
                 "[{\"id\": \"abc\", \"summary\": \"x\", \"quality_score\": 2},"
               + " {\"id\": 5, \"summary\": \"Good trace.\", \"quality_score\": 4}]");
 
