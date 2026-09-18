@@ -294,9 +294,17 @@ public class AssignmentSubmissionAPIController {
 
         // Preserve existing content map for change detection
         Map<String, Object> existingContent = submission.getContent() != null ? submission.getContent() : Collections.emptyMap();
-        boolean contentChanged = !Objects.equals(existingContent, updatedContent);
 
-        submission.setContent(updatedContent);
+        // Carry over any keys this endpoint does not manage. The content map is
+        // free-form: the submit form stores things here that have no column of
+        // their own -- the unit and chapter a lesson was filed under, for one --
+        // and rebuilding the map from scratch silently dropped them on every edit.
+        Map<String, Object> mergedContent = new HashMap<>(existingContent);
+        mergedContent.putAll(updatedContent);
+
+        boolean contentChanged = !Objects.equals(existingContent, mergedContent);
+
+        submission.setContent(mergedContent);
         submission.setComment(comment == null ? "" : comment);
         submission.setIsLate(Boolean.TRUE.equals(isLate));
 
