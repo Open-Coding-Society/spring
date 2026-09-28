@@ -22,7 +22,15 @@ import com.open.spring.mvc.S3uploads.FileHandler;
 
 @Service
 public class AssignmentAiGradingService {
-    private static final int MAX_GEMINI_ATTEMPTS = 5;
+    // grade() runs synchronously inside the submit request (instant auto-grade) and inside
+    // the manual re-grade endpoint. 5 attempts x a 30s per-attempt timeout let a single call
+    // block for up to ~3 minutes when Gemini is genuinely down (a real, observed sustained
+    // "high demand" 503 outage on Google's side) - the caller's own request timed out long
+    // before that ever finished. During a real outage, more attempts don't help: every
+    // retry just hits the same overloaded backend. Bounded low so a submission never hangs.
+    private static final int MAX_GEMINI_ATTEMPTS = 3;
+    private static final Duration GEMINI_REQUEST_TIMEOUT = Duration.ofSeconds(12);
+    private static final long MAX_BACKOFF_MILLIS = 4000L;
     private static final Pattern GITHUB_ISSUE_URL = Pattern.compile(
             "^https?://github\\.com/([^/]+)/([^/#?]+)/issues/(\\d+)/?$",
             Pattern.CASE_INSENSITIVE);
@@ -436,7 +444,7 @@ public class AssignmentAiGradingService {
         String requestBodyJson = objectMapper.writeValueAsString(requestBody);
         for (int attempt = 0; attempt < MAX_GEMINI_ATTEMPTS; attempt++) {
             HttpRequest request = HttpRequest.newBuilder(URI.create(geminiApiUrl + "?key=" + geminiApiKey))
-                    .timeout(Duration.ofSeconds(30))
+                    .timeout(GEMINI_REQUEST_TIMEOUT)
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
                     .build();
@@ -456,8 +464,8 @@ public class AssignmentAiGradingService {
         long retryAfter = response.headers().firstValue("Retry-After")
                 .map(this::parseRetryAfterMillis)
                 .orElse(0L);
-        long exponentialDelay = Math.min(8000L, 1000L << attempt);
-        Thread.sleep(retryAfter > 0 ? Math.min(retryAfter, 8000L) : exponentialDelay);
+        long exponentialDelay = Math.min(MAX_BACKOFF_MILLIS, 1000L << attempt);
+        Thread.sleep(retryAfter > 0 ? Math.min(retryAfter, MAX_BACKOFF_MILLIS) : exponentialDelay);
     }
 
     private long parseRetryAfterMillis(String value) {
