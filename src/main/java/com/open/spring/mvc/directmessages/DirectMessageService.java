@@ -1,7 +1,9 @@
 package com.open.spring.mvc.directmessages;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -25,7 +27,19 @@ public class DirectMessageService {
 
     private final DirectMessageConversationJpaRepository conversationRepository;
     private final DirectMessageJpaRepository messageRepository;
+    private final DirectMessageReadStateJpaRepository readStateRepository;
     private final SimpMessagingTemplate messagingTemplate;
+
+    public record UnreadSender(String uid, String name) {
+    }
+
+    /**
+     * {@code people} is every distinct person with at least one unread message for
+     * the viewer (the notification badge counts people, not messages), most recent
+     * first; {@code unreadByConversation} is the unread message count per conversation.
+     */
+    public record UnreadSummary(List<UnreadSender> people, Map<Long, Long> unreadByConversation) {
+    }
 
     /**
      * Finds or creates the conversation between {@code requester} and
@@ -82,8 +96,38 @@ public class DirectMessageService {
                 .sentAt(message.getSentAt().toString())
                 .build();
 
+        // Posting in a conversation means the sender has caught up on it.
+        advanceReadMarker(conversation, sender, message.getId());
+
         messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + conversation.getId(), event);
         return event;
+    }
+
+    @Transactional(readOnly = true)
+    public UnreadSummary getUnreadSummary(Person person) {
+        Map<String, UnreadSender> people = new LinkedHashMap<>();
+        Map<Long, Long> unreadByConversation = new LinkedHashMap<>();
+        for (UnreadMessageCount row : messageRepository.countUnreadBySender(person)) {
+            people.putIfAbsent(row.senderUid(), new UnreadSender(row.senderUid(), row.senderName()));
+            unreadByConversation.merge(row.conversationId(), row.unreadCount(), Long::sum);
+        }
+        return new UnreadSummary(List.copyOf(people.values()), unreadByConversation);
+    }
+
+    /** Marks everything currently in the conversation as read for {@code person}. */
+    @Transactional
+    public void markRead(DirectMessageConversation conversation, Person person) {
+        messageRepository.findTopByConversationOrderByIdDesc(conversation)
+                .ifPresent(latest -> advanceReadMarker(conversation, person, latest.getId()));
+    }
+
+    private void advanceReadMarker(DirectMessageConversation conversation, Person person, Long messageId) {
+        DirectMessageReadState state = readStateRepository.findByConversationAndPerson(conversation, person)
+                .orElseGet(() -> new DirectMessageReadState(conversation, person));
+        if (state.getLastReadMessageId() == null || state.getLastReadMessageId() < messageId) {
+            state.setLastReadMessageId(messageId);
+            readStateRepository.save(state);
+        }
     }
 
     private boolean containsPerson(List<Person> people, Person target) {
