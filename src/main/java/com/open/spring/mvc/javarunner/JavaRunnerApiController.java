@@ -1,6 +1,9 @@
 package com.open.spring.mvc.javarunner;
 
 import org.springframework.web.client.RestClient;
+
+import io.github.cdimascio.dotenv.Dotenv;
+
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
 import org.springframework.http.HttpStatus;
@@ -22,17 +25,35 @@ public class JavaRunnerApiController {
         this.restClient = builder.build();
         this.localJavaRunner = localJavaRunner;
 
-        this.isProduction = Boolean.parseBoolean(
-                System.getenv().getOrDefault(
+        Dotenv dotenv = Dotenv.configure()
+                .ignoreIfMissing()
+                .load();
+
+        String productionValue = System.getenv("IS_PRODUCTION");
+
+        if (productionValue == null) {
+                productionValue = dotenv.get(
                         "IS_PRODUCTION",
                         "false"
-                )
+                );
+        }
+
+        this.isProduction = Boolean.parseBoolean(
+                productionValue
         );
 
-        this.runnerUrl = System.getenv().getOrDefault(
-                "JAVA_RUNNER_URL",
-                "http://code_runner:8592"
-        );
+        String configuredRunnerUrl =
+                System.getenv("JAVA_RUNNER_URL");
+
+        if (configuredRunnerUrl == null) {
+                configuredRunnerUrl = dotenv.get(
+                        "JAVA_RUNNER_URL",
+                        "http://code_runner:8592"
+                );
+        }
+
+        this.runnerUrl = configuredRunnerUrl;
+
     }
 
     @PostMapping("/java")
