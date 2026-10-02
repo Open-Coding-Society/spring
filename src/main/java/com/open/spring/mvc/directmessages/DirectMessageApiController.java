@@ -62,12 +62,32 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(Map.of("error", "User not authenticated"), HttpStatus.UNAUTHORIZED);
         }
 
+        Map<Long, Long> unreadByConversation = directMessageService.getUnreadSummary(person).unreadByConversation();
         List<Map<String, Object>> conversations = conversationRepository.findByParticipantsContaining(person)
                 .stream()
-                .map(conversation -> conversationSummary(conversation, person))
+                .map(conversation -> conversationSummary(conversation, person, unreadByConversation))
                 .toList();
 
         return new ResponseEntity<>(conversations, HttpStatus.OK);
+    }
+
+    /**
+     * Drives the navbar notification bell: {@code count} is how many different people
+     * have sent the caller messages they haven't read yet (people, not messages).
+     */
+    @GetMapping("/unread")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Object> getUnread(@AuthenticationPrincipal UserDetails userDetails) {
+        Person person = currentPerson(userDetails);
+        if (person == null) {
+            return new ResponseEntity<>(Map.of("error", "User not authenticated"), HttpStatus.UNAUTHORIZED);
+        }
+
+        DirectMessageService.UnreadSummary summary = directMessageService.getUnreadSummary(person);
+        return new ResponseEntity<>(Map.of(
+                "count", summary.people().size(),
+                "people", summary.people(),
+                "conversations", summary.unreadByConversation()), HttpStatus.OK);
     }
 
     @PostMapping("/conversations")
@@ -93,8 +113,12 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(Map.of("error", "No valid recipients found"), HttpStatus.BAD_REQUEST);
         }
 
+        // Must run before a new conversation is persisted: a query afterwards auto-flushes it, and the
+        // commit-time flush then compares its participants by Person.hashCode(), which recurses forever
+        // through Person <-> Bank (both Lombok @Data).
+        Map<Long, Long> unreadByConversation = directMessageService.getUnreadSummary(person).unreadByConversation();
         DirectMessageConversation conversation = directMessageService.getOrCreateConversation(person, others);
-        return new ResponseEntity<>(conversationSummary(conversation, person), HttpStatus.OK);
+        return new ResponseEntity<>(conversationSummary(conversation, person, unreadByConversation), HttpStatus.OK);
     }
 
     @GetMapping("/conversations/{id}/messages")
@@ -153,6 +177,30 @@ public class DirectMessageApiController {
         return new ResponseEntity<>(event, HttpStatus.OK);
     }
 
+    @PostMapping("/conversations/{id}/read")
+    @Transactional
+    public ResponseEntity<Object> markRead(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable("id") Long id) {
+        Person person = currentPerson(userDetails);
+        if (person == null) {
+            return new ResponseEntity<>(Map.of("error", "User not authenticated"), HttpStatus.UNAUTHORIZED);
+        }
+
+        Optional<DirectMessageConversation> conversationOpt = conversationRepository.findById(id);
+        if (conversationOpt.isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+
+        DirectMessageConversation conversation = conversationOpt.get();
+        if (!directMessageService.isParticipant(conversation, person)) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        directMessageService.markRead(conversation, person);
+        return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+    }
+
     private Person currentPerson(UserDetails userDetails) {
         if (userDetails == null) {
             return null;
@@ -160,7 +208,8 @@ public class DirectMessageApiController {
         return personRepository.findByUid(userDetails.getUsername());
     }
 
-    private Map<String, Object> conversationSummary(DirectMessageConversation conversation, Person self) {
+    private Map<String, Object> conversationSummary(
+            DirectMessageConversation conversation, Person self, Map<Long, Long> unreadByConversation) {
         List<Map<String, Object>> otherParticipants = conversation.getParticipants().stream()
                 .filter(participant -> !participant.getId().equals(self.getId()))
                 .map(participant -> Map.<String, Object>of(
@@ -171,7 +220,8 @@ public class DirectMessageApiController {
 
         return Map.of(
                 "id", conversation.getId(),
-                "participants", otherParticipants);
+                "participants", otherParticipants,
+                "unreadCount", unreadByConversation.getOrDefault(conversation.getId(), 0L));
     }
 
     private Map<String, Object> messageSummary(DirectMessage message) {
