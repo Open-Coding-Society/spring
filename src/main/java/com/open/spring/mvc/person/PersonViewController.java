@@ -17,6 +17,8 @@ import io.github.cdimascio.dotenv.Dotenv;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.session.SessionInformation;
+import org.springframework.security.core.session.SessionRegistry;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Controller;
@@ -63,6 +65,9 @@ public class PersonViewController {
 
     @Autowired
     private com.open.spring.mvc.capstone.CapstoneApplicationJpaRepository capstoneApplicationRepository;
+
+    @Autowired
+    private SessionRegistry sessionRegistry;
 
     //@Autowired
     //private PersonJpaRepository find;
@@ -717,21 +722,25 @@ public class PersonViewController {
 
         Person personToReset = repository.getByUid(requestBody.getUid());
 
-        //person not found
+        //person not found -- same {"verified":false}/403 shape as every other denial below,
+        //so an unknown uid can't be distinguished from a real one that failed verification
         if (personToReset == null) {
-            return new ResponseEntity<Object>(HttpStatus.NO_CONTENT);
+            logger.warn("AUDIT oauth_reset_denied uid={} reason=not_found", requestBody.getUid());
+            return oauthResetDenied(HttpStatus.FORBIDDEN);
         }
 
         //don't allow people to reset the passwords of admins
         if (personToReset.getRoles().stream().anyMatch(role -> "ROLE_ADMIN".equals(role.getName()))) {
-            return new ResponseEntity<Object>(HttpStatus.UNAUTHORIZED);
+            logger.warn("AUDIT oauth_reset_denied uid={} reason=admin_account", personToReset.getUid());
+            return oauthResetDenied(HttpStatus.FORBIDDEN);
         }
 
         //dont allow people to reset password of default users (such as toby)
         Person[] databasePersons = Person.init();
         for (Person person : databasePersons) {
             if (person.getUid().equals(personToReset.getUid())) {
-                return new ResponseEntity<Object>(HttpStatus.UNAUTHORIZED);
+                logger.warn("AUDIT oauth_reset_denied uid={} reason=default_account", personToReset.getUid());
+                return oauthResetDenied(HttpStatus.FORBIDDEN);
             }
         }
 
@@ -798,7 +807,11 @@ public class PersonViewController {
             return new ResponseEntity<Object>(HttpStatus.NO_CONTENT);
         }
 
-        if (requestBody.getNewPassword() == null || requestBody.getNewPassword().length() < 8) {
+        // Check complexity (same rule as PersonDetailsService.save) before consuming
+        // the single-use reset token, so a rejected password doesn't burn the token.
+        Person passwordCheck = new Person();
+        passwordCheck.setPassword(requestBody.getNewPassword());
+        if (!passwordCheck.checkPassword()) {
             return new ResponseEntity<Object>(HttpStatus.BAD_REQUEST);
         }
 
@@ -812,11 +825,38 @@ public class PersonViewController {
 
         logger.info("AUDIT oauth_reset_completed uid={}", personToReset.getUid());
 
-        // Best-effort sync to Flask so both backends' passwords stay in sync for this
-        // account; failure here doesn't roll back or fail the Spring-side reset above.
-        FlaskPasswordSync.syncPassword(personToReset.getUid(), requestBody.getNewPassword());
+        // Flask's copy of this password is synced by the frontend calling Flask's own
+        // /api/reset-password directly with this same resetToken -- not by Spring pushing
+        // it there (see docs/forgot-password-pipeline.md, "Architecture: no backend-to-backend
+        // sync"). Flask verifies the token's HMAC locally (shared RESET_TOKEN_SECRET, no
+        // network call back to Spring) and owns that write.
+
+        // Force-logout: kill any MVC HttpSession this uid currently holds (e.g. an admin
+        // portal tab logged in as this account elsewhere), closing the gap where password
+        // resets invalidated JWTs (tokenVersion) but not this session-based auth path. The
+        // requesting browser itself gets an explicit /logout call from the frontend on
+        // success (see support.md) since that's the only way to also clear its cookies.
+        invalidateActiveSessions(personToReset.getUid());
 
         return new ResponseEntity<Object>(HttpStatus.OK);
+    }
+
+    // Marks every SessionRegistry-tracked HttpSession for this uid as expired. Expiry isn't
+    // instant server-side destruction -- ConcurrentSessionFilter enforces it the next time
+    // that session is used, which is sufficient: the account is unusable via the old session
+    // from that point on, matching what a real logout accomplishes.
+    private void invalidateActiveSessions(String uid) {
+        for (Object principal : sessionRegistry.getAllPrincipals()) {
+            String principalUid = (principal instanceof UserDetails userDetails)
+                ? userDetails.getUsername()
+                : String.valueOf(principal);
+            if (!uid.equals(principalUid)) {
+                continue;
+            }
+            for (SessionInformation sessionInformation : sessionRegistry.getAllSessions(principal, false)) {
+                sessionInformation.expireNow();
+            }
+        }
     }
 
 ///////////////////////////////////////////////////////////////////////////////////////////
