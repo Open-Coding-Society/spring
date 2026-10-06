@@ -174,6 +174,29 @@ public class ModelInit {
                     } catch (Throwable t) {
                     }
 
+                    String createGroupMentors = buildGroupMentorsTableSql(conn);
+                    st.execute(createGroupMentors);
+                    System.out.println("Ensured 'group_mentors' table exists");
+
+                    st.execute(buildCapstoneProjectTableSql(conn));
+                    System.out.println("Ensured 'capstone_project' table exists");
+                    st.execute(buildCapstoneMentorsTableSql(conn));
+                    System.out.println("Ensured 'capstone_mentors' table exists");
+                    // CapstoneProject.groupId is new; additive and a no-op once applied.
+                    try {
+                        st.execute("ALTER TABLE " + quoteIdentifier(conn, "capstone_project")
+                                + " ADD COLUMN " + quoteIdentifier(conn, "group_id") + " BIGINT");
+                        System.out.println("Added 'group_id' column to 'capstone_project' table");
+                    } catch (SQLException ignore) {
+                        // column already exists; nothing to do
+                    }
+
+                    // Hibernate's AUTO id generator allocates from a <table>_seq table;
+                    // without it the first insert fails with "no such table".
+                    st.execute(buildCapstoneSeqTableSql(conn));
+                    ensureCapstoneSeqSeeded(conn);
+                    System.out.println("Ensured 'capstone_project_seq' table exists");
+
                     // Person.mentorEmailVerified is a new field and ddl-auto=none, so an
                     // existing database has no column for it and every person read fails
                     // with "no such column: person.mentor_email_verified". Same shape as the
@@ -444,6 +467,49 @@ public class ModelInit {
                 System.err.println("Error initializing Stats data: " + e.getMessage());
             }
         };
+    }
+
+    private String buildGroupMentorsTableSql(Connection connection) throws SQLException {
+        return "CREATE TABLE IF NOT EXISTS " + quoteIdentifier(connection, "group_mentors") + " ("
+                + quoteIdentifier(connection, "group_id") + " BIGINT NOT NULL,"
+                + quoteIdentifier(connection, "person_id") + " BIGINT NOT NULL"
+                + ");";
+    }
+
+    private String buildCapstoneProjectTableSql(Connection connection) throws SQLException {
+        return "CREATE TABLE IF NOT EXISTS " + quoteIdentifier(connection, "capstone_project") + " ("
+                + quoteIdentifier(connection, "id") + " BIGINT NOT NULL,"
+                + quoteIdentifier(connection, "slug") + " VARCHAR(255) NOT NULL,"
+                + quoteIdentifier(connection, "title") + " VARCHAR(255),"
+                + quoteIdentifier(connection, "description") + " TEXT,"
+                + quoteIdentifier(connection, "url") + " VARCHAR(255),"
+                + "PRIMARY KEY (" + quoteIdentifier(connection, "id") + "),"
+                + "UNIQUE (" + quoteIdentifier(connection, "slug") + "))";
+    }
+
+    private String buildCapstoneMentorsTableSql(Connection connection) throws SQLException {
+        return "CREATE TABLE IF NOT EXISTS " + quoteIdentifier(connection, "capstone_mentors") + " ("
+                + quoteIdentifier(connection, "capstone_id") + " BIGINT NOT NULL,"
+                + quoteIdentifier(connection, "person_id") + " BIGINT NOT NULL)";
+    }
+
+    private String buildCapstoneSeqTableSql(Connection connection) throws SQLException {
+        return "CREATE TABLE IF NOT EXISTS " + quoteIdentifier(connection, "capstone_project_seq") + " ("
+                + quoteIdentifier(connection, "next_val") + " BIGINT)";
+    }
+
+    // Hibernate expects a seeded row to increment; an empty table makes it fall over.
+    private void ensureCapstoneSeqSeeded(Connection connection) throws SQLException {
+        String seq = quoteIdentifier(connection, "capstone_project_seq");
+        String nextVal = quoteIdentifier(connection, "next_val");
+        try (Statement check = connection.createStatement();
+             java.sql.ResultSet rs = check.executeQuery("SELECT COUNT(*) FROM " + seq)) {
+            if (rs.next() && rs.getInt(1) == 0) {
+                try (Statement insert = connection.createStatement()) {
+                    insert.execute("INSERT INTO " + seq + " (" + nextVal + ") VALUES (1)");
+                }
+            }
+        }
     }
 
     private void ensureRoleExists(String roleName) {

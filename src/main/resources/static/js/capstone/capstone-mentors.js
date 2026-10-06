@@ -1,0 +1,219 @@
+// Mentor assignment for the capstone admin table.
+//
+// Same shape as group/group-mentors.js: the cell is filled client-side so a project
+// row still renders if the endpoint is unavailable, rather than taking the page down.
+
+async function fetchMentors(projectId) {
+    const response = await fetch(`/api/capstones/${projectId}/mentors`, { method: "GET", cache: "no-cache" });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`mentors lookup failed: ${response.status}`);
+    return response.json();
+}
+
+async function errorText(response, fallback) {
+    try {
+        const body = await response.text();
+        return body && body.length < 300 ? body : `${fallback} (${response.status})`;
+    } catch (e) {
+        return `${fallback} (${response.status})`;
+    }
+}
+
+async function mutateMentor(projectId, personId, method) {
+    const response = await fetch(`/api/capstones/${projectId}/mentors/${personId}`, { method, cache: "no-cache" });
+    if (!response.ok) throw new Error(await errorText(response, "Could not update mentor"));
+}
+
+let peopleCache = null;
+async function personIdForUid(uid) {
+    if (peopleCache === null) {
+        const response = await fetch("/api/people", { method: "GET", cache: "no-cache" });
+        if (!response.ok) throw new Error("Could not load people");
+        peopleCache = await response.json();
+    }
+    const match = peopleCache.find((person) => person.uid === uid);
+    if (!match) throw new Error(`No account with uid "${uid}"`);
+    return match.id;
+}
+
+function render(cell, projectId, mentors) {
+    cell.textContent = "";
+    const list = document.createElement("ul");
+    list.className = "list-unstyled mb-0";
+
+    if (mentors.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "text-secondary";
+        empty.textContent = "none";
+        list.appendChild(empty);
+    }
+
+    mentors.forEach((mentor) => {
+        const item = document.createElement("li");
+        item.textContent = `${mentor.name} (${mentor.uid}) `;
+        const remove = document.createElement("button");
+        remove.className = "btn btn-outline-danger btn-sm";
+        remove.type = "button";
+        remove.textContent = "x";
+        remove.title = `Remove ${mentor.uid} from this project`;
+        remove.addEventListener("click", async () => {
+            remove.disabled = true;
+            try {
+                await mutateMentor(projectId, mentor.id, "DELETE");
+                await load(cell, projectId);
+            } catch (error) {
+                window.alert(error.message);
+                remove.disabled = false;
+            }
+        });
+        item.appendChild(remove);
+        list.appendChild(item);
+    });
+
+    cell.appendChild(list);
+
+    const add = document.createElement("button");
+    add.className = "btn btn-outline-secondary btn-sm mt-1";
+    add.type = "button";
+    add.textContent = "+ mentor";
+    add.addEventListener("click", async () => {
+        const uid = window.prompt("GitHub ID (uid) of the mentor to attach:");
+        if (!uid) return;
+        add.disabled = true;
+        try {
+            await mutateMentor(projectId, await personIdForUid(uid.trim()), "POST");
+            await load(cell, projectId);
+        } catch (error) {
+            window.alert(error.message);
+        } finally {
+            add.disabled = false;
+        }
+    });
+    cell.appendChild(add);
+}
+
+async function load(cell, projectId) {
+    cell.textContent = "…";
+    try {
+        const mentors = await fetchMentors(projectId);
+        if (mentors === null) {
+            cell.textContent = "unavailable";
+            cell.className = "text-secondary";
+            return;
+        }
+        cell.className = "";
+        render(cell, projectId, mentors);
+    } catch (error) {
+        console.warn("Capstone mentors cell failed", error);
+        cell.textContent = "unavailable";
+        cell.className = "text-secondary";
+    }
+}
+
+// Student group link: approved mentors of a project become mentors of this group,
+// which is what lets them message its students (see CapstoneGroupLinkService).
+let groupsCache = null;
+async function fetchGroups() {
+    if (groupsCache === null) {
+        const response = await fetch("/api/groups", { method: "GET", cache: "no-cache" });
+        if (!response.ok) throw new Error(`groups lookup failed: ${response.status}`);
+        groupsCache = await response.json();
+    }
+    return groupsCache;
+}
+
+async function renderGroupCell(cell) {
+    const projectId = cell.getAttribute("data-capstone-group-cell");
+    const currentId = cell.getAttribute("data-group-id") || "";
+    try {
+        const groups = await fetchGroups();
+        const select = document.createElement("select");
+        select.className = "form-select form-select-sm";
+        select.setAttribute("aria-label", "Student group for this project");
+        select.append(new Option("— none —", ""));
+        groups.forEach((group) => {
+            const label = [group.name, group.course, group.period && `P${group.period}`].filter(Boolean).join(" · ");
+            select.append(new Option(label, String(group.id)));
+        });
+        select.value = currentId;
+        const status = document.createElement("small");
+        status.className = "text-secondary ms-1";
+        select.addEventListener("change", async () => {
+            select.disabled = true;
+            status.textContent = "saving…";
+            try {
+                const groupId = select.value ? Number(select.value) : null;
+                const response = await fetch(`/api/capstones/${projectId}/group`, {
+                    method: "PUT",
+                    cache: "no-cache",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ groupId }),
+                });
+                if (!response.ok) throw new Error(await errorText(response, "Could not link group"));
+                status.textContent = "saved";
+            } catch (error) {
+                window.alert(error.message);
+                select.value = currentId;
+                status.textContent = "";
+            } finally {
+                select.disabled = false;
+            }
+        });
+        cell.textContent = "";
+        cell.append(select, status);
+    } catch (error) {
+        console.warn("Capstone group cell failed", error);
+        cell.textContent = "unavailable";
+        cell.className = "text-secondary";
+    }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    document.querySelectorAll("[data-capstone-mentor-cell]").forEach((cell) => {
+        load(cell, cell.getAttribute("data-capstone-mentor-cell"));
+    });
+    document.querySelectorAll("[data-capstone-group-cell]").forEach(renderGroupCell);
+
+    const syncBtn = document.getElementById("capstone-sync");
+    if (syncBtn) {
+        syncBtn.addEventListener("click", async () => {
+            const status = document.getElementById("capstone-sync-status");
+            syncBtn.disabled = true;
+            status.textContent = "syncing…";
+            try {
+                const response = await fetch("/api/capstones/sync", { method: "POST", cache: "no-cache" });
+                const body = await response.json();
+                if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+                status.textContent = `created ${body.created}, updated ${body.updated}, total ${body.total} — reloading…`;
+                setTimeout(() => window.location.reload(), 900);
+            } catch (error) {
+                status.textContent = `sync failed: ${error.message}`;
+                syncBtn.disabled = false;
+            }
+        });
+    }
+
+    // Project mentor applications (raised from the Mentor Portal's Apply action).
+    // Approve/deny buttons use data attributes + addEventListener, matching the
+    // rest of this file, rather than inline onclick -- this script loads as a
+    // module, so a top-level function wouldn't be reachable from an onclick anyway.
+    document.querySelectorAll(".capstone-application-action").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+            const id = btn.getAttribute("data-id");
+            const action = btn.getAttribute("data-action");
+            const row = btn.closest("tr");
+            row.querySelectorAll("button").forEach((b) => { b.disabled = true; });
+            try {
+                const response = await fetch(`/api/capstones/applications/${id}/${action}`, { method: "POST", cache: "no-cache" });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                row.remove();
+                if (action === "approve") {
+                    window.location.reload();
+                }
+            } catch (error) {
+                window.alert(`Could not ${action} this application: ${error.message}`);
+                row.querySelectorAll("button").forEach((b) => { b.disabled = false; });
+            }
+        });
+    });
+});
