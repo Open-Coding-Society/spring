@@ -46,6 +46,12 @@ public class DirectMessage {
 
     private Instant sentAt;
 
+    /** Soft-delete: the row (and sentAt) are kept so history still shows a tombstone in order. */
+    private boolean deleted;
+
+    /** Set once on the first edit; stays true even if edited again. */
+    private boolean edited;
+
     public DirectMessage(DirectMessageConversation conversation, Person sender, String body) {
         this.conversation = conversation;
         this.sender = sender;
