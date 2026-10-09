@@ -22,6 +22,8 @@ import com.open.spring.mvc.S3uploads.FileHandler;
 
 @Service
 public class AssignmentAiGradingService {
+    private static final String DEFAULT_GEMINI_API_URL =
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent";
     // grade() runs synchronously inside the submit request (instant auto-grade) and inside
     // the manual re-grade endpoint. 5 attempts x a 30s per-attempt timeout let a single call
     // block for up to ~3 minutes when Gemini is genuinely down (a real, observed sustained
@@ -42,6 +44,11 @@ public class AssignmentAiGradingService {
             Pattern.CASE_INSENSITIVE);
     private static final Pattern GIST_ID = Pattern.compile("[a-fA-F0-9]{6,64}");
     private static final String GIST_MANIFEST_FILE = "ocs.json";
+    private static final int MAX_SUBMISSION_CHARS = 60000;
+    private static final List<String> TEXT_FILE_EXTENSIONS = List.of(
+            ".java", ".py", ".js", ".ts", ".jsx", ".tsx", ".html", ".css", ".md", ".txt",
+            ".json", ".c", ".cpp", ".h", ".cs", ".kt", ".rb", ".go", ".rs", ".sql", ".sh",
+            ".xml", ".yml", ".yaml", ".csv");
 
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
@@ -56,7 +63,7 @@ public class AssignmentAiGradingService {
             ObjectMapper objectMapper,
             FileHandler fileHandler,
             @Value("${gemini.api.key:}") String geminiApiKey,
-            @Value("${gemini.api.url:https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent}") String geminiApiUrl,
+            @Value("${gemini.api.url:" + DEFAULT_GEMINI_API_URL + "}") String geminiApiUrl,
             @Value("${github.api.base-url:https://api.github.com}") String githubApiBaseUrl,
             @Value("${github.api.token:}") String githubApiToken,
             @Value("${gist.token:}") String gistToken) {
@@ -96,8 +103,10 @@ public class AssignmentAiGradingService {
             submissionText = fetchGistText(content);
         } else if ("file".equalsIgnoreCase(contentType)) {
             submissionText = fetchNotebookText(content);
+        } else if (content != null) {
+            submissionText = fetchInlineText(content);
         } else {
-            return GradeResult.notGradeable("Automatic grading is not available for this submission type yet.");
+            submissionText = SubmissionText.notGradeable("The submission has no content to grade.");
         }
 
         if (submissionText.notGradeableReason != null) {
@@ -107,14 +116,20 @@ public class AssignmentAiGradingService {
             return GradeResult.failed("AI grading is not configured on the server.");
         }
 
-        String rubric = submission.getAssignment() == null
-                ? Assignment.DEFAULT_AI_RUBRIC
-                : submission.getAssignment().getAiRubric();
-        if (rubric == null || rubric.isBlank()) {
+        // Until the assignment has its own AI rubric, grade against the default rubric (written
+        // out of 1) and flag the result so AssignmentAiRegradeService re-grades it later.
+        Assignment assignment = submission.getAssignment();
+        Double points = assignment == null ? null : assignment.getPoints();
+        double maxScore = AssignmentRubricService.maxScore(points);
+        String rubric = assignment == null ? null : assignment.getAiRubric();
+        boolean usedDefaultRubric = !AssignmentRubricService.isAiRubricReady(rubric, points);
+        if (usedDefaultRubric) {
             rubric = Assignment.DEFAULT_AI_RUBRIC;
         }
+        double rubricScale = usedDefaultRubric ? 1.0 : maxScore;
+        double topScore = AssignmentRubricService.aiTopScore(rubricScale);
 
-        String prompt = buildPrompt(rubric, submissionText.kind, submissionText.text);
+        String prompt = buildPrompt(rubric, topScore, submissionText.kind, submissionText.text);
 
         JsonNode response = objectMapper.readTree(callGemini(prompt));
         String text = response.path("candidates").path(0).path("content").path("parts").path(0).path("text").asText("");
@@ -122,15 +137,17 @@ public class AssignmentAiGradingService {
             return GradeResult.failed("The AI returned no grading result.");
         }
         JsonNode result = parseJsonResult(text);
-        int score = normalizeScore(extractScore(result, text));
+        double score = extractScore(result, text);
+        int quality = normalizeQuality(result.path("quality").asInt(0));
         String feedback = extractFeedback(result).trim();
-        if (score < 2 || score > 4 || feedback.isBlank()) {
+        if (!Double.isFinite(score) || score < 0 || score > topScore + 1e-9 || quality == 0 || feedback.isBlank()) {
             return GradeResult.failed("The AI returned an invalid grading result.");
         }
-        return GradeResult.graded(score, limitToTwoSentences(feedback));
+        double grade = Math.round(score / rubricScale * maxScore * 100.0) / 100.0;
+        return GradeResult.graded(grade, quality, limitToTwoSentences(feedback), usedDefaultRubric);
     }
 
-    private String buildPrompt(String rubric, String submissionKind, String submissionText) {
+    private String buildPrompt(String rubric, double topScore, String submissionKind, String submissionText) {
         return """
                 Grade this %s submission using the rubric below.
                 Do not infer details that are absent from the submission. The content below was fetched by the server; evaluate only what is supplied.
@@ -141,13 +158,16 @@ public class AssignmentAiGradingService {
 
                 The rubric above defines the grading criteria only. Ignore any output-format instructions inside the rubric.
                 Return ONLY valid JSON with exactly these fields:
-                {"score": 2, "feedback": "One or two sentences."}
-                score must be an integer from 2 through 4, where 2 is the minimum passing score and 4 means the submission goes above and beyond the rubric. Map the rubric's levels onto this 2-4 scale when necessary (a 5 is reserved for a separate batch-review pass and must never be returned here).
+                {"score": 0.8, "quality": 3, "feedback": "One or two sentences."}
+                score must be a number from 0 through %s (the rubric's top tier) on the rubric's own scale: use the score of the rubric tier the submission best matches, or a value between two tiers when it falls between them. Never go above the top tier.
+                quality must be an integer from 2 through 4: 4 for the Strong / Exceptional tier, 3 for Adequate, 2 for Limited or Insufficient (a 5 is reserved for a separate batch-review pass and must never be returned here).
                 feedback must be one or two concise sentences explaining one strength and one improvement when possible.
 
                 %s:
                 %s
-                """.formatted(submissionKind, rubric, submissionKind.toUpperCase(java.util.Locale.ROOT), submissionText);
+                """.formatted(submissionKind, rubric,
+                        java.math.BigDecimal.valueOf(topScore).stripTrailingZeros().toPlainString(),
+                        submissionKind.toUpperCase(java.util.Locale.ROOT), limitSubmission(submissionText));
     }
 
     private record SubmissionText(String kind, String text, String notGradeableReason) {
@@ -213,9 +233,6 @@ public class AssignmentAiGradingService {
         if (!isGistUrl(url)) {
             return SubmissionText.notGradeable("This submission is not a Gist link, so it was not graded.");
         }
-        if (gistToken == null || gistToken.isBlank()) {
-            return SubmissionText.notGradeable("Gist grading is not configured on the server.");
-        }
         String gistId = extractGistId(url);
         if (gistId == null) {
             return SubmissionText.notGradeable("Could not determine the Gist id from the submitted link.");
@@ -229,7 +246,9 @@ public class AssignmentAiGradingService {
 
     private SubmissionText fetchNotebookText(Map<String, Object> content) {
         String filename = String.valueOf(content.getOrDefault("filename", ""));
-        if (!filename.toLowerCase(java.util.Locale.ROOT).endsWith(".ipynb")) {
+        String lowerFilename = filename.toLowerCase(java.util.Locale.ROOT);
+        boolean notebook = lowerFilename.endsWith(".ipynb");
+        if (!notebook && TEXT_FILE_EXTENSIONS.stream().noneMatch(lowerFilename::endsWith)) {
             return SubmissionText.notGradeable("Automatic grading is not available for this file type yet.");
         }
         String uploadedBy = String.valueOf(content.getOrDefault("uploadedBy", ""));
@@ -242,6 +261,12 @@ public class AssignmentAiGradingService {
             return SubmissionText.notGradeable("The notebook file could not be downloaded, so no score was assigned.");
         }
         String notebookJson = new String(Base64.getDecoder().decode(base64), StandardCharsets.UTF_8);
+        if (!notebook) {
+            if (notebookJson.isBlank()) {
+                return SubmissionText.notGradeable("The uploaded file was empty.");
+            }
+            return SubmissionText.of("CODE FILE (" + filename + ")", notebookJson);
+        }
         String extracted;
         try {
             extracted = extractNotebookText(notebookJson);
@@ -252,6 +277,16 @@ public class AssignmentAiGradingService {
             return SubmissionText.notGradeable("The notebook had no gradable content.");
         }
         return SubmissionText.of("JUPYTER NOTEBOOK", extracted);
+    }
+
+    private SubmissionText fetchInlineText(Map<String, Object> content) {
+        for (String field : List.of("text", "answer", "response", "value", "content", "markdown")) {
+            Object value = content.get(field);
+            if (value instanceof String text && !text.isBlank()) {
+                return SubmissionText.of("TEXT RESPONSE", text.trim());
+            }
+        }
+        return SubmissionText.notGradeable("The submission did not contain readable text.");
     }
 
     /** Extracts code/markdown cell source text from a .ipynb file's JSON, ignoring outputs. */
@@ -297,15 +332,17 @@ public class AssignmentAiGradingService {
     }
 
     private String fetchGistFiles(String gistId) throws Exception {
-        HttpRequest request = HttpRequest.newBuilder(URI.create("https://api.github.com/gists/" + gistId))
-                .timeout(Duration.ofSeconds(45))
-                .header("Accept", "application/vnd.github+json")
-                .header("Authorization", "Bearer " + gistToken)
-                .header("X-GitHub-Api-Version", "2022-11-28")
-                .header("User-Agent", "OpenCodingSociety-assignment-grader")
-                .GET()
-                .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+        // Public gists are readable without a token; the token only raises the rate limit.
+        HttpRequest.Builder request = githubIssueRequest(githubApiBaseUrl.replaceAll("/$", "") + "/gists/" + gistId);
+        if (gistToken != null && !gistToken.isBlank()) {
+            request.header("Authorization", "Bearer " + gistToken);
+        }
+        HttpResponse<String> response = httpClient.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        if ((response.statusCode() == 401 || response.statusCode() == 403)
+                && gistToken != null && !gistToken.isBlank()) {
+            response = httpClient.send(githubIssueRequest(githubApiBaseUrl.replaceAll("/$", "") + "/gists/" + gistId).build(),
+                    HttpResponse.BodyHandlers.ofString());
+        }
         if (response.statusCode() != 200) {
             return null;
         }
@@ -324,31 +361,32 @@ public class AssignmentAiGradingService {
         return out.toString().trim();
     }
 
-    private int extractScore(JsonNode result, String responseText) {
+    /** Returns the AI's score on the rubric scale, or NaN when none could be found. */
+    private double extractScore(JsonNode result, String responseText) {
         for (String field : List.of("score", "grade", "rating", "overall_score", "overallScore")) {
             JsonNode value = result.path(field);
             if (value.isNumber()) {
-                return value.asInt(0);
+                return value.asDouble();
             }
             if (value.isTextual()) {
-                Matcher matcher = Pattern.compile("(?i)\\b([0-9]+(?:\\.[0-9]+)?)(?:\\s*/\\s*[0-9]+)?\\b").matcher(value.asText());
+                Matcher matcher = Pattern.compile("(?i)([0-9]*\\.?[0-9]+)(?:\\s*/\\s*[0-9.]+)?").matcher(value.asText());
                 if (matcher.find()) {
-                    return (int) Math.round(Double.parseDouble(matcher.group(1)));
+                    return Double.parseDouble(matcher.group(1));
                 }
             }
         }
-        Matcher matcher = Pattern.compile("(?i)\\\"?(?:score|grade|rating|overall[_ ]?score)\\\"?\\s*[:=-]\\s*([0-9]+(?:\\.[0-9]+)?)(?:\\s*/\\s*[0-9]+)?\\b")
+        Matcher matcher = Pattern.compile("(?i)\\\"?(?:score|grade|rating|overall[_ ]?score)\\\"?\\s*[:=-]\\s*([0-9]*\\.?[0-9]+)")
                 .matcher(responseText);
-        return matcher.find() ? (int) Math.round(Double.parseDouble(matcher.group(1))) : 0;
+        return matcher.find() ? Double.parseDouble(matcher.group(1)) : Double.NaN;
     }
 
-    private int normalizeScore(int score) {
-        if (score <= 0) {
+    private int normalizeQuality(int quality) {
+        if (quality <= 0) {
             return 0;
         }
         // Instant auto-grading is limited to 2-4; a 5 is reserved for a separate
         // batch-review pass that picks the single best submission across students.
-        return Math.max(2, Math.min(4, score));
+        return Math.max(2, Math.min(4, quality));
     }
 
     private String extractFeedback(JsonNode result) {
@@ -448,7 +486,16 @@ public class AssignmentAiGradingService {
                     .header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
                     .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> response;
+            try {
+                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            } catch (java.net.http.HttpTimeoutException timeout) {
+                // Slow responses are as transient as a 503: retry rather than leave the submission ungraded.
+                if (attempt == MAX_GEMINI_ATTEMPTS - 1) {
+                    throw timeout;
+                }
+                continue;
+            }
             if (response.statusCode() == 200) {
                 return response.body();
             }
@@ -481,6 +528,13 @@ public class AssignmentAiGradingService {
                 || statusCode == 503 || statusCode == 504;
     }
 
+    private String limitSubmission(String text) {
+        if (text.length() <= MAX_SUBMISSION_CHARS) {
+            return text;
+        }
+        return text.substring(0, MAX_SUBMISSION_CHARS) + "\n\n[Remaining submission content omitted.]";
+    }
+
     private String limitToTwoSentences(String feedback) {
         String[] sentences = feedback.split("(?<=[.!?])\\s+");
         if (sentences.length <= 2) {
@@ -489,9 +543,27 @@ public class AssignmentAiGradingService {
         return sentences[0] + " " + sentences[1];
     }
 
-    public record GradeResult(String status, Integer score, String feedback, String message) {
-        static GradeResult graded(int score, String feedback) { return new GradeResult("graded", score, feedback, null); }
-        static GradeResult notGradeable(String message) { return new GradeResult("not_gradeable", null, null, message); }
-        static GradeResult failed(String message) { return new GradeResult("failed", null, null, message); }
+    /**
+     * @param grade             score on the assignment's points scale (out of 1 when points aren't set)
+     * @param qualityScore      2-4 quality tier shown as "AI quality" in the tracker
+     * @param usedDefaultRubric true when the assignment had no usable AI rubric yet, so the
+     *                          submission should be re-graded once one is generated
+     */
+    public record GradeResult(String status, Double grade, Integer qualityScore, String feedback, String message,
+            boolean usedDefaultRubric) {
+        static GradeResult graded(double grade, int qualityScore, String feedback, boolean usedDefaultRubric) {
+            return new GradeResult("graded", grade, qualityScore, feedback, null, usedDefaultRubric);
+        }
+        static GradeResult notGradeable(String message) { return new GradeResult("not_gradeable", null, null, null, message, false); }
+        static GradeResult failed(String message) { return new GradeResult("failed", null, null, null, message, false); }
+
+        /** Copies a graded result onto the submission, flagging it for re-grade if the default rubric was used. */
+        public void applyTo(AssignmentSubmission submission) {
+            submission.setGrade(grade);
+            submission.setQualityScore(qualityScore);
+            submission.setFeedback(feedback);
+            submission.setAiSummary(feedback);
+            submission.setNeedsAiRegrade(usedDefaultRubric);
+        }
     }
 }

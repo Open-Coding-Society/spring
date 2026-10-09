@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
@@ -32,6 +33,12 @@ import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import java.util.HashMap;
+import java.util.Optional;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 
 /**
  * Covers the ownership half of POST /api/assignments/auto-create and GET /api/assignments/managed.
@@ -60,6 +67,9 @@ class AssignmentsApiControllerCreatorTest {
     @Mock
     private GroupsJpaRepository groupsRepository;
 
+    @Mock
+    private AssignmentAiRegradeService aiRegradeService;
+
     private AssignmentsApiController controller;
     private AssignmentCreatorSyncService creatorSyncService;
     private AssignmentCourseSyncService courseSyncService;
@@ -85,6 +95,7 @@ class AssignmentsApiControllerCreatorTest {
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
         ReflectionTestUtils.setField(controller, "assignmentCreatorSyncService", creatorSyncService);
         ReflectionTestUtils.setField(controller, "assignmentCourseSyncService", courseSyncService);
+        ReflectionTestUtils.setField(controller, "aiRegradeService", aiRegradeService);
 
         bot = syncBot(100L, "pages-bot");
         firstCreator = student(1L, "AdityaS-2010");
@@ -368,6 +379,177 @@ class AssignmentsApiControllerCreatorTest {
     void managedAssignmentsRequiresAuthentication() {
         ResponseEntity<?> response = controller.getManagedAssignments(null);
         assertEquals(401, response.getStatusCode().value());
+    }
+
+    @Test
+    void bulkCreateBodyDeserializes() throws Exception {
+        AssignmentDto[] dtos = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
+            "[{\"name\":\"a\",\"type\":\"homework\",\"points\":1,\"dueDate\":\"2026-12-31\",\"assignmentType\":\"link\"}]",
+            AssignmentDto[].class);
+        assertEquals("link", dtos[0].assignmentType);
+    }
+
+    @Test
+    void extractUnknownAssignmentReturns404() {
+        when(assignmentRepo.findById(99L)).thenReturn(java.util.Optional.empty());
+        assertEquals(404, controller.extractAssignment(99L).getStatusCode().value());
+    }
+
+    /** Rubric readiness (AssignmentRubricService) and the AI re-grade job built on it. */
+    @Nested
+    class RegradeService {
+        private static final String READY_RUBRIC = """
+                Score 0.9 — Strong / Exceptional
+                Great.
+
+                **Score 0.75 — Adequate**
+                Fine.
+
+                Score 0.5 — Limited
+                Thin.
+                """;
+
+        @BeforeEach
+        void openRegradeMocks() {
+            MockitoAnnotations.openMocks(this);
+        }
+
+        @Mock AssignmentSubmissionJPA submissionRepo;
+        @Mock AssignmentJpaRepository assignmentRepo;
+        @Mock AssignmentAiGradingService aiGradingService;
+        @Mock AssignmentRubricService rubricService;
+        @Mock JdbcTemplate jdbcTemplate;
+
+        // ---- rubric readiness ----
+
+        @Test
+        void defaultOrBlankRubricIsNeverReady() {
+            assertFalse(AssignmentRubricService.isAiRubricReady(Assignment.DEFAULT_AI_RUBRIC, 1.0));
+            assertFalse(AssignmentRubricService.isAiRubricReady("  \n" + Assignment.DEFAULT_AI_RUBRIC + "\n", 1.0));
+            assertFalse(AssignmentRubricService.isAiRubricReady(null, 1.0));
+            assertFalse(AssignmentRubricService.isAiRubricReady("Be thorough and explain your reasoning.", 1.0));
+        }
+
+        @Test
+        void acceptsTiersUpToNinetyPercentIncludingMarkdownHeadings() {
+            assertTrue(AssignmentRubricService.isAiRubricReady(READY_RUBRIC, 1.0));
+            assertTrue(AssignmentRubricService.isAiRubricReady(READY_RUBRIC, null));
+        }
+
+        @Test
+        void rejectsTiersAboveNinetyPercentOfPoints() {
+            assertFalse(AssignmentRubricService.isAiRubricReady("Score 1.0 — Strong\nx\nScore 0.8 — Adequate\n", 1.0));
+            String fourPoint = "Score 4 — Strong\nx\nScore 3 — Adequate\nx\nScore 2 — Limited\n";
+            assertFalse(AssignmentRubricService.isAiRubricReady(fourPoint, 1.0));
+            // An old 1-4 rubric is only trusted when its top tier matches 90% of the points.
+            assertFalse(AssignmentRubricService.isAiRubricReady(fourPoint, 5.0));
+            assertFalse(AssignmentRubricService.isAiRubricReady(fourPoint, 100.0));
+            assertTrue(AssignmentRubricService.isAiRubricReady("Score 4.5 — Strong\nx\nScore 3 — Adequate\n", 5.0));
+            assertEquals(0.9, AssignmentRubricService.aiTopScore(AssignmentRubricService.maxScore(null)));
+        }
+
+        // ---- re-grade job ----
+
+        @Test
+        void generatesMissingRubricThenRegradesAndClearsFlag() throws Exception {
+            Assignment assignment = assignment(Assignment.DEFAULT_AI_RUBRIC);
+            flagged(10L);
+            when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment));
+            when(rubricService.generateRubric(eq("Inheritance"), anyString(), isNull(), eq(1.0))).thenReturn(READY_RUBRIC);
+            when(submissionRepo.findById(10L)).thenReturn(Optional.of(submission(10L, true)), Optional.of(submission(10L, true)));
+            when(aiGradingService.grade(any()))
+                    .thenReturn(AssignmentAiGradingService.GradeResult.graded(0.85, 3, "Good.", false));
+
+            service().runOnce();
+
+            verify(jdbcTemplate).update("UPDATE assignment SET ai_rubric = ? WHERE id = ?", READY_RUBRIC, 1L);
+            ArgumentCaptor<AssignmentSubmission> saved = ArgumentCaptor.forClass(AssignmentSubmission.class);
+            verify(submissionRepo).save(saved.capture());
+            assertEquals(0.85, saved.getValue().getGrade());
+            assertFalse(saved.getValue().getNeedsAiRegrade());
+        }
+
+        @Test
+        void leavesSubmissionsFlaggedWhenRubricStillUnavailable() throws Exception {
+            flagged(10L);
+            when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment(Assignment.DEFAULT_AI_RUBRIC)));
+            when(rubricService.generateRubric(any(), any(), any(), any())).thenReturn(null);
+
+            service().runOnce();
+
+            verify(aiGradingService, never()).grade(any());
+            verify(submissionRepo, never()).save(any());
+        }
+
+        @Test
+        void doesNotOverwriteATeacherGradeMadeDuringRegrade() throws Exception {
+            flagged(10L);
+            when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment(READY_RUBRIC)));
+            when(submissionRepo.findById(10L)).thenReturn(Optional.of(submission(10L, true)), Optional.of(submission(10L, false)));
+            when(aiGradingService.grade(any()))
+                    .thenReturn(AssignmentAiGradingService.GradeResult.graded(0.85, 3, "Good.", false));
+
+            service().runOnce();
+
+            verify(submissionRepo, never()).save(any());
+        }
+
+        // ---- fix out-of-range grades ----
+
+        @Test
+        void fixOutOfRangeGradesAttemptsEachSubmissionOnceAndNeverFlagsFailures() throws Exception {
+            when(jdbcTemplate.queryForList(anyString())).thenReturn(List.of(
+                    Map.of("id", 10L, "assignment_id", 1L), Map.of("id", 11L, "assignment_id", 1L)));
+            when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment(READY_RUBRIC)));
+            AssignmentSubmission good = submission(10L, false);
+            good.setGrade(4.0);
+            AssignmentSubmission bad = submission(11L, false);
+            bad.setGrade(2.0);
+            when(submissionRepo.findById(10L)).thenReturn(Optional.of(good));
+            when(submissionRepo.findById(11L)).thenReturn(Optional.of(bad));
+            when(aiGradingService.grade(any())).thenAnswer(call -> ((AssignmentSubmission) call.getArgument(0)).getId() == 10L
+                    ? AssignmentAiGradingService.GradeResult.graded(0.8, 3, "Good.", false)
+                    : AssignmentAiGradingService.GradeResult.failed("Gemini returned HTTP 503"));
+
+            AssignmentAiRegradeService service = service();
+            assertEquals(2, service.startFixOutOfRangeGrades().total());
+            long deadline = System.currentTimeMillis() + 5000;
+            while (service.getFixStatus().running() && System.currentTimeMillis() < deadline) {
+                Thread.sleep(20);
+            }
+
+            assertEquals(new AssignmentAiRegradeService.FixGradesStatus(false, 2, 2, 1, 1), service.getFixStatus());
+            verify(aiGradingService, org.mockito.Mockito.times(2)).grade(any());
+            ArgumentCaptor<AssignmentSubmission> saved = ArgumentCaptor.forClass(AssignmentSubmission.class);
+            verify(submissionRepo).save(saved.capture());
+            assertEquals(10L, saved.getValue().getId());
+            assertEquals(0.8, saved.getValue().getGrade());
+            assertFalse(Boolean.TRUE.equals(bad.getNeedsAiRegrade()));
+        }
+
+        private void flagged(Long submissionId) {
+            when(jdbcTemplate.queryForList(anyString()))
+                    .thenReturn(List.of(Map.of("id", submissionId, "assignment_id", 1L)));
+        }
+
+        private AssignmentAiRegradeService service() {
+            return new AssignmentAiRegradeService(submissionRepo, assignmentRepo, aiGradingService, rubricService, jdbcTemplate);
+        }
+
+        private static Assignment assignment(String rubric) {
+            Assignment assignment = new Assignment("Inheritance", "homework", "Explain inheritance", 1.0, "2026-12-31", "text");
+            assignment.setId(1L);
+            assignment.setAiRubric(rubric);
+            return assignment;
+        }
+
+        private static AssignmentSubmission submission(Long id, boolean needsRegrade) {
+            AssignmentSubmission submission = new AssignmentSubmission();
+            submission.setId(id);
+            submission.setContent(new HashMap<>(Map.of("type", "text", "text", "answer")));
+            submission.setNeedsAiRegrade(needsRegrade);
+            return submission;
+        }
     }
 
     @SuppressWarnings("unchecked")

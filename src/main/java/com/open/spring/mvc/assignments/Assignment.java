@@ -40,7 +40,7 @@ import lombok.Setter;
 @NoArgsConstructor
 public class Assignment {
     public static final String DEFAULT_AI_RUBRIC = """
- Score 4 — Strong / Exceptional
+Score 0.9 — Strong / Exceptional
 The submission is clear, well-organized, and substantively complete. It directly addresses the core requirement and goes further by including specific, relevant details (examples, data, edge cases, or context) that demonstrate genuine understanding. Reasoning is explicit and logically connects the details to the conclusion — a reader does not need to infer missing steps. Minor imperfections are acceptable, but nothing essential is missing.
 
 Indicators:
@@ -49,8 +49,8 @@ Indicators:
  Reasoning is explained, not just asserted
  Well-structured and easy to follow
 
-Score 3 — Adequate
-The submission addresses the main requirement and is generally correct, but is noticeably thinner than a 4. It may rely on general statements rather than specific details, skip minor aspects of the prompt, or leave some reasoning implicit. A reader can follow it without major confusion, but it lacks the depth, precision, or supporting evidence of a top submission.
+Score 0.8 — Adequate
+The submission addresses the main requirement and is generally correct, but is noticeably thinner than a 0.9. It may rely on general statements rather than specific details, skip minor aspects of the prompt, or leave some reasoning implicit. A reader can follow it without major confusion, but it lacks the depth, precision, or supporting evidence of a top submission.
 
 Indicators:
  Core requirement is met; response is accurate
@@ -58,7 +58,7 @@ Indicators:
  Reasoning is present but may be brief or partially assumed
  Minor gaps that don't undermine the overall response
 
- Score 2 — Limited
+Score 0.7 — Limited
 The submission is partial or shallow. It may address only part of the requirement, provide information without explaining its relevance, or offer a conclusion with little to no supporting reasoning. Important details are missing or vague, and the response reads as incomplete or underdeveloped rather than simply concise.
 
 Indicators:
@@ -67,7 +67,7 @@ Indicators:
  Lacks specific supporting detail or context
  Reader is left with unanswered questions about how the conclusion was reached
 
- Score 1 — Insufficient
+Score 0.55 — Insufficient
 The submission fails to meaningfully address the requirement. It may be off-topic, factually incorrect, too vague to evaluate, or missing entirely. There is little to no relevant reasoning or detail present.
 
 Indicators:
