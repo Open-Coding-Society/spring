@@ -5,6 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -105,7 +106,8 @@ public class DirectMessageService {
                 .type("message")
                 .senderUid(sender.getUid())
                 .senderName(sender.getName())
-                .body(message.getBody())
+                .senderPfp(sender.getPfp())
+                .body(body)
                 .sentAt(message.getSentAt().toString())
                 .build();
 
@@ -116,38 +118,78 @@ public class DirectMessageService {
         return event;
     }
 
-    /** Only the original sender may edit their message. Compared by id, like isParticipant. */
-    public boolean isSender(DirectMessage message, Person person) {
-        return message.getSender().getId().equals(person.getId());
+    /**
+     * Only the original sender may edit, and only while the message hasn't been deleted.
+     * Throws {@link NoSuchElementException} if {@code messageId} isn't in this conversation,
+     * {@link SecurityException} if {@code requester} didn't send it.
+     *
+     * {@code noRollbackFor}: these are expected, caller-handled outcomes (404/403/409), not
+     * failures -- without it, the exception crossing this method's transactional boundary
+     * marks the (shared, REQUIRED-propagation) transaction rollback-only, and the controller's
+     * own @Transactional then fails to commit with UnexpectedRollbackException even though it
+     * catches the exception and returns a normal response.
+     */
+    @Transactional(noRollbackFor = {NoSuchElementException.class, SecurityException.class, IllegalStateException.class})
+    public DirectMessage editMessage(
+            DirectMessageConversation conversation, Person requester, Long messageId, String newBody) {
+        DirectMessage message = messageRepository.findByIdAndConversation(messageId, conversation)
+                .orElseThrow(() -> new NoSuchElementException("Message not found"));
+        if (!message.getSender().getId().equals(requester.getId())) {
+            throw new SecurityException("Not the message sender");
+        }
+        if (message.isDeleted()) {
+            throw new IllegalStateException("Message was deleted");
+        }
+
+        message.setBody(newBody);
+        message.setEdited(true);
+        messageRepository.save(message);
+
+        DirectMessageEvent event = DirectMessageEvent.builder()
+                .id(message.getId())
+                .conversationId(conversation.getId())
+                .senderUid(requester.getUid())
+                .senderName(requester.getName())
+                .body(newBody)
+                .sentAt(message.getSentAt().toString())
+                .type("edited")
+                .edited(true)
+                .build();
+        messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + conversation.getId(), event);
+        return message;
     }
 
     /**
-     * Replaces the body of an existing message and broadcasts an "edited" event on the
-     * conversation topic so other participants' open chats update in place. The message
-     * id and sentAt don't change, so read markers and unread counts are unaffected.
+     * Soft-delete: the row stays (so the conversation's order and read-state markers aren't
+     * disturbed) but its body is cleared and {@code deleted} is set, so history shows a
+     * tombstone instead of just dropping the message. Same ownership rule as {@link #editMessage},
+     * and the same {@code noRollbackFor} reasoning -- see the comment there.
      */
-    @Transactional
-    public DirectMessageEvent editMessage(DirectMessage message, String newBody) {
-        if (message == null) {
-            throw new IllegalArgumentException("message is required");
+    @Transactional(noRollbackFor = {NoSuchElementException.class, SecurityException.class})
+    public void deleteMessage(DirectMessageConversation conversation, Person requester, Long messageId) {
+        DirectMessage message = messageRepository.findByIdAndConversation(messageId, conversation)
+                .orElseThrow(() -> new NoSuchElementException("Message not found"));
+        if (!message.getSender().getId().equals(requester.getId())) {
+            throw new SecurityException("Not the message sender");
         }
-        validateMessageBody(newBody);
-        message.edit(newBody.trim());
-        DirectMessage saved = messageRepository.save(message);
+        if (message.isDeleted()) {
+            return;
+        }
+
+        message.setDeleted(true);
+        message.setBody("");
+        messageRepository.save(message);
 
         DirectMessageEvent event = DirectMessageEvent.builder()
-                .id(saved.getId())
-                .conversationId(saved.getConversation().getId())
-                .type("edited")
-                .senderUid(saved.getSender().getUid())
-                .senderName(saved.getSender().getName())
-                .body(saved.getBody())
-                .sentAt(saved.getSentAt().toString())
-                .editedAt(saved.getEditedAt().toString())
+                .id(message.getId())
+                .conversationId(conversation.getId())
+                .senderUid(requester.getUid())
+                .senderName(requester.getName())
+                .sentAt(message.getSentAt().toString())
+                .type("deleted")
+                .deleted(true)
                 .build();
-
-        messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + saved.getConversation().getId(), event);
-        return event;
+        messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + conversation.getId(), event);
     }
 
     @Transactional(readOnly = true)

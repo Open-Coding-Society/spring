@@ -104,11 +104,58 @@ public class GroupChatService {
         return messages;
     }
 
-    public void deleteMessage(String groupName, String messageId) {
+    /**
+     * Returns whether a message with that id was found (and updated) in this group.
+     * Throws {@link SecurityException} if the message exists but {@code requesterDisplayName}
+     * didn't send it. Compared by display name, not uid -- a {@link GroupChatMessage} only
+     * ever stores the sender's display name (there's no Person link, unlike direct messages),
+     * since group chat predates/doesn't use Person-backed identity for its S3-stored history.
+     */
+    public boolean editMessage(String groupName, String messageId, String newMessage, String requesterDisplayName) {
+        if (messageId == null) return false;
+        List<GroupChatMessage> messages = getMessages(groupName);
+        boolean found = false;
+        for (GroupChatMessage m : messages) {
+            if (messageId.equals(m.getId())) {
+                if (requesterDisplayName == null || !requesterDisplayName.equals(m.getName())) {
+                    throw new SecurityException("Not the message sender");
+                }
+                m.setMessage(newMessage);
+                m.setEdited(true);
+                found = true;
+                break;
+            }
+        }
+
+        if (found) {
+            String jsonl = messages.stream()
+                    .map(this::toJson)
+                    .collect(Collectors.joining("\n"));
+
+            String base64Data = Base64.getEncoder()
+                    .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
+
+            s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+        }
+        return found;
+    }
+
+    /** Same ownership rule as {@link #editMessage}; throws {@link SecurityException} on mismatch. */
+    public void deleteMessage(String groupName, String messageId, String requesterDisplayName) {
         if (messageId == null) return;
         List<GroupChatMessage> messages = getMessages(groupName);
-        boolean removed = messages.removeIf(m -> messageId.equals(m.getId()));
-        
+
+        GroupChatMessage target = messages.stream()
+                .filter(m -> messageId.equals(m.getId()))
+                .findFirst()
+                .orElse(null);
+        if (target == null) return;
+        if (requesterDisplayName == null || !requesterDisplayName.equals(target.getName())) {
+            throw new SecurityException("Not the message sender");
+        }
+
+        boolean removed = messages.remove(target);
+
         if (removed) {
             String jsonl = messages.stream()
                     .map(this::toJson)

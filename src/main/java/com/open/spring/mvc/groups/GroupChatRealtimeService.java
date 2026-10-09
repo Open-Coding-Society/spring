@@ -43,9 +43,35 @@ public class GroupChatRealtimeService {
         return event;
     }
 
-    public void deleteMessage(Long groupId, String messageId) {
+    /**
+     * Returns whether the message existed (and was broadcast as edited). Throws
+     * {@link SecurityException} if {@code requesterDisplayName} didn't send it --
+     * see {@link GroupChatService#editMessage} for why a display name, not a uid.
+     */
+    public boolean editMessage(Long groupId, String messageId, String newMessage, String requesterDisplayName) {
         Groups group = getGroupOrThrow(groupId);
-        groupChatService.deleteMessage(group.getName(), messageId);
+        boolean updated = groupChatService.editMessage(group.getName(), messageId, newMessage, requesterDisplayName);
+        if (!updated) {
+            return false;
+        }
+
+        GroupChatEvent event = GroupChatEvent.builder()
+                .context("editMessageServer")
+                .groupId(groupId)
+                .messageId(messageId)
+                .message(newMessage)
+                .edited(true)
+                .date(Instant.now().toString())
+                .build();
+
+        broadcastToGroup(groupId, event);
+        return true;
+    }
+
+    /** Throws {@link SecurityException} if {@code requesterDisplayName} didn't send it. */
+    public void deleteMessage(Long groupId, String messageId, String requesterDisplayName) {
+        Groups group = getGroupOrThrow(groupId);
+        groupChatService.deleteMessage(group.getName(), messageId, requesterDisplayName);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("deleteMessageServer")

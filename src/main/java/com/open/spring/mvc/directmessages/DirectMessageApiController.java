@@ -1,9 +1,9 @@
 package com.open.spring.mvc.directmessages;
 
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -211,27 +212,52 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         }
 
-        // The message must exist AND belong to this conversation (blocks editing via a mismatched URL).
-        Optional<DirectMessage> messageOpt = messageRepository.findById(messageId)
-                .filter(m -> m.getConversation().getId().equals(conversation.getId()));
-        if (messageOpt.isEmpty()) {
-            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
-        }
-
-        DirectMessage message = messageOpt.get();
-        if (!directMessageService.isSender(message, person)) {
-            return new ResponseEntity<>(Map.of("error", "You can only edit your own messages"), HttpStatus.FORBIDDEN);
-        }
-
         if (request == null || request.getBody() == null || request.getBody().isBlank()) {
             return new ResponseEntity<>(Map.of("error", "body is required"), HttpStatus.BAD_REQUEST);
         }
-        String body = request.getBody().trim();
-        if (body.length() > DirectMessageService.MAX_BODY_LENGTH) {
-            return new ResponseEntity<>(Map.of("error", "body is too long"), HttpStatus.BAD_REQUEST);
+
+        try {
+            DirectMessage updated = directMessageService.editMessage(
+                    conversation, person, messageId, request.getBody().trim());
+            return new ResponseEntity<>(messageSummary(updated), HttpStatus.OK);
+        } catch (NoSuchElementException ex) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        } catch (SecurityException ex) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        } catch (IllegalStateException ex) {
+            return new ResponseEntity<>(Map.of("error", ex.getMessage()), HttpStatus.CONFLICT);
+        }
+    }
+
+    @DeleteMapping("/conversations/{id}/messages/{messageId}")
+    @Transactional
+    public ResponseEntity<Object> deleteMessage(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable("id") Long id,
+            @PathVariable("messageId") Long messageId) {
+        Person person = currentPerson(userDetails);
+        if (person == null) {
+            return new ResponseEntity<>(Map.of("error", "User not authenticated"), HttpStatus.UNAUTHORIZED);
         }
 
-        return new ResponseEntity<>(directMessageService.editMessage(message, body), HttpStatus.OK);
+        Optional<DirectMessageConversation> conversationOpt = conversationRepository.findById(id);
+        if (conversationOpt.isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+
+        DirectMessageConversation conversation = conversationOpt.get();
+        if (!directMessageService.isParticipant(conversation, person)) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        try {
+            directMessageService.deleteMessage(conversation, person, messageId);
+            return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+        } catch (NoSuchElementException ex) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        } catch (SecurityException ex) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
     }
 
     @PostMapping("/conversations/{id}/read")
@@ -283,14 +309,14 @@ public class DirectMessageApiController {
 
     private Map<String, Object> messageSummary(DirectMessage message) {
         Person sender = message.getSender();
-        // Not Map.of: editedAt is null for unedited messages and Map.of rejects null values.
-        Map<String, Object> summary = new LinkedHashMap<>();
-        summary.put("id", message.getId());
-        summary.put("senderUid", sender.getUid());
-        summary.put("senderName", sender.getName());
-        summary.put("body", message.getBody());
-        summary.put("sentAt", message.getSentAt().toString());
-        summary.put("editedAt", message.getEditedAt() == null ? null : message.getEditedAt().toString());
-        return summary;
+        return Map.of(
+                "id", message.getId(),
+                "senderUid", sender.getUid(),
+                "senderName", sender.getName(),
+                "senderPfp", sender.getPfp() == null ? "" : sender.getPfp(),
+                "body", message.getBody() == null ? "" : message.getBody(),
+                "sentAt", message.getSentAt().toString(),
+                "deleted", message.isDeleted(),
+                "edited", message.isEdited());
     }
 }

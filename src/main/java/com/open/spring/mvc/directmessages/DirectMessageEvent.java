@@ -19,7 +19,9 @@ public class DirectMessageEvent {
     private String type;      // "message" for new posts, "edited" for edits
     private String senderUid;
     private String senderName;
+    private String senderPfp;
     private String body;
     private String sentAt;
-    private String editedAt;  // null unless the message was edited
+    private boolean deleted;
+    private boolean edited;
 }
