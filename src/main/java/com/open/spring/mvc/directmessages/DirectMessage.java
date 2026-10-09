@@ -46,10 +46,18 @@ public class DirectMessage {
 
     private Instant sentAt;
 
+    /** Null until the message has been edited. */
+    private Instant editedAt;
+
     public DirectMessage(DirectMessageConversation conversation, Person sender, String body) {
         this.conversation = conversation;
         this.sender = sender;
         this.body = body;
         this.sentAt = Instant.now();
+    }
+
+    public void edit(String newBody) {
+        this.body = newBody;
+        this.editedAt = Instant.now();
     }
 }
