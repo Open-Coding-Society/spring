@@ -2,6 +2,7 @@ package com.open.spring.mvc.directmessages;
 
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import org.springframework.http.HttpStatus;
@@ -9,7 +10,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -177,6 +180,76 @@ public class DirectMessageApiController {
         return new ResponseEntity<>(event, HttpStatus.OK);
     }
 
+    @PatchMapping("/conversations/{id}/messages/{messageId}")
+    @Transactional
+    public ResponseEntity<Object> editMessage(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable("id") Long id,
+            @PathVariable("messageId") Long messageId,
+            @RequestBody SendMessageRequest request) {
+        Person person = currentPerson(userDetails);
+        if (person == null) {
+            return new ResponseEntity<>(Map.of("error", "User not authenticated"), HttpStatus.UNAUTHORIZED);
+        }
+
+        Optional<DirectMessageConversation> conversationOpt = conversationRepository.findById(id);
+        if (conversationOpt.isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+
+        DirectMessageConversation conversation = conversationOpt.get();
+        if (!directMessageService.isParticipant(conversation, person)) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        if (request == null || request.getBody() == null || request.getBody().isBlank()) {
+            return new ResponseEntity<>(Map.of("error", "body is required"), HttpStatus.BAD_REQUEST);
+        }
+
+        try {
+            DirectMessage updated = directMessageService.editMessage(
+                    conversation, person, messageId, request.getBody().trim());
+            return new ResponseEntity<>(messageSummary(updated), HttpStatus.OK);
+        } catch (NoSuchElementException ex) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        } catch (SecurityException ex) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        } catch (IllegalStateException ex) {
+            return new ResponseEntity<>(Map.of("error", ex.getMessage()), HttpStatus.CONFLICT);
+        }
+    }
+
+    @DeleteMapping("/conversations/{id}/messages/{messageId}")
+    @Transactional
+    public ResponseEntity<Object> deleteMessage(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable("id") Long id,
+            @PathVariable("messageId") Long messageId) {
+        Person person = currentPerson(userDetails);
+        if (person == null) {
+            return new ResponseEntity<>(Map.of("error", "User not authenticated"), HttpStatus.UNAUTHORIZED);
+        }
+
+        Optional<DirectMessageConversation> conversationOpt = conversationRepository.findById(id);
+        if (conversationOpt.isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+
+        DirectMessageConversation conversation = conversationOpt.get();
+        if (!directMessageService.isParticipant(conversation, person)) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        try {
+            directMessageService.deleteMessage(conversation, person, messageId);
+            return new ResponseEntity<>(HttpStatus.NO_CONTENT);
+        } catch (NoSuchElementException ex) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        } catch (SecurityException ex) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+    }
+
     @PostMapping("/conversations/{id}/read")
     @Transactional
     public ResponseEntity<Object> markRead(
@@ -230,7 +303,10 @@ public class DirectMessageApiController {
                 "id", message.getId(),
                 "senderUid", sender.getUid(),
                 "senderName", sender.getName(),
-                "body", message.getBody(),
-                "sentAt", message.getSentAt().toString());
+                "senderPfp", sender.getPfp() == null ? "" : sender.getPfp(),
+                "body", message.getBody() == null ? "" : message.getBody(),
+                "sentAt", message.getSentAt().toString(),
+                "deleted", message.isDeleted(),
+                "edited", message.isEdited());
     }
 }

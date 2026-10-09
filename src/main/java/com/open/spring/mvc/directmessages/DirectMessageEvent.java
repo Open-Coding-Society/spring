@@ -18,6 +18,11 @@ public class DirectMessageEvent {
     private Long conversationId;
     private String senderUid;
     private String senderName;
+    private String senderPfp;
     private String body;
     private String sentAt;
+    /** "edited" or "deleted"; absent (null) for an ordinary new-message event. */
+    private String type;
+    private boolean deleted;
+    private boolean edited;
 }
