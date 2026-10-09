@@ -1,9 +1,11 @@
 package com.open.spring.mvc.directmessages;
 
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
+import java.util.Set;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -41,6 +43,7 @@ public class DirectMessageApiController {
 
     private final DirectMessageService directMessageService;
     private final DirectMessageConversationJpaRepository conversationRepository;
+    private final DirectMessageJpaRepository messageRepository;
     private final PersonJpaRepository personRepository;
 
     @Data
@@ -107,7 +110,9 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(Map.of("error", "otherPersonIds is required"), HttpStatus.BAD_REQUEST);
         }
 
+        Set<Long> seenIds = new LinkedHashSet<>();
         List<Person> others = request.getOtherPersonIds().stream()
+                .filter(id -> id != null && seenIds.add(id))
                 .map(id -> personRepository.findById(id).orElse(null))
                 .filter(other -> other != null && !other.getId().equals(person.getId()))
                 .toList();
@@ -176,7 +181,12 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(Map.of("error", "body is required"), HttpStatus.BAD_REQUEST);
         }
 
-        DirectMessageEvent event = directMessageService.postMessage(conversation, person, request.getBody().trim());
+        String body = request.getBody().trim();
+        if (body.length() > DirectMessageService.MAX_BODY_LENGTH) {
+            return new ResponseEntity<>(Map.of("error", "body is too long"), HttpStatus.BAD_REQUEST);
+        }
+
+        DirectMessageEvent event = directMessageService.postMessage(conversation, person, body);
         return new ResponseEntity<>(event, HttpStatus.OK);
     }
 

@@ -2,9 +2,11 @@ package com.open.spring.mvc.directmessages;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -25,6 +27,7 @@ import lombok.RequiredArgsConstructor;
 public class DirectMessageService {
 
     public static final String DM_TOPIC_PREFIX = "/topic/dm/";
+    public static final int MAX_BODY_LENGTH = 2000; // matches @Column(length = 2000) on DirectMessage.body
 
     private final DirectMessageConversationJpaRepository conversationRepository;
     private final DirectMessageJpaRepository messageRepository;
@@ -52,8 +55,16 @@ public class DirectMessageService {
      */
     @Transactional
     public DirectMessageConversation getOrCreateConversation(Person requester, List<Person> others) {
-        if (others.size() == 1) {
-            Person other = others.get(0);
+        if (requester == null) {
+            throw new IllegalArgumentException("requester is required");
+        }
+        if (others == null || others.isEmpty()) {
+            throw new IllegalArgumentException("at least one other participant is required");
+        }
+
+        List<Person> dedupedOthers = dedupeParticipants(others, requester);
+        if (dedupedOthers.size() == 1) {
+            Person other = dedupedOthers.get(0);
             List<DirectMessageConversation> existing = conversationRepository.findByParticipantsContaining(requester);
             for (DirectMessageConversation conversation : existing) {
                 List<Person> participants = conversation.getParticipants();
@@ -65,7 +76,7 @@ public class DirectMessageService {
 
         List<Person> participants = new ArrayList<>();
         participants.add(requester);
-        participants.addAll(others);
+        participants.addAll(dedupedOthers);
 
         return conversationRepository.save(new DirectMessageConversation(participants));
     }
@@ -86,11 +97,13 @@ public class DirectMessageService {
 
     @Transactional
     public DirectMessageEvent postMessage(DirectMessageConversation conversation, Person sender, String body) {
-        DirectMessage message = messageRepository.save(new DirectMessage(conversation, sender, body));
+        validateMessageBody(body);
+        DirectMessage message = messageRepository.save(new DirectMessage(conversation, sender, body.trim()));
 
         DirectMessageEvent event = DirectMessageEvent.builder()
                 .id(message.getId())
                 .conversationId(conversation.getId())
+                .type("message")
                 .senderUid(sender.getUid())
                 .senderName(sender.getName())
                 .senderPfp(sender.getPfp())
@@ -208,5 +221,28 @@ public class DirectMessageService {
 
     private boolean containsPerson(List<Person> people, Person target) {
         return people.stream().anyMatch(person -> person.getId().equals(target.getId()));
+    }
+
+    private void validateMessageBody(String body) {
+        if (body == null || body.isBlank()) {
+            throw new IllegalArgumentException("body is required");
+        }
+        if (body.trim().length() > MAX_BODY_LENGTH) {
+            throw new IllegalArgumentException("body is too long");
+        }
+    }
+
+    private List<Person> dedupeParticipants(List<Person> others, Person requester) {
+        Set<Long> seenIds = new LinkedHashSet<>();
+        List<Person> deduped = new ArrayList<>();
+        for (Person person : others) {
+            if (person == null || person.getId() == null || person.getId().equals(requester.getId())) {
+                continue;
+            }
+            if (seenIds.add(person.getId())) {
+                deduped.add(person);
+            }
+        }
+        return deduped;
     }
 }
