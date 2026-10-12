@@ -15,6 +15,8 @@ public class GroupChatMessage {
     private String message;
     private String date;
     private String image;
+    /** Set once on the first edit; stays true even if edited again. */
+    private boolean edited;
 
     public GroupChatMessage(String name, String message, String date, String image) {
         this.id = UUID.randomUUID().toString();

@@ -105,10 +105,11 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/grades/").permitAll()
                         // updated so that it takes auth to actually hit endpoint
                         .requestMatchers("/api/scraper/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
-                        // ← GIST CREATION ENDPOINTS - PUBLIC (NO AUTH)
-                        .requestMatchers(HttpMethod.POST, "/api/grades/create-gist").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/grades/create-gist/").permitAll()
-                        // ← GIST READ - PUBLIC (mirrors create-gist; a gist URL is
+                        // Personal connections and Gist creation require the caller's login.
+                        .requestMatchers("/api/gist-connection", "/api/gist-connection/").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/grades/create-gist").authenticated()
+                        .requestMatchers(HttpMethod.POST, "/api/grades/create-gist/").authenticated()
+                        // Gist reading stays public; an unlisted URL is
                         //    already shareable, so reading one adds no exposure)
                         .requestMatchers(HttpMethod.GET, "/api/grades/read-gist/**").permitAll()
                         // ← MAKE DEBUGGER - PUBLIC (NO AUTH)
@@ -260,6 +261,8 @@ public class SecurityConfig {
         policy.put("/api/face/**", "ROLE_TEACHER|ROLE_ADMIN");
         policy.put("POST /api/assignment-submissions/upload", "permitAll");
         policy.put("POST /api/assignments/auto-create", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT|ROLE_ASSIGNMENT_SYNC");
+        policy.put("/api/gist-connection", "authenticated");
+        policy.put("POST /api/grades/create-gist", "authenticated");
         policy.put("/api/pausemenu/**", "permitAll");
         policy.put("/api/leaderboard/**", "permitAll");
         policy.put("/api/exports/**", "ROLE_ADMIN");

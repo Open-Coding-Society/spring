@@ -68,6 +68,10 @@ public class AssignmentSubmission {
 
     private Integer qualityScore;
 
+    // True when the AI grade came from the default rubric because the assignment's AI rubric
+    // wasn't ready yet; AssignmentAiRegradeService re-grades these once it is.
+    private Boolean needsAiRegrade;
+
     private String comment;
 
     private Long assignmentid;

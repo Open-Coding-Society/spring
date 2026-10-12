@@ -19,6 +19,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -44,6 +45,7 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 
 import jakarta.transaction.Transactional;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @RestController
@@ -74,6 +76,9 @@ public class AssignmentsApiController {
     private AssignmentRubricService rubricService;
 
     @Autowired
+    private AssignmentAiRegradeService aiRegradeService;
+
+    @Autowired
     private AssignmentAuthorizationService assignmentAuthorizationService;
 
     @Autowired
@@ -87,6 +92,7 @@ public class AssignmentsApiController {
 
     @Getter
     @Setter
+    @NoArgsConstructor // lets Jackson read the bulk/create request body
     public static class AssignmentDto {
         public Long id;
         public String name;
@@ -409,6 +415,10 @@ public class AssignmentsApiController {
                 assignment.setAssignmentType(requestedAssignmentType);
                 assignment = saveAssignmentWithRetry(assignment);
             }
+            if (pageContent != null && !pageContent.isBlank()
+                    && !AssignmentRubricService.isAiRubricReady(assignment.getAiRubric(), assignment.getPoints())) {
+                aiRegradeService.requestRubric(assignment.getId(), name, description, pageContent);
+            }
             boolean metadataChanged = synchronizeCreators
                 && assignmentCreatorSyncService.applyCreators(assignment, resolvedCreators);
             metadataChanged = (synchronizeCourses
@@ -441,7 +451,6 @@ public class AssignmentsApiController {
                 resolvedDueDate,
                 requestedAssignmentType == null ? "file" : requestedAssignmentType
             );
-            applyGeneratedRubric(newAssignment, name, description, pageContent);
 
             newAssignment.setContentUrl(canonicalUrl);
             if (synchronizeCreators) {
@@ -453,10 +462,24 @@ public class AssignmentsApiController {
             
             normalizeAssignmentSequenceForSqlite();
             Assignment savedAssignment = saveAssignmentWithRetry(newAssignment);
+            aiRegradeService.requestRubric(savedAssignment.getId(), name, description, pageContent);
             logger.info("Auto-created assignment with ID: " + savedAssignment.getId() + " for contentUrl: " + canonicalUrl);
             return new ResponseEntity<>(
                 toDto(savedAssignment, synchronizeCreators || synchronizeCourses),
                 HttpStatus.CREATED);
+        } catch (DataIntegrityViolationException e) {
+            // Another request can pass the lookup above before inserting the same URL.
+            // The unique index is the final arbiter; return that request's assignment
+            // instead of turning an idempotent operation into a 500.
+            Assignment concurrent = assignmentRepo.findFirstByContentUrlOrderByIdAsc(canonicalUrl);
+            if (concurrent != null) {
+                logger.info("Assignment was created concurrently for contentUrl: {}, ID: {}",
+                    canonicalUrl, concurrent.getId());
+                return ResponseEntity.ok(toDto(concurrent, synchronizeCreators || synchronizeCourses));
+            }
+            logger.error("Assignment uniqueness violation for contentUrl {} with no existing row", canonicalUrl, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Assignment could not be created because its content URL is already in use"));
         } catch (Exception e) {
             logger.error("Error auto-creating assignment for contentUrl: " + contentUrl, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -534,13 +557,17 @@ public class AssignmentsApiController {
      * constructor-assigned {@link Assignment#DEFAULT_AI_RUBRIC} in place.
      */
     private void applyGeneratedRubric(Assignment assignment, String name, String description, String pageContent) {
-        if (pageContent == null || pageContent.isBlank()) {
-            return;
-        }
         try {
-            String generated = rubricService.generateRubric(name, description, pageContent);
+            logger.info("Generating AI rubric for assignment '{}' (pageContentChars={}, descriptionPresent={})",
+                name,
+                pageContent == null ? 0 : pageContent.length(),
+                description != null && !description.isBlank());
+            String generated = rubricService.generateRubric(name, description, pageContent, assignment.getPoints());
             if (generated != null && !generated.isBlank()) {
                 assignment.setAiRubric(generated);
+                logger.info("Generated AI rubric for assignment '{}' ({} characters)", name, generated.length());
+            } else {
+                logger.warn("AI rubric generation returned no rubric for assignment '{}'", name);
             }
         } catch (Exception e) {
             logger.warn("Rubric generation failed for assignment '{}': {}", name, e.getMessage());
@@ -583,6 +610,8 @@ public class AssignmentsApiController {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 return retryTemplate.execute(status -> assignmentRepo.save(assignment));
+            } catch (DataIntegrityViolationException e) {
+                throw e;
             } catch (DataAccessException e) {
                 lastFailure = e;
                 logger.warn("Transient error saving assignment (attempt {}/{}): {}", attempt, maxAttempts, e.getMessage());
@@ -1310,8 +1339,10 @@ public class AssignmentsApiController {
     @GetMapping("/extract/{id}")
     public ResponseEntity<AssignmentDto> extractAssignment(@PathVariable Long id) {
         Optional<Assignment> curAssignment = assignmentRepo.findById(id);
-        Assignment assignment = curAssignment.get();
-        AssignmentDto assignmentDto = new AssignmentDto(assignment);
+        if (curAssignment.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        AssignmentDto assignmentDto = new AssignmentDto(curAssignment.get());
         return new ResponseEntity<>(assignmentDto, HttpStatus.OK);
     }
 

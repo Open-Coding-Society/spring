@@ -78,6 +78,9 @@ public class AssignmentSubmissionAPIController {
     private AssignmentAiGradingService aiGradingService;
 
     @Autowired
+    private AssignmentAiRegradeService aiRegradeService;
+
+    @Autowired
     private AssignmentAuthorizationService assignmentAuthorizationService;
     
     /**
@@ -195,7 +198,7 @@ public class AssignmentSubmissionAPIController {
             if (linkValidationError != null) {
                 return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
             }
-            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, submissionInfo.content, submissionInfo.comment, submissionInfo.isLate);
+            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, submissionInfo.content, submissionInfo.comment, Boolean.TRUE.equals(submissionInfo.isLate));
             submission.setTechnicalExcellence(submissionInfo.technicalExcellence);
             submission.setCommunication(submissionInfo.communication);
             submission.setWorkHabits(submissionInfo.workHabits);
@@ -273,7 +276,7 @@ public class AssignmentSubmissionAPIController {
                 return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
             }
 
-            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, requestData.content, requestData.comment,requestData.isLate);
+            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, requestData.content, requestData.comment, Boolean.TRUE.equals(requestData.isLate));
             submission.setTechnicalExcellence(requestData.technicalExcellence);
             submission.setCommunication(requestData.communication);
             submission.setWorkHabits(requestData.workHabits);
@@ -325,20 +328,32 @@ public class AssignmentSubmissionAPIController {
         String normalizedContentType = contentType == null ? "" : contentType.trim().toLowerCase(Locale.ROOT);
         Map<String, Object> updatedContent;
 
+        // The submissions page edits every URL-based submission as "link"; store it under the
+        // assignment's own URL type (github_issue/code) so it validates and grades like the original.
+        String assignmentType = submission.getAssignment() == null || submission.getAssignment().getAssignmentType() == null
+                ? "" : submission.getAssignment().getAssignmentType().trim().toLowerCase(Locale.ROOT);
+        if ("link".equals(normalizedContentType) && ("github_issue".equals(assignmentType) || "code".equals(assignmentType))) {
+            normalizedContentType = assignmentType;
+        }
+
         if (!isAllowedSubmissionType(submission.getAssignment(), normalizedContentType)) {
             return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
         }
 
-        if ("link".equals(normalizedContentType)) {
+        if (List.of("link", "github_issue", "code").contains(normalizedContentType)) {
             if (url == null || url.trim().isEmpty()) {
                 return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                         .body(Map.of("error", "A submission URL is required for link submissions"));
             }
 
             updatedContent = new HashMap<>();
-            updatedContent.put("type", "link");
+            updatedContent.put("type", normalizedContentType);
             updatedContent.put("url", url.trim());
             updatedContent.put("notes", notes == null ? "" : notes);
+            String linkValidationError = validateLinkContent(updatedContent);
+            if (linkValidationError != null) {
+                return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
+            }
         } else if ("file".equals(normalizedContentType)) {
             updatedContent = updateFileSubmissionContent(submission, currentUser, file, notes);
             if (updatedContent == null) {
@@ -364,12 +379,16 @@ public class AssignmentSubmissionAPIController {
             submission.setFeedback(null);
             submission.setAiSummary(null);
             submission.setQualityScore(null);
+            submission.setNeedsAiRegrade(null);
         }
 
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
+        if (contentChanged) {
+            savedSubmission = tryAutoGrade(savedSubmission);
+        }
         return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
     }
-    
+
     /**
      * Grade an existing assignment submission.
      * 
@@ -406,8 +425,39 @@ public class AssignmentSubmissionAPIController {
         // we have a correct submission
         submission.setGrade(grade);
         submission.setFeedback(feedback);
+        // A teacher's grade is final; don't let a pending AI re-grade replace it.
+        submission.setNeedsAiRegrade(false);
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
         return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
+    }
+
+    /**
+     * Starts re-grading every submission whose grade is above its assignment's points (e.g. 4/1
+     * left over from the old 2-4 scale). Runs in the background, one attempt per submission;
+     * poll the GET mapping for progress.
+     */
+    @PostMapping("/fix-out-of-range-grades")
+    public ResponseEntity<?> fixOutOfRangeGrades(@AuthenticationPrincipal UserDetails userDetails) {
+        ResponseEntity<?> denied = requireTeacherOrAdmin(userDetails);
+        return denied != null ? denied : ResponseEntity.ok(aiRegradeService.startFixOutOfRangeGrades());
+    }
+
+    @GetMapping("/fix-out-of-range-grades")
+    public ResponseEntity<?> fixOutOfRangeGradesStatus(@AuthenticationPrincipal UserDetails userDetails) {
+        ResponseEntity<?> denied = requireTeacherOrAdmin(userDetails);
+        return denied != null ? denied : ResponseEntity.ok(aiRegradeService.getFixStatus());
+    }
+
+    /** Null when allowed; otherwise the 401/403 response. AI grading calls a metered API. */
+    private ResponseEntity<?> requireTeacherOrAdmin(UserDetails userDetails) {
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required"));
+        }
+        if (!assignmentAuthorizationService.isTeacherOrAdmin(currentUser)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Admin or teacher access required"));
+        }
+        return null;
     }
 
     @PostMapping("/ai-grade/{submissionId}")
@@ -435,11 +485,11 @@ public class AssignmentSubmissionAPIController {
             if (!"graded".equals(result.status())) {
                 return ResponseEntity.unprocessableEntity().body(result);
             }
-            applyAiGradeResult(submission, result);
+            result.applyTo(submission);
                 AssignmentSubmission savedSubmission = submissionRepo.save(submission);
                 return ResponseEntity.ok(new AiGradeResponse(
                     result.status(),
-                    result.score(),
+                    result.grade(),
                     savedSubmission.getQualityScore(),
                     savedSubmission.getFeedback(),
                     new AssignmentSubmissionReturnDto(savedSubmission)));
@@ -453,7 +503,7 @@ public class AssignmentSubmissionAPIController {
 
                 public record AiGradeResponse(
                     String status,
-                    Integer score,
+                    Double score,
                     Integer qualityScore,
                     String feedback,
                     AssignmentSubmissionReturnDto submission) {
@@ -602,6 +652,7 @@ public class AssignmentSubmissionAPIController {
      * @return a ResponseEntity containing a list of assigned grader IDs or an error if the submission is not found
      */
     @GetMapping("/{id}/assigned-graders")
+    @Transactional
     public ResponseEntity<?> getAssignedGraders(@PathVariable Long id) {
         Optional<AssignmentSubmission> submissionOptional = submissionRepo.findById(id);
         if (!submissionOptional.isPresent()) {
@@ -720,20 +771,26 @@ public class AssignmentSubmissionAPIController {
         try {
             AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
             if ("graded".equals(result.status())) {
-                applyAiGradeResult(submission, result);
-                return submissionRepo.save(submission);
+                result.applyTo(submission);
+                // Return the caller's instance, not save()'s merged copy: the copy's assignment is a
+                // lazy proxy, and building the response DTO outside a session would throw.
+                submissionRepo.save(submission);
+                return submission;
+            }
+            if ("failed".equals(result.status())) {
+                flagForRegrade(submission);
             }
         } catch (Exception e) {
             logger.warn("Auto-grade failed for submission {}: {}", submission.getId(), e.getMessage());
+            flagForRegrade(submission);
         }
         return submission;
     }
 
-    private void applyAiGradeResult(AssignmentSubmission submission, AssignmentAiGradingService.GradeResult result) {
-        submission.setQualityScore(result.score());
-        submission.setGrade(result.score().doubleValue());
-        submission.setFeedback(result.feedback());
-        submission.setAiSummary(result.feedback());
+    /** Lets AssignmentAiRegradeService retry a grade that failed (e.g. Gemini timed out). */
+    private void flagForRegrade(AssignmentSubmission submission) {
+        submission.setNeedsAiRegrade(true);
+        submissionRepo.save(submission);
     }
 
     private Person getAuthenticatedPerson(UserDetails userDetails) {
