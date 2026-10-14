@@ -191,6 +191,7 @@ public class AssignmentSubmissionAPIController {
         }
 
         if (assignment != null) {
+            submissionInfo.content = normalizeUrlSubmissionType(submissionInfo.content, assignment);
             if (!hasSubmissionType(submissionInfo.content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
             }
@@ -268,6 +269,7 @@ public class AssignmentSubmissionAPIController {
                 return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
             }
 
+            requestData.content = normalizeUrlSubmissionType(requestData.content, assignment);
             if (!hasSubmissionType(requestData.content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
             }
@@ -722,6 +724,25 @@ public class AssignmentSubmissionAPIController {
         return assignmentAuthorizationService.canManage(currentUser, submission.getAssignment());
     }
 
+    /**
+     * A plain "link" sent to a code/github_issue assignment is stored under the assignment's
+     * own URL type, so callers don't have to know each assignment's type to submit a URL.
+     * validateLinkContent still checks the URL, and grading routes by the URL's shape.
+     */
+    private Map<String, Object> normalizeUrlSubmissionType(Map<String, Object> content, Assignment assignment) {
+        if (content == null || assignment == null || assignment.getAssignmentType() == null) {
+            return content;
+        }
+        String contentType = String.valueOf(content.getOrDefault("type", "")).trim().toLowerCase(Locale.ROOT);
+        String assignmentType = assignment.getAssignmentType().trim().toLowerCase(Locale.ROOT);
+        if (!"link".equals(contentType) || !List.of("code", "github_issue").contains(assignmentType)) {
+            return content;
+        }
+        Map<String, Object> normalized = new HashMap<>(content);
+        normalized.put("type", assignmentType);
+        return normalized;
+    }
+
     private boolean hasSubmissionType(Map<String, Object> content, Assignment assignment) {
         if (content == null) {
             return false;
@@ -756,8 +777,8 @@ public class AssignmentSubmissionAPIController {
         // "link" is deliberately unrestricted — any URL is accepted. It just isn't
         // AI-gradable unless it happens to be a GitHub issue/file link, which
         // AssignmentAiGradingService already handles gracefully (notGradeable, not an error).
-        if ("code".equalsIgnoreCase(type) && !AssignmentAiGradingService.isGistUrl(url)) {
-            return "A code submission must include a valid Gist link";
+        if ("code".equalsIgnoreCase(type) && !AssignmentAiGradingService.isCodeSubmissionUrl(url)) {
+            return "A code submission must include a valid Gist link or GitHub file link";
         }
         return null;
     }
