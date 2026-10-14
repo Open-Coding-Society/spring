@@ -220,6 +220,15 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/cs-pathway/setup-report/*").permitAll()
                         // =============================================
 
+                        // ========== TOOLCHAIN TRAIL DEVICE PAIRING ==========
+                        // The local agent has no JWT cookie. /pair is guarded by the one-time pairing
+                        // code and /results by the scoped agent token, both checked in ToolchainService.
+                        // Starting and polling a session (POST /sessions, GET /sessions/*) stay under the
+                        // default authenticated /api/** rule.
+                        .requestMatchers(HttpMethod.POST, "/api/toolchain/pair").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/toolchain/sessions/*/results").permitAll()
+                        // ====================================================
+
                         // ========== OCS ANALYTICS ==========
                         // OCS Analytics endpoints - require authentication to associate data with user
                         .requestMatchers("/api/ocs-analytics/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
@@ -272,6 +281,8 @@ public class SecurityConfig {
         policy.put("POST /api/cs-pathway/setup-report/pairing-code", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT");
         policy.put("POST /api/cs-pathway/setup-report/review/**", "ROLE_ADMIN|ROLE_TEACHER");
         policy.put("POST /api/cs-pathway/setup-report/*", "permitAll");
+        policy.put("POST /api/toolchain/pair", "permitAll");
+        policy.put("POST /api/toolchain/sessions/*/results", "permitAll");
         policy.put("/api/pausemenu/**", "permitAll");
         policy.put("/api/leaderboard/**", "permitAll");
         policy.put("/api/exports/**", "ROLE_ADMIN");
