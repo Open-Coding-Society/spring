@@ -92,14 +92,6 @@ public class AssignmentAiGradingService {
         return url != null && GIST_URL.matcher(url.trim()).matches();
     }
 
-    /**
-     * A code submission is normally a Gist, but students fall back to a GitHub file link
-     * (usually an .ipynb) when Gist export is unavailable, so both shapes are accepted.
-     */
-    public static boolean isCodeSubmissionUrl(String url) {
-        return isGistUrl(url) || isGithubBlobUrl(url);
-    }
-
     public GradeResult grade(AssignmentSubmission submission) throws Exception {
         Map<String, Object> content = submission.getContent();
         String contentType = content == null ? null : String.valueOf(content.getOrDefault("type", "")).trim();
@@ -108,10 +100,7 @@ public class AssignmentAiGradingService {
         if ("github_issue".equalsIgnoreCase(contentType) || "link".equalsIgnoreCase(contentType)) {
             submissionText = fetchGithubLinkText(content);
         } else if ("code".equalsIgnoreCase(contentType)) {
-            // Grade by what was actually submitted, not the declared type: a code assignment
-            // may hold a GitHub notebook link when the student's Gist export failed.
-            String url = String.valueOf(content.getOrDefault("url", "")).trim();
-            submissionText = isGistUrl(url) ? fetchGistText(content) : fetchGithubLinkText(content);
+            submissionText = fetchGistText(content);
         } else if ("file".equalsIgnoreCase(contentType)) {
             submissionText = fetchNotebookText(content);
         } else if (content != null) {
