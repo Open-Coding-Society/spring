@@ -7,9 +7,10 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * One Toolchain Trail station attempt: the student and station it belongs to,
- * the one-time pairing code the game showed, and the agent token the local
- * Python agent received for it. Codes and tokens are stored only as SHA-256
+ * One student's paired Toolchain Trail agent: the one-time pairing code the game
+ * showed, the agent token the local Python agent received for it, and the station
+ * the game currently wants checked. One pairing covers the whole trail; the agent
+ * may only report on the station the game asked about. Codes and tokens are stored only as SHA-256
  * hashes, so a copy of the database cannot be used to report progress.
  * Times are epoch milliseconds so the same column type works on SQLite and MySQL.
  * The table is created by ToolchainSessionMigration (ddl-auto is none).
@@ -20,17 +21,21 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class ToolchainSession {
     public static final String WAITING_FOR_AGENT = "WAITING_FOR_AGENT";
-    public static final String PAIRED = "PAIRED";
+    /** The game asked for a check and the agent has not reported on it yet. */
+    public static final String CHECKING = "CHECKING";
     public static final String VERIFIED = "VERIFIED";
     public static final String FAILED = "FAILED";
     /** Never stored: reported for a session whose code expired before an agent paired. */
     public static final String EXPIRED = "EXPIRED";
+    /** Never stored: reported once the agent token has expired; the game must pair again. */
+    public static final String AGENT_EXPIRED = "AGENT_EXPIRED";
 
     @Id
     private String id; // UUID
 
     private String studentUid;
-    private String stationId;
+    private String stationId; // the station the game most recently asked the agent to check
+    private Long requestedAt; // when the game asked; the agent runs each request once
 
     private String pairingCodeHash;
     private Long pairingExpiresAt;
@@ -41,7 +46,7 @@ public class ToolchainSession {
 
     private String status;
     private String agentOs; // what the agent says it runs on: macos, windows, linux, wsl
-    private String results; // JSON array of ToolchainStations.CheckResult
+    private String results; // JSON array of ToolchainStations.CheckResult for stationId
     private Long createdAt;
     private Long updatedAt;
 }

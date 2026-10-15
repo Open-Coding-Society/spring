@@ -57,18 +57,21 @@ public class ToolchainController {
     ) {}
 
     public record CheckEvidence(String id, Integer exitCode, String output) {}
-    public record ResultsRequest(String os, List<CheckEvidence> checks) {}
+    /** stationId names the station the agent checked; results for any other station are refused. */
+    public record ResultsRequest(String os, String stationId, List<CheckEvidence> checks) {}
+    public record CheckRequest(@NotBlank String stationId) {}
 
     public record SessionView(
         UUID sessionId,
         String stationId,
+        Long requestedAt,
         String status,
         List<CheckResult> checks,
         Instant pairingExpiresAt,
         Instant updatedAt
     ) {}
 
-    /** POST /api/toolchain/sessions - the signed-in game starts a station and gets a pairing code. */
+    /** POST /api/toolchain/sessions - the signed-in game starts at a station and gets a pairing code for the trail. */
     @PostMapping("/sessions")
     public StartResponse start(
         Principal student,
@@ -82,6 +85,25 @@ public class ToolchainController {
     @PostMapping("/pair")
     public PairResponse pair(@RequestBody @Valid PairRequest request) {
         return service.pair(request.pairingCode());
+    }
+
+    /** POST /api/toolchain/sessions/{id}/check - the game reached a station; ask the paired agent to check it. */
+    @PostMapping("/sessions/{sessionId}/check")
+    public SessionView requestCheck(
+        Principal student,
+        @PathVariable String sessionId,
+        @RequestBody @Valid CheckRequest request
+    ) {
+        return service.requestCheck(student.getName(), sessionId, request.stationId());
+    }
+
+    /** GET /api/toolchain/sessions/{id}/next - the agent polls for the station the game wants checked. */
+    @GetMapping("/sessions/{sessionId}/next")
+    public SessionView nextRequest(
+        @PathVariable String sessionId,
+        @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization
+    ) {
+        return service.nextRequest(sessionId, authorization);
     }
 
     /** POST /api/toolchain/sessions/{id}/results - the agent's check results, sent with its bearer token. */

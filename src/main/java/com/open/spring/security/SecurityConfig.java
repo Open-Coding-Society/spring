@@ -222,10 +222,11 @@ public class SecurityConfig {
 
                         // ========== TOOLCHAIN TRAIL DEVICE PAIRING ==========
                         // The local agent has no JWT cookie. /pair is guarded by the one-time pairing
-                        // code and /results by the scoped agent token, both checked in ToolchainService.
-                        // Starting and polling a session (POST /sessions, GET /sessions/*) stay under the
-                        // default authenticated /api/** rule.
+                        // code; /next and /results by the scoped agent token. Both are checked in
+                        // ToolchainService. Starting, polling and requesting checks (POST /sessions,
+                        // GET /sessions/*, POST /sessions/*/check) stay under the default /api/** rule.
                         .requestMatchers(HttpMethod.POST, "/api/toolchain/pair").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/toolchain/sessions/*/next").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/toolchain/sessions/*/results").permitAll()
                         // ====================================================
 
@@ -282,6 +283,7 @@ public class SecurityConfig {
         policy.put("POST /api/cs-pathway/setup-report/review/**", "ROLE_ADMIN|ROLE_TEACHER");
         policy.put("POST /api/cs-pathway/setup-report/*", "permitAll");
         policy.put("POST /api/toolchain/pair", "permitAll");
+        policy.put("GET /api/toolchain/sessions/*/next", "permitAll");
         policy.put("POST /api/toolchain/sessions/*/results", "permitAll");
         policy.put("/api/pausemenu/**", "permitAll");
         policy.put("/api/leaderboard/**", "permitAll");
