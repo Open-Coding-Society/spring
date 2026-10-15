@@ -17,7 +17,7 @@ import org.springframework.web.server.ResponseStatusException;
  * The local agent (scripts/toolchain_agent.py in the pages repository) runs one
  * command per check id below and sends back its exit code and output. The rules
  * here decide pass/fail, so the browser and the agent never decide progress.
- * Check ids must match the agent's STATION_CHECKS table.
+ * Check ids must match collect_evidence() in the agent.
  *
  * Patterns accept output from macOS, Windows and Linux (including WSL):
  * paths may use / or \, and git/ruby/python print the same version lines on all three.

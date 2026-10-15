@@ -34,6 +34,7 @@ public class ToolchainSessionMigration {
                         + "pairing_used_at bigint, "
                         + "agent_token_hash varchar(64) UNIQUE, "
                         + "agent_token_expires_at bigint, "
+                        + "requested_at bigint, "
                         + "status varchar(32), "
                         + "agent_os varchar(16), "
                         + "results text, "
@@ -41,6 +42,12 @@ public class ToolchainSessionMigration {
                         + "updated_at bigint)");
             } catch (DataAccessException e) {
                 logger.warn("Could not create Toolchain Trail session table: {}", e.getMessage());
+            }
+            try {
+                // Tables created before one pairing covered the whole trail lack this column.
+                jdbcTemplate.execute("ALTER TABLE toolchain_session ADD COLUMN requested_at bigint");
+            } catch (DataAccessException e) {
+                // Already there.
             }
         };
     }

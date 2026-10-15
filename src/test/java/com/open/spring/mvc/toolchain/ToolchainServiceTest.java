@@ -94,7 +94,7 @@ class ToolchainServiceTest {
         PairResponse paired = service.pair(started.pairingCode());
         assertEquals(started.sessionId(), paired.sessionId());
         assertEquals("git-village-hall", paired.stationId());
-        assertEquals(ToolchainSession.PAIRED, rows.get(started.sessionId().toString()).getStatus());
+        assertEquals(ToolchainSession.CHECKING, rows.get(started.sessionId().toString()).getStatus());
 
         ResponseStatusException again = assertThrows(ResponseStatusException.class, () -> service.pair(started.pairingCode()));
         assertEquals(HttpStatus.UNAUTHORIZED, again.getStatusCode());
@@ -115,7 +115,7 @@ class ToolchainServiceTest {
         PairResponse paired = service.pair(started.pairingCode());
 
         SessionView result = service.submitResults(started.sessionId().toString(), "Bearer " + paired.agentToken(),
-                new ResultsRequest("windows", List.of(
+                new ResultsRequest("windows", null, List.of(
                         new CheckEvidence("git", 0, "git version 2.46.0.windows.1"),
                         new CheckEvidence("git-name", 0, "Toby Ledger"),
                         new CheckEvidence("git-email", 0, "t***@opencodingsociety.com"))));
@@ -131,7 +131,7 @@ class ToolchainServiceTest {
         PairResponse paired = service.pair(started.pairingCode());
 
         SessionView result = service.submitResults(started.sessionId().toString(), "Bearer " + paired.agentToken(),
-                new ResultsRequest("linux", List.of(
+                new ResultsRequest("linux", null, List.of(
                         new CheckEvidence("git", 0, "git version 2.43.0"),
                         new CheckEvidence("git-name", 1, ""))));
 
@@ -148,19 +148,19 @@ class ToolchainServiceTest {
         PairResponse firstAgent = service.pair(first.pairingCode());
         service.pair(second.pairingCode());
 
-        ResultsRequest request = new ResultsRequest("macos", List.of(new CheckEvidence("git", 0, "git version 2.39.5")));
+        ResultsRequest request = new ResultsRequest("macos", null, List.of(new CheckEvidence("git", 0, "git version 2.39.5")));
         ResponseStatusException error = assertThrows(ResponseStatusException.class,
                 () -> service.submitResults(second.sessionId().toString(), "Bearer " + firstAgent.agentToken(), request));
         assertEquals(HttpStatus.UNAUTHORIZED, error.getStatusCode());
     }
 
     @Test
-    void agentTokenExpiresAfterAnHour() {
+    void agentTokenExpiresAfterFourHours() {
         StartResponse started = service.start("toby", "git-village-hall");
         PairResponse paired = service.pair(started.pairingCode());
-        clock.advanceSeconds(3601);
+        clock.advanceSeconds(4 * 3600 + 1);
 
-        ResultsRequest request = new ResultsRequest("macos", List.of(new CheckEvidence("git", 0, "git version 2.39.5")));
+        ResultsRequest request = new ResultsRequest("macos", null, List.of(new CheckEvidence("git", 0, "git version 2.39.5")));
         assertThrows(ResponseStatusException.class,
                 () -> service.submitResults(started.sessionId().toString(), "Bearer " + paired.agentToken(), request));
     }
@@ -169,7 +169,7 @@ class ToolchainServiceTest {
     void missingOrMalformedAuthorizationIsRejected() {
         StartResponse started = service.start("toby", "git-village-hall");
         service.pair(started.pairingCode());
-        ResultsRequest request = new ResultsRequest("macos", List.of(new CheckEvidence("git", 0, "git version 2.39.5")));
+        ResultsRequest request = new ResultsRequest("macos", null, List.of(new CheckEvidence("git", 0, "git version 2.39.5")));
 
         assertThrows(ResponseStatusException.class, () -> service.submitResults(started.sessionId().toString(), null, request));
         assertThrows(ResponseStatusException.class, () -> service.submitResults(started.sessionId().toString(), "Basic abc", request));
@@ -192,10 +192,72 @@ class ToolchainServiceTest {
         String auth = "Bearer " + paired.agentToken();
         String id = started.sessionId().toString();
 
-        service.submitResults(id, auth, new ResultsRequest("linux", List.of(new CheckEvidence("editor", 0, "1.94.2\nabc123\nx64"))));
-        SessionView again = service.submitResults(id, auth, new ResultsRequest("linux", List.of(new CheckEvidence("editor", 127, "command not found: code"))));
+        service.submitResults(id, auth, new ResultsRequest("linux", null, List.of(new CheckEvidence("editor", 0, "1.94.2\nabc123\nx64"))));
+        SessionView again = service.submitResults(id, auth, new ResultsRequest("linux", null, List.of(new CheckEvidence("editor", 127, "command not found: code"))));
 
         assertEquals(ToolchainSession.VERIFIED, again.status());
+    }
+
+    @Test
+    void onePairingCoversLaterStations() {
+        StartResponse started = service.start("toby", "terminal-town-gate");
+        PairResponse paired = service.pair(started.pairingCode());
+        String id = started.sessionId().toString();
+        String auth = "Bearer " + paired.agentToken();
+        service.submitResults(id, auth, new ResultsRequest("linux", "terminal-town-gate", List.of(
+                new CheckEvidence("working-folder", 0, "/home/toby"),
+                new CheckEvidence("trail-folder", 0, "/home/toby/toolchain-trail"))));
+
+        clock.advanceSeconds(60);
+        SessionView requested = service.requestCheck("toby", id, "editor-isle-tower");
+        assertEquals(ToolchainSession.CHECKING, requested.status());
+        assertTrue(requested.checks().isEmpty());
+
+        SessionView next = service.nextRequest(id, auth);
+        assertEquals("editor-isle-tower", next.stationId());
+        assertEquals(requested.requestedAt(), next.requestedAt());
+
+        SessionView result = service.submitResults(id, auth, new ResultsRequest("linux", "editor-isle-tower",
+                List.of(new CheckEvidence("editor", 0, "1.94.2"))));
+        assertEquals(ToolchainSession.VERIFIED, result.status());
+        assertEquals("editor-isle-tower", result.stationId());
+    }
+
+    @Test
+    void resultsForAStationTheGameDidNotAskAboutAreRefused() {
+        StartResponse started = service.start("toby", "terminal-town-gate");
+        PairResponse paired = service.pair(started.pairingCode());
+        String id = started.sessionId().toString();
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.submitResults(id, "Bearer " + paired.agentToken(), new ResultsRequest("linux", "editor-isle-tower",
+                        List.of(new CheckEvidence("editor", 0, "1.94.2")))));
+        assertEquals(HttpStatus.CONFLICT, error.getStatusCode());
+    }
+
+    @Test
+    void requestingACheckNeedsAConnectedAgent() {
+        StartResponse started = service.start("toby", "terminal-town-gate");
+        String id = started.sessionId().toString();
+
+        ResponseStatusException unpaired = assertThrows(ResponseStatusException.class,
+                () -> service.requestCheck("toby", id, "editor-isle-tower"));
+        assertEquals(HttpStatus.CONFLICT, unpaired.getStatusCode());
+
+        service.pair(started.pairingCode());
+        clock.advanceSeconds(4 * 3600 + 1);
+        assertEquals(ToolchainSession.AGENT_EXPIRED, service.getSession("toby", id).status());
+        assertThrows(ResponseStatusException.class, () -> service.requestCheck("toby", id, "editor-isle-tower"));
+    }
+
+    @Test
+    void studentsCannotPointAnotherStudentsAgent() {
+        StartResponse started = service.start("toby", "terminal-town-gate");
+        service.pair(started.pairingCode());
+
+        ResponseStatusException error = assertThrows(ResponseStatusException.class,
+                () -> service.requestCheck("hope", started.sessionId().toString(), "editor-isle-tower"));
+        assertEquals(HttpStatus.NOT_FOUND, error.getStatusCode());
     }
 
     private static final class MutableClock extends Clock {
