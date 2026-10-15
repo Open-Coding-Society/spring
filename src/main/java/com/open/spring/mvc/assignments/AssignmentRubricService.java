@@ -36,6 +36,11 @@ public class AssignmentRubricService {
     private static final int MAX_PAGE_CONTENT_CHARS = 24000;
     private static final Duration GEMINI_REQUEST_TIMEOUT = Duration.ofSeconds(20);
     private static final Pattern TIER_SCORE = Pattern.compile("(?im)^[\\s#*_]*Score\\s+([0-9]+(?:\\.[0-9]+)?)\\b");
+    // "Hack #1 (Weight: 60%)" as it appears in the page text (markdown heading, HTML stripped).
+    private static final Pattern WEIGHTED_HACK = Pattern.compile(
+            "(?i)\\bHack\\s*#?\\s*(\\d+)\\s*[(\\[]?\\s*(?:weight|worth)\\s*[:=-]?\\s*(\\d+(?:\\.\\d+)?)\\s*%?\\s*[)\\]]?");
+    private static final int MAX_HACK_INSTRUCTION_CHARS = 600;
+    private static final ObjectMapper JSON = new ObjectMapper();
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final String geminiApiKey;
@@ -140,13 +145,93 @@ public class AssignmentRubricService {
         return tiers >= 2 && max - highest <= Math.max(0.01, max * 0.01);
     }
 
+    /**
+     * One weighted hack from the assignment page. {@code weight} is as written on the page
+     * (60 for "60%"); grading normalizes by the total so weights needn't add up to 100.
+     */
+    public record HackWeight(String hack, double weight, String instructions) {
+    }
+
+    /**
+     * Finds the page's weighted hacks, each with the instructions that follow its heading.
+     * Fewer than two weighted hacks means there is nothing to weight, so the list is empty.
+     */
+    public static List<HackWeight> parseHackWeights(String pageContent) {
+        if (pageContent == null || pageContent.isBlank()) {
+            return List.of();
+        }
+        List<java.util.regex.MatchResult> headings = new java.util.ArrayList<>();
+        java.util.Set<String> seen = new java.util.HashSet<>();
+        Matcher matcher = WEIGHTED_HACK.matcher(pageContent);
+        while (matcher.find()) {
+            // The first heading for each hack number wins; later mentions are just text.
+            if (Double.parseDouble(matcher.group(2)) > 0 && seen.add(matcher.group(1))) {
+                headings.add(matcher.toMatchResult());
+            }
+        }
+        if (headings.size() < 2) {
+            return List.of();
+        }
+        List<HackWeight> hacks = new java.util.ArrayList<>();
+        for (int i = 0; i < headings.size(); i++) {
+            java.util.regex.MatchResult heading = headings.get(i);
+            int end = i + 1 < headings.size() ? headings.get(i + 1).start() : pageContent.length();
+            String instructions = pageContent.substring(heading.end(), end).replaceAll("\\s+", " ").strip();
+            if (instructions.length() > MAX_HACK_INSTRUCTION_CHARS) {
+                instructions = instructions.substring(0, MAX_HACK_INSTRUCTION_CHARS) + "…";
+            }
+            hacks.add(new HackWeight("Hack #" + heading.group(1), Double.parseDouble(heading.group(2)), instructions));
+        }
+        return hacks;
+    }
+
+    /** {@link #parseHackWeights} as the JSON stored in {@link Assignment#getHackWeights}, or null when there are none. */
+    public static String hackWeightsJson(String pageContent) {
+        List<HackWeight> hacks = parseHackWeights(pageContent);
+        if (hacks.isEmpty()) {
+            return null;
+        }
+        try {
+            return JSON.writeValueAsString(hacks);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Reads {@link Assignment#getHackWeights}; empty when unset or unreadable. */
+    public static List<HackWeight> readHackWeights(String json) {
+        if (json == null || json.isBlank()) {
+            return List.of();
+        }
+        try {
+            return List.of(JSON.readValue(json, HackWeight[].class));
+        } catch (Exception e) {
+            logger.warn("Ignoring unreadable hack weights: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
     private String buildPrompt(String assignmentName, String description, String pageContent, double maxScore) {
+        List<HackWeight> hacks = parseHackWeights(pageContent);
+        String hackWeighting = "";
+        if (!hacks.isEmpty()) {
+            StringBuilder weights = new StringBuilder(
+                    "\nThis assignment's hacks are weighted; the grade is the weighted average of a score for each hack:\n");
+            double total = hacks.stream().mapToDouble(HackWeight::weight).sum();
+            for (HackWeight hack : hacks) {
+                weights.append(" ").append(hack.hack()).append(": ")
+                        .append(formatScore(Math.round(hack.weight() / total * 1000.0) / 10.0)).append("%\n");
+            }
+            weights.append("Each tier's indicators must cover every hack, with emphasis in proportion to its weight.\n");
+            hackWeighting = weights.toString();
+        }
         return """
                 You are writing a grading rubric for a student assignment. Base the rubric on the ACTUAL assignment content below — be specific to what this assignment asks for, not generic.
 
                 ASSIGNMENT NAME: %s
                 ASSIGNMENT DESCRIPTION: %s
                 ASSIGNMENT MAXIMUM SCORE: %s
+                %s
 
                 ASSIGNMENT PAGE CONTENT:
                 %s
@@ -190,6 +275,7 @@ public class AssignmentRubricService {
                 assignmentName == null ? "" : assignmentName,
                 description == null ? "" : description,
                 formatScore(maxScore),
+                hackWeighting,
                 limitPageContent(pageContent),
                 formatScore(aiTopScore(maxScore)),
                 formatScore(aiTopScore(maxScore)));
