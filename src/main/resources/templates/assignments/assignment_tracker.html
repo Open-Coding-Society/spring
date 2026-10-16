@@ -813,6 +813,7 @@
                 <span><strong>Points available:</strong> ${escapeHtml(assignment.points ?? 'Not specified')}</span>
                 <span><strong>Submission:</strong> ${escapeHtml(assignment.assignmentType || 'Not specified')}</span>
                 <span><strong>Created:</strong> ${escapeHtml(assignment.timestamp || 'Not specified')}</span>
+                ${formatHackWeights(assignment.hackWeights)}
             `;
 
             const resourceText = document.getElementById('assignmentDashboardResource');
@@ -870,6 +871,17 @@
             document.getElementById('editAssignmentModal').style.display = 'block';
             document.getElementById('editAssignmentName').focus();
         };
+
+        // "Hack #1 60%, Hack #2 40%", normalized like grading does so weights needn't sum to 100.
+        function formatHackWeights(hacks) {
+            if (!Array.isArray(hacks) || hacks.length === 0) {
+                return '';
+            }
+            const total = hacks.reduce((sum, hack) => sum + (Number(hack.weight) || 0), 0) || 1;
+            const parts = hacks.map(hack =>
+                `${hack.hack} ${Math.round((Number(hack.weight) || 0) / total * 1000) / 10}%`);
+            return `<span><strong>Hack weights:</strong> ${escapeHtml(parts.join(', '))}</span>`;
+        }
 
         window.saveAssignmentDetails = async function () {
             const assignment = currentDashboardAssignment();

@@ -103,6 +103,14 @@ Indicators:
     @Column(columnDefinition = "TEXT")
     private String aiRubric;
 
+    /**
+     * JSON list of the page's weighted hacks ("Hack #1 (Weight: 60%)" headings), parsed from
+     * the page content on auto-create by {@link AssignmentRubricService#hackWeightsJson}.
+     * When set, AI grading scores each hack separately and weights the grade by them.
+     */
+    @Column(columnDefinition = "TEXT")
+    private String hackWeights;
+
     @NotEmpty
     private String dueDate;
 

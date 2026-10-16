@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -112,6 +113,8 @@ public class AssignmentsApiController {
         public List<String> courseCodes;
         /** Owner uids; null on endpoints that do not load the creator relationship. */
         public List<String> creatorUids;
+        /** Weighted hacks parsed from the page; empty when the assignment is not hack-weighted. */
+        public List<AssignmentRubricService.HackWeight> hackWeights;
 
         public AssignmentDto(
                 Assignment assignment,
@@ -138,6 +141,7 @@ public class AssignmentsApiController {
             this.resourceStoragePath = assignment.getResourceStoragePath();
             this.resourceUploadedBy = extractResourceUploader(assignment);
             this.contentUrl = assignment.getContentUrl();
+            this.hackWeights = AssignmentRubricService.readHackWeights(assignment.getHackWeights());
         }
 
         private static String extractResourceUploader(Assignment assignment) {
@@ -199,6 +203,7 @@ public class AssignmentsApiController {
         } else {
             applyGeneratedRubric(newAssignment, name, description, pageContent);
         }
+        newAssignment.setHackWeights(AssignmentRubricService.hackWeightsJson(pageContent));
         normalizeAssignmentSequenceForSqlite();
         Assignment savedAssignment = assignmentRepo.save(newAssignment);
         return new ResponseEntity<>(new AssignmentDto(savedAssignment), HttpStatus.CREATED);
@@ -415,6 +420,15 @@ public class AssignmentsApiController {
                 assignment.setAssignmentType(requestedAssignmentType);
                 assignment = saveAssignmentWithRetry(assignment);
             }
+            // Keep hack weights in step with the page, so editing a "(Weight: N%)" heading
+            // changes how new submissions are graded.
+            String hackWeights = pageContent == null || pageContent.isBlank()
+                ? assignment.getHackWeights() : AssignmentRubricService.hackWeightsJson(pageContent);
+            if (!Objects.equals(hackWeights, assignment.getHackWeights())) {
+                assignment.setHackWeights(hackWeights);
+                assignment = saveAssignmentWithRetry(assignment);
+                logger.info("Updated hack weights for assignment ID {}: {}", assignment.getId(), hackWeights);
+            }
             if (pageContent != null && !pageContent.isBlank()
                     && !AssignmentRubricService.isAiRubricReady(assignment.getAiRubric(), assignment.getPoints())) {
                 aiRegradeService.requestRubric(assignment.getId(), name, description, pageContent);
@@ -453,6 +467,7 @@ public class AssignmentsApiController {
             );
 
             newAssignment.setContentUrl(canonicalUrl);
+            newAssignment.setHackWeights(AssignmentRubricService.hackWeightsJson(pageContent));
             if (synchronizeCreators) {
                 assignmentCreatorSyncService.applyCreators(newAssignment, resolvedCreators);
             }

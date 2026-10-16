@@ -66,18 +66,26 @@ public class AssignmentAiRegradeService {
         this.jdbcTemplate = jdbcTemplate;
     }
 
-    /** Adds the needs_ai_regrade column; runs before other startup runners that load submissions. */
+    /**
+     * Adds the needs_ai_regrade and hack_weights columns; runs before other startup runners
+     * that load submissions or assignments.
+     */
     @Bean
     @Order(Ordered.HIGHEST_PRECEDENCE)
     public ApplicationRunner migrateSubmissionRegradeFlag() {
         return args -> {
-            try {
-                jdbcTemplate.execute("ALTER TABLE assignment_submission ADD COLUMN needs_ai_regrade BOOLEAN");
-                logger.info("Added needs_ai_regrade column to assignment_submission");
-            } catch (DataAccessException e) {
-                logger.debug("needs_ai_regrade column not added (already exists?): {}", e.getMessage());
-            }
+            addColumn("assignment_submission", "needs_ai_regrade BOOLEAN");
+            addColumn("assignment", "hack_weights TEXT");
         };
+    }
+
+    private void addColumn(String table, String columnDefinition) {
+        try {
+            jdbcTemplate.execute("ALTER TABLE " + table + " ADD COLUMN " + columnDefinition);
+            logger.info("Added {} column to {}", columnDefinition, table);
+        } catch (DataAccessException e) {
+            logger.debug("{} column not added to {} (already exists?): {}", columnDefinition, table, e.getMessage());
+        }
     }
 
     /**
