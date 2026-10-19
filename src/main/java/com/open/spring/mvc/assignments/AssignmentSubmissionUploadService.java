@@ -118,15 +118,21 @@ public class AssignmentSubmissionUploadService {
         try {
             AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
             if ("graded".equals(result.status())) {
-                submission.setQualityScore(result.score());
-                submission.setGrade(result.score().doubleValue());
-                submission.setFeedback(result.feedback());
-                submission.setAiSummary(result.feedback());
-                return submissionRepo.save(submission);
+                result.applyTo(submission);
+                // Return the caller's instance, not save()'s merged copy: the copy's assignment is a
+                // lazy proxy, and building the response DTO outside a session would throw.
+                submissionRepo.save(submission);
+                return submission;
+            }
+            if ("failed".equals(result.status())) {
+                submission.setNeedsAiRegrade(true); // AssignmentAiRegradeService retries it later.
+                submissionRepo.save(submission);
             }
         } catch (Exception e) {
             // Best-effort: the upload already succeeded, so a grading failure is logged, not thrown.
             System.err.println("Auto-grade failed for submission " + submission.getId() + ": " + e.getMessage());
+            submission.setNeedsAiRegrade(true); // AssignmentAiRegradeService retries it later.
+            submissionRepo.save(submission);
         }
         return submission;
     }
