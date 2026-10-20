@@ -6,6 +6,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.Iterator;
 import java.util.List;
@@ -642,6 +643,7 @@ public class AssignmentAiGradingService {
             submission.setFeedback(feedback.length() > 255 ? feedback.substring(0, 254) + "…" : feedback);
             submission.setAiSummary(feedback);
             submission.setNeedsAiRegrade(usedDefaultRubric);
+            submission.setGradedAt(LocalDateTime.now());
         }
     }
 }

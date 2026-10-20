@@ -145,6 +145,46 @@ public class AssignmentRubricService {
         return tiers >= 2 && max - highest <= Math.max(0.01, max * 0.01);
     }
 
+    /** Submission types the submit endpoints understand (Assignment#assignmentType). */
+    public static final List<String> SUBMISSION_TYPES = List.of("text", "link", "github_issue", "code", "file");
+
+    private static final Pattern DUE_DATE = Pattern.compile("^(0?[1-9]|1[0-2])/(0?[1-9]|[12][0-9]|3[01])/\\d{4}$");
+
+    /** One result of {@link #runChecks}: {@code ok} false means the assignment has that problem. */
+    public record Check(String check, boolean ok, String message) {
+    }
+
+    /**
+     * Health checks for the tracker's "Run checks" tool: flags missing or invalid values that make
+     * an assignment fail to accept submissions or grade correctly.
+     */
+    public static List<Check> runChecks(Assignment assignment, List<AssignmentSubmission> submissions) {
+        List<Check> checks = new java.util.ArrayList<>();
+        String name = assignment.getName();
+        checks.add(new Check("Name", name != null && !name.isBlank(), "Assignment name is blank"));
+        Double points = assignment.getPoints();
+        checks.add(new Check("Points", points != null && points > 0, "Points must be greater than 0 (got " + points + ")"));
+        String due = assignment.getDueDate();
+        checks.add(new Check("Due date", due != null && DUE_DATE.matcher(due.trim()).matches(),
+                "Due date must be MM/DD/YYYY (got " + due + ")"));
+        String type = assignment.getAssignmentType();
+        checks.add(new Check("Submission type",
+                type != null && SUBMISSION_TYPES.contains(type.trim().toLowerCase(java.util.Locale.ROOT)),
+                "Submission type must be one of " + SUBMISSION_TYPES + " (got " + type + ")"));
+        String contentUrl = assignment.getContentUrl();
+        checks.add(new Check("Content URL", contentUrl != null && !contentUrl.isBlank(),
+                "No content URL, so the frontend page can't find this assignment"));
+        checks.add(new Check("AI rubric", isAiRubricReady(assignment.getAiRubric(), points),
+                "AI rubric is missing or not on this assignment's points scale; grading falls back to the default rubric"));
+        double max = maxScore(points);
+        long overPoints = submissions.stream()
+                .filter(s -> s.getGrade() != null && s.getGrade() > max + 0.000001).count();
+        checks.add(new Check("Grades in range", overPoints == 0, overPoints + " submission(s) graded above the points"));
+        long queued = submissions.stream().filter(s -> Boolean.TRUE.equals(s.getNeedsAiRegrade())).count();
+        checks.add(new Check("AI queue", queued == 0, queued + " submission(s) still waiting for an AI grade"));
+        return checks;
+    }
+
     /**
      * One weighted hack from the assignment page. {@code weight} is as written on the page
      * (60 for "60%"); grading normalizes by the total so weights needn't add up to 100.
