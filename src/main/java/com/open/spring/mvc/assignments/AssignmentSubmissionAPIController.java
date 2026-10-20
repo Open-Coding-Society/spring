@@ -2,14 +2,17 @@ package com.open.spring.mvc.assignments;
 
 import java.nio.file.Paths;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -425,6 +428,7 @@ public class AssignmentSubmissionAPIController {
         // we have a correct submission
         submission.setGrade(grade);
         submission.setFeedback(feedback);
+        submission.setGradedAt(LocalDateTime.now());
         // A teacher's grade is final; don't let a pending AI re-grade replace it.
         submission.setNeedsAiRegrade(false);
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
@@ -446,6 +450,62 @@ public class AssignmentSubmissionAPIController {
     public ResponseEntity<?> fixOutOfRangeGradesStatus(@AuthenticationPrincipal UserDetails userDetails) {
         ResponseEntity<?> denied = requireTeacherOrAdmin(userDetails);
         return denied != null ? denied : ResponseEntity.ok(aiRegradeService.getFixStatus());
+    }
+
+    /**
+     * The AI grading queue with ETAs. Teachers/admins see every queued submission; anyone else
+     * only sees their own (or their groups') submissions, plus the total queue length.
+     */
+    @GetMapping("/ai-queue")
+    public ResponseEntity<?> aiQueue(@AuthenticationPrincipal UserDetails userDetails) {
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required"));
+        }
+        AssignmentAiRegradeService.QueueSnapshot snapshot = aiRegradeService.queueSnapshot();
+        List<AssignmentAiRegradeService.QueueEntry> entries = snapshot.entries();
+        if (!assignmentAuthorizationService.isTeacherOrAdmin(currentUser)) {
+            Set<Long> submitterIds = new HashSet<>();
+            submitterIds.add(currentUser.getId());
+            groupRepo.findGroupsByPersonId(currentUser.getId()).forEach(group -> submitterIds.add(group.getId()));
+            entries = entries.stream().filter(entry -> submitterIds.contains(entry.submitterId())).toList();
+        }
+        Map<String, Object> body = new HashMap<>();
+        body.put("running", snapshot.running());
+        body.put("nextRunInSeconds", snapshot.nextRunInSeconds());
+        body.put("secondsPerGrade", snapshot.secondsPerGrade());
+        body.put("queueLength", snapshot.entries().size());
+        body.put("entries", entries);
+        return ResponseEntity.ok(body);
+    }
+
+    /** Skip the queue: AI-grade one queued submission now (teacher/admin; for testing). */
+    @PostMapping("/ai-queue/{submissionId}/grade-now")
+    public ResponseEntity<?> gradeQueuedNow(@PathVariable Long submissionId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        ResponseEntity<?> denied = requireTeacherOrAdmin(userDetails);
+        if (denied != null) {
+            return denied;
+        }
+        AssignmentAiRegradeService.GradeNowResult result = aiRegradeService.gradeNow(submissionId);
+        HttpStatus status = switch (result.status()) {
+            case "graded" -> HttpStatus.OK;
+            case "busy", "not_queued" -> HttpStatus.CONFLICT;
+            default -> HttpStatus.BAD_GATEWAY;
+        };
+        return ResponseEntity.status(status).body(result);
+    }
+
+    /** Start a full AI queue run now instead of waiting for the timer (teacher/admin). */
+    @PostMapping("/ai-queue/run-now")
+    public ResponseEntity<?> runAiQueueNow(@AuthenticationPrincipal UserDetails userDetails) {
+        ResponseEntity<?> denied = requireTeacherOrAdmin(userDetails);
+        if (denied != null) {
+            return denied;
+        }
+        return aiRegradeService.runQueueNow()
+                ? ResponseEntity.accepted().body(Map.of("status", "started"))
+                : ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", "A grading run is already in progress."));
     }
 
     /** Null when allowed; otherwise the 401/403 response. AI grading calls a metered API. */
