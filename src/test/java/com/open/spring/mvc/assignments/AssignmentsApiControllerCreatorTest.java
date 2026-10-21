@@ -96,6 +96,7 @@ class AssignmentsApiControllerCreatorTest {
         ReflectionTestUtils.setField(controller, "assignmentCreatorSyncService", creatorSyncService);
         ReflectionTestUtils.setField(controller, "assignmentCourseSyncService", courseSyncService);
         ReflectionTestUtils.setField(controller, "aiRegradeService", aiRegradeService);
+        ReflectionTestUtils.setField(controller, "groupRepo", groupsRepository);
 
         bot = syncBot(100L, "pages-bot");
         firstCreator = student(1L, "AdityaS-2010");
@@ -391,8 +392,63 @@ class AssignmentsApiControllerCreatorTest {
 
     @Test
     void extractUnknownAssignmentReturns404() {
+        when(personRepo.findByUid("boss")).thenReturn(admin(50L, "boss"));
         when(assignmentRepo.findById(99L)).thenReturn(java.util.Optional.empty());
-        assertEquals(404, controller.extractAssignment(99L).getStatusCode().value());
+        assertEquals(404, controller.extractAssignment(99L, caller("boss", "ROLE_ADMIN")).getStatusCode().value());
+    }
+
+    /** Tracker endpoints and the teacher/admin checks added for the admin UI revamp. */
+    @Nested
+    class TrackerAdmin {
+        private final UserDetails studentCaller = caller("AdityaS-2010", "ROLE_STUDENT");
+
+        @Test
+        void studentsCannotDeleteOrManageGraders() {
+            assertForbidden(() -> controller.deleteAssignment(1L, studentCaller));
+            assertForbidden(() -> controller.assignGradersToAssignment(1L, List.of(2L), studentCaller));
+            assertForbidden(() -> controller.randomizePeerGraders(1L, studentCaller));
+            assertForbidden(() -> controller.bulkExtractAssignments(studentCaller));
+            assertForbidden(() -> controller.trackerAssignments(studentCaller));
+            assertForbidden(() -> controller.createTestAssignment(studentCaller));
+            verify(assignmentRepo, never()).delete(any());
+        }
+
+        @Test
+        void testAssignmentPassesItsOwnChecks() {
+            when(personRepo.findByUid("boss")).thenReturn(admin(50L, "boss"));
+            ResponseEntity<?> response = controller.createTestAssignment(caller("boss", "ROLE_ADMIN"));
+
+            assertEquals(201, response.getStatusCode().value());
+            org.mockito.ArgumentCaptor<Assignment> saved = org.mockito.ArgumentCaptor.forClass(Assignment.class);
+            verify(assignmentRepo).save(saved.capture());
+            Assignment created = saved.getValue();
+            created.setAiRubric("Score 0.9: great\nScore 0.5: ok\nScore 0: missing");
+            List<AssignmentRubricService.Check> checks = AssignmentRubricService.runChecks(created, List.of());
+            assertTrue(checks.stream().allMatch(AssignmentRubricService.Check::ok), checks.toString());
+        }
+
+        @Test
+        void checksFlagBrokenAssignment() {
+            Assignment broken = assignment(7L, "Broken");
+            broken.setPoints(null);
+            broken.setDueDate("2026-12-31");
+            broken.setAssignmentType(null);
+            AssignmentSubmission overGraded = AssignmentCreatorFixtures.submission(1L, broken);
+            overGraded.setGrade(4.0);
+            overGraded.setNeedsAiRegrade(true);
+
+            List<String> failed = AssignmentRubricService.runChecks(broken, List.of(overGraded)).stream()
+                .filter(check -> !check.ok()).map(AssignmentRubricService.Check::check).toList();
+
+            assertTrue(failed.containsAll(List.of("Points", "Due date", "Submission type",
+                "AI rubric", "Grades in range", "AI queue")), failed.toString());
+        }
+
+        private void assertForbidden(org.junit.jupiter.api.function.Executable call) {
+            org.springframework.web.server.ResponseStatusException e =
+                org.junit.jupiter.api.Assertions.assertThrows(org.springframework.web.server.ResponseStatusException.class, call);
+            assertEquals(403, e.getStatusCode().value());
+        }
     }
 
     /** Rubric readiness (AssignmentRubricService) and the AI re-grade job built on it. */
