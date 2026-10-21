@@ -515,20 +515,22 @@ public class Person extends Submitter implements Comparable<Person> {
         return all;
     }
 
-    // Complexity rule shared across the whole password-reset pipeline (this field,
-    // flask's model/user.py validate_password, and pages' getPasswordStrength in
-    // support.md) -- keep the required special-character set identical across all
-    // three so a password accepted by one backend is never rejected by the other.
+    // The one password rule for every account. Same rule in flask's model/user.py
+    // (meets_password_rule) and pages' assets/js/api/passwordRules.js, so a password
+    // accepted by one is never rejected by another.
+    public static final String PASSWORD_RULE = "Password needs 8+ characters with an uppercase letter, "
+            + "a lowercase letter, a number, and one of ` ~ ! @ # $ % ^ & * ( )";
+
+    public static boolean meetsPasswordRule(String password) {
+        return password != null
+                && password.length() >= 8
+                && password.matches(".*[A-Z].*")
+                && password.matches(".*[a-z].*")
+                && password.matches(".*[0-9].*")
+                && password.matches(".*[`~!@#$%^&*()].*");
+    }
+
     public boolean checkPassword() {
-        if (password == null || password.length() < 8) {
-            return false;
-        }
-
-        boolean hasUpper = password.matches(".*[A-Z].*");
-        boolean hasLower = password.matches(".*[a-z].*");
-        boolean hasNumber = password.matches(".*[0-9].*");
-        boolean hasSpecial = password.matches(".*[`~!@#$%^&*()].*");
-
-        return hasUpper && hasLower && hasNumber && hasSpecial;
+        return meetsPasswordRule(password);
     }
 }
