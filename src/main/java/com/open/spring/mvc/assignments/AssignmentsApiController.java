@@ -897,7 +897,8 @@ public class AssignmentsApiController {
      * @return A JSON object indicating that the assignment was deleted.
      */
     @PostMapping("/delete/{id}")
-    public ResponseEntity<?> deleteAssignment(@PathVariable Long id) {
+    public ResponseEntity<?> deleteAssignment(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         Assignment assignment = assignmentRepo.findById(id).orElse(null);
         if (assignment != null) {
             assignmentRepo.delete(assignment);
@@ -908,6 +909,117 @@ public class AssignmentsApiController {
         Map<String, String> error = new HashMap<>();
         error.put("error", "Assignment not found");
         return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+    }
+
+    /** An assignment plus the submission counts and rubric state the tracker filters on. */
+    @Getter
+    @Setter
+    public static class TrackerAssignmentDto extends AssignmentDto {
+        public boolean rubricReady;
+        public long submissionCount;
+        public long ungradedCount;
+        public long pendingAiCount;
+        public Double averageGrade;
+
+        public TrackerAssignmentDto(Assignment assignment, List<String> courseCodes) {
+            super(assignment, null, courseCodes);
+            this.rubricReady = AssignmentRubricService.isAiRubricReady(assignment.getAiRubric(), assignment.getPoints());
+        }
+    }
+
+    /**
+     * Every assignment for the admin tracker, with submission stats from one grouped query
+     * instead of loading each assignment's submissions.
+     */
+    @GetMapping("/tracker")
+    @Transactional
+    public ResponseEntity<?> trackerAssignments(@AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        Map<Long, Map<String, Object>> stats = new HashMap<>();
+        jdbcTemplate.queryForList(
+                "SELECT assignment_id, COUNT(*) AS total, "
+                        + "SUM(CASE WHEN grade IS NULL THEN 1 ELSE 0 END) AS ungraded, "
+                        + "SUM(CASE WHEN needs_ai_regrade = 1 THEN 1 ELSE 0 END) AS pending_ai, "
+                        + "AVG(grade) AS average_grade "
+                        + "FROM assignment_submission GROUP BY assignment_id")
+            .forEach(row -> {
+                Object id = row.get("assignment_id");
+                if (id != null) {
+                    stats.put(((Number) id).longValue(), row);
+                }
+            });
+        List<TrackerAssignmentDto> dtos = new ArrayList<>();
+        for (Assignment assignment : assignmentRepo.findAll()) {
+            TrackerAssignmentDto dto = new TrackerAssignmentDto(
+                    assignment, assignmentCourseSyncService.courseCodesOf(assignment));
+            Map<String, Object> row = stats.get(assignment.getId());
+            if (row != null) {
+                dto.submissionCount = toLong(row.get("total"));
+                dto.ungradedCount = toLong(row.get("ungraded"));
+                dto.pendingAiCount = toLong(row.get("pending_ai"));
+                dto.averageGrade = row.get("average_grade") == null ? null : ((Number) row.get("average_grade")).doubleValue();
+            }
+            dtos.add(dto);
+        }
+        return ResponseEntity.ok(dtos);
+    }
+
+    private static long toLong(Object value) {
+        return value == null ? 0 : ((Number) value).longValue();
+    }
+
+    /** Regenerates the assignment's AI rubric now (about 10-20s), then re-grades anything queued. */
+    @PostMapping("/{id}/ai-rubric/regenerate")
+    public ResponseEntity<?> regenerateAiRubric(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        Assignment assignment = assignmentRepo.findById(id).orElse(null);
+        if (assignment == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Assignment not found"));
+        }
+        String generated = rubricService.generateRubric(
+                assignment.getName(), assignment.getDescription(), null, assignment.getPoints());
+        if (generated == null || generated.isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(Map.of("error", "The AI could not generate a rubric right now. Try again in a minute."));
+        }
+        // Update only the rubric column so concurrent edits to the assignment aren't overwritten.
+        jdbcTemplate.update("UPDATE assignment SET ai_rubric = ? WHERE id = ?", generated, id);
+        aiRegradeService.requestRubric(id, assignment.getName(), assignment.getDescription(), null);
+        return ResponseEntity.ok(Map.of("aiRubric", generated,
+                "rubricReady", AssignmentRubricService.isAiRubricReady(generated, assignment.getPoints())));
+    }
+
+    /**
+     * Creates a throwaway "[TEST]" assignment with valid values (text submissions, 1 point, due in
+     * a week, no course) for checking the submit and grading flow without touching a real assignment.
+     */
+    @PostMapping("/test")
+    @Transactional
+    public ResponseEntity<?> createTestAssignment(@AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        String dueDate = java.time.LocalDate.now().plusWeeks(1).format(java.time.format.DateTimeFormatter.ofPattern("MM/dd/yyyy"));
+        Assignment assignment = new Assignment("[TEST] " + stamp, "test",
+                "Test assignment created from the tracker. Write a short paragraph about what you learned today.",
+                1.0, dueDate, "text");
+        assignment.setContentUrl("/test-assignments/" + stamp);
+        normalizeAssignmentSequenceForSqlite();
+        Assignment saved = saveAssignmentWithRetry(assignment);
+        aiRegradeService.requestRubric(saved.getId(), saved.getName(), saved.getDescription(), null);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new AssignmentDto(saved, null, assignmentCourseSyncService.courseCodesOf(saved)));
+    }
+
+    /** Health checks for one assignment; see {@link AssignmentRubricService#runChecks}. */
+    @GetMapping("/{id}/checks")
+    @Transactional
+    public ResponseEntity<?> checkAssignment(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        Assignment assignment = assignmentRepo.findById(id).orElse(null);
+        if (assignment == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Assignment not found"));
+        }
+        return ResponseEntity.ok(AssignmentRubricService.runChecks(assignment, submissionRepo.findByAssignmentId(id)));
     }
 
     /**
@@ -1082,7 +1194,9 @@ public class AssignmentsApiController {
      * @return A response indicating success or failure.
      */
     @PostMapping("/assignGraders/{id}")
-    public ResponseEntity<?> assignGradersToAssignment( @PathVariable Long id, @RequestBody List<Long> personIds ) {
+    public ResponseEntity<?> assignGradersToAssignment(@PathVariable Long id, @RequestBody List<Long> personIds,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         Optional<Assignment> assignmentOptional = assignmentRepo.findById(id);
         if (!assignmentOptional.isPresent()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Assignment not found");
@@ -1206,7 +1320,8 @@ public class AssignmentsApiController {
      * @return A list of AssignmentDto objects representing all assignments.
      */
     @GetMapping("/bulk/extract")
-    public ResponseEntity<List<AssignmentDto>> bulkExtractAssignments() {
+    public ResponseEntity<List<AssignmentDto>> bulkExtractAssignments(@AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         // Fetch all Assignment entities from the database
         List<Assignment> assignment = assignmentRepo.findAll();
 
@@ -1280,7 +1395,8 @@ public class AssignmentsApiController {
      */
     @PostMapping("/randomizeGraders/{id}")
     @Transactional
-    public ResponseEntity<?> randomizePeerGraders(@PathVariable Long id) {
+    public ResponseEntity<?> randomizePeerGraders(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         Optional<Assignment> assignmentOptional = assignmentRepo.findById(id);
         if (!assignmentOptional.isPresent()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Assignment not found");
@@ -1352,7 +1468,8 @@ public class AssignmentsApiController {
      * @return A ResponseEntity containing the AssignmentDto object if found, or a 404 error if not found.
      */
     @GetMapping("/extract/{id}")
-    public ResponseEntity<AssignmentDto> extractAssignment(@PathVariable Long id) {
+    public ResponseEntity<AssignmentDto> extractAssignment(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         Optional<Assignment> curAssignment = assignmentRepo.findById(id);
         if (curAssignment.isEmpty()) {
             return ResponseEntity.notFound().build();
