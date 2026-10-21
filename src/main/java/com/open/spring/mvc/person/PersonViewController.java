@@ -627,12 +627,9 @@ public class PersonViewController {
             return new ResponseEntity<Object>(HttpStatus.NO_CONTENT);
         }
 
-        // Check complexity (same rule as PersonDetailsService.save) before consuming
-        // the single-use reset token, so a rejected password doesn't burn the token.
-        Person passwordCheck = new Person();
-        passwordCheck.setPassword(requestBody.getNewPassword());
-        if (!passwordCheck.checkPassword()) {
-            return new ResponseEntity<Object>(HttpStatus.BAD_REQUEST);
+        // Check the rule before the single-use reset token is spent on a weak password
+        if (!Person.meetsPasswordRule(requestBody.getNewPassword())) {
+            throw new WeakPasswordException();
         }
 
         if (!ResetCode.validateAndConsume(personToReset.getUid(), requestBody.getResetToken())) {
