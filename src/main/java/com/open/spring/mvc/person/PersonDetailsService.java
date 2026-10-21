@@ -81,6 +81,15 @@ public class PersonDetailsService implements UserDetailsService {  // "implement
         return personJpaRepository.findByLikeTermNative(like_term);
     }
 
+    // Checks a new plaintext password against Person.PASSWORD_RULE and encodes it.
+    // For callers that set the password on an existing person themselves.
+    public String encodeNewPassword(String rawPassword) {
+        if (!Person.meetsPasswordRule(rawPassword)) {
+            throw new WeakPasswordException();
+        }
+        return passwordEncoder.encode(rawPassword);
+    }
+
     // encode password prior to sava
     public void save(Person person) {
         if (person.getPassword() == null || person.getPassword().isEmpty()) {
@@ -89,7 +98,7 @@ public class PersonDetailsService implements UserDetailsService {  // "implement
         // Always a plaintext password here (new-account creation / seed init), so
         // this is the only place in this overload where complexity applies.
         if (!person.checkPassword()) {
-            throw new IllegalArgumentException("Password does not meet complexity requirements");
+            throw new WeakPasswordException();
         }
         person.setPassword(passwordEncoder.encode(person.getPassword()));
         personJpaRepository.save(person);
@@ -106,7 +115,7 @@ public class PersonDetailsService implements UserDetailsService {  // "implement
             // plaintext candidate, and checking a hash against these rules would
             // fail unpredictably depending on its byte content.
             if (!person.checkPassword()) {
-                throw new IllegalArgumentException("Password does not meet complexity requirements");
+                throw new WeakPasswordException();
             }
             // Encode the password only if it's not the same as before
             person.setPassword(passwordEncoder.encode(person.getPassword()));
