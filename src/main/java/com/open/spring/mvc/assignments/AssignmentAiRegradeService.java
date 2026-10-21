@@ -1,16 +1,20 @@
 package com.open.spring.mvc.assignments;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.Ordered;
@@ -23,6 +27,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 
 /**
@@ -46,7 +51,19 @@ public class AssignmentAiRegradeService {
     private final AssignmentRubricService rubricService;
     private final JdbcTemplate jdbcTemplate;
     private final AtomicBoolean running = new AtomicBoolean(false);
+    /** Submissions being graded right now via {@link #gradeNow}; the timed run skips them. */
+    private final Set<Long> gradingNow = ConcurrentHashMap.newKeySet();
     private volatile FixGradesStatus fixStatus = new FixGradesStatus(false, 0, 0, 0, 0);
+    // Rolling average of how long one background grade takes, for the queue ETA.
+    private volatile double avgGradeSeconds = 15.0;
+    private volatile long nextRunAtMillis;
+    @Value("${assignments.ai-regrade.initial-delay-ms:60000}")
+    private long initialDelayMs = 60000;
+    @Value("${assignments.ai-regrade.interval-ms:300000}")
+    private long intervalMs = 300000;
+    // Gemini requests per minute the key allows; the ETA never assumes grading faster than this.
+    @Value("${assignments.ai-grade.rpm:15}")
+    private int gradesPerMinute = 15;
     private final ExecutorService executor = Executors.newSingleThreadExecutor(runnable -> {
         Thread thread = new Thread(runnable, "assignment-ai-regrade");
         thread.setDaemon(true);
@@ -67,7 +84,7 @@ public class AssignmentAiRegradeService {
     }
 
     /**
-     * Adds the needs_ai_regrade and hack_weights columns; runs before other startup runners
+     * Adds the needs_ai_regrade, hack_weights and graded_at columns; runs before other startup runners
      * that load submissions or assignments.
      */
     @Bean
@@ -76,6 +93,7 @@ public class AssignmentAiRegradeService {
         return args -> {
             addColumn("assignment_submission", "needs_ai_regrade BOOLEAN");
             addColumn("assignment", "hack_weights TEXT");
+            addColumn("assignment_submission", "graded_at DATETIME");
         };
     }
 
@@ -128,6 +146,11 @@ public class AssignmentAiRegradeService {
         }
     }
 
+    @PostConstruct
+    void initNextRun() {
+        nextRunAtMillis = System.currentTimeMillis() + initialDelayMs;
+    }
+
     @Scheduled(
             initialDelayString = "${assignments.ai-regrade.initial-delay-ms:60000}",
             fixedDelayString = "${assignments.ai-regrade.interval-ms:300000}")
@@ -151,14 +174,132 @@ public class AssignmentAiRegradeService {
             for (Map.Entry<Long, List<Long>> entry : byAssignment.entrySet()) {
                 Assignment assignment = assignmentRepo.findById(entry.getKey()).orElse(null);
                 if (assignment != null && ensureAiRubric(assignment)) {
-                    entry.getValue().forEach(submissionId -> regrade(submissionId, assignment, true));
+                    entry.getValue().stream().filter(submissionId -> !gradingNow.contains(submissionId))
+                            .forEach(submissionId -> regrade(submissionId, assignment, true));
                 }
             }
         } catch (Exception e) {
             logger.warn("AI re-grade run failed: {}", e.getMessage());
         } finally {
+            nextRunAtMillis = System.currentTimeMillis() + intervalMs;
             running.set(false);
         }
+    }
+
+    /**
+     * Starts a full queue run now instead of waiting for the timer (teacher "run queue now").
+     * Runs on its own thread so it doesn't hold up rubric generation on the executor.
+     * Returns false if a run is already in progress.
+     */
+    public boolean runQueueNow() {
+        if (running.get()) {
+            return false;
+        }
+        Thread thread = new Thread(this::runOnce, "ai-regrade-now");
+        thread.setDaemon(true);
+        thread.start();
+        return true;
+    }
+
+    public record GradeNowResult(String status, String message) {
+    }
+
+    /**
+     * Skips the queue: grades one queued submission right away (generating the assignment's
+     * rubric first if needed), blocking until done. Only queued submissions, so a teacher's
+     * final grade can't be replaced from here.
+     */
+    public GradeNowResult gradeNow(Long submissionId) {
+        if (!gradingNow.add(submissionId)) {
+            return new GradeNowResult("busy", "This submission is already being graded.");
+        }
+        try {
+            AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
+            if (submission == null || !Boolean.TRUE.equals(submission.getNeedsAiRegrade())) {
+                return new GradeNowResult("not_queued", "This submission is no longer in the AI queue.");
+            }
+            Long assignmentId = jdbcTemplate.queryForObject(
+                    "SELECT assignment_id FROM assignment_submission WHERE id = ?", Long.class, submissionId);
+            Assignment assignment = assignmentId == null ? null : assignmentRepo.findById(assignmentId).orElse(null);
+            if (assignment == null) {
+                return new GradeNowResult("failed", "The submission's assignment no longer exists.");
+            }
+            if (!ensureAiRubric(assignment)) {
+                return new GradeNowResult("failed", "Could not generate a rubric for this assignment; try again.");
+            }
+            return regrade(submissionId, assignment, true)
+                    ? new GradeNowResult("graded", "Graded.")
+                    : new GradeNowResult("failed", "The AI grader could not grade it right now; see the server log.");
+        } finally {
+            gradingNow.remove(submissionId);
+        }
+    }
+
+    /**
+     * One submission waiting in the AI grading queue; position is 1-based. The submitter is a
+     * person (name + uid) or a group (group name, uid null, members as "Name (uid)").
+     */
+    public record QueueEntry(long submissionId, long assignmentId, String assignmentName, Long submitterId,
+            String submitterName, String submitterUid, List<String> members,
+            int position, long etaSeconds, boolean gradingNow) {
+    }
+
+    public record QueueSnapshot(boolean running, long nextRunInSeconds, double secondsPerGrade,
+            List<QueueEntry> entries) {
+    }
+
+    /**
+     * The flagged submissions in the order {@link #runOnce} grades them (by assignment, in order of
+     * each assignment's first flagged submission), each with an ETA from the next run time and the
+     * average grade time, capped by the key's rate limit.
+     */
+    public QueueSnapshot queueSnapshot() {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT s.id, s.assignment_id, s.submitter_id, a.name, p.name AS person_name, p.uid, "
+                        + "g.name AS group_name FROM assignment_submission s "
+                        + "LEFT JOIN assignment a ON a.id = s.assignment_id "
+                        + "LEFT JOIN person p ON p.id = s.submitter_id "
+                        + "LEFT JOIN `groups` g ON g.id = s.submitter_id "
+                        + "WHERE s.needs_ai_regrade = 1 ORDER BY s.id");
+        Map<Long, List<String>> groupMembers = new HashMap<>();
+        jdbcTemplate.queryForList(
+                "SELECT DISTINCT gm.group_id, p.name, p.uid FROM group_members gm "
+                        + "JOIN person p ON p.id = gm.person_id "
+                        + "JOIN assignment_submission s ON s.submitter_id = gm.group_id "
+                        + "WHERE s.needs_ai_regrade = 1 ORDER BY p.name")
+                .forEach(row -> groupMembers
+                        .computeIfAbsent(((Number) row.get("group_id")).longValue(), id -> new ArrayList<>())
+                        .add(row.get("name") + " (" + row.get("uid") + ")"));
+        Map<Long, Map<String, Object>> byId = new LinkedHashMap<>();
+        rows.forEach(row -> byId.put(((Number) row.get("id")).longValue(), row));
+        boolean isRunning = running.get();
+        long untilNextRun = isRunning ? 0 : Math.max(0, (nextRunAtMillis - System.currentTimeMillis()) / 1000);
+        double perGrade = secondsPerGrade();
+        List<QueueEntry> entries = new ArrayList<>();
+        for (List<Long> ids : groupByAssignment(rows).values()) {
+            for (Long id : ids) {
+                Map<String, Object> row = byId.get(id);
+                int position = entries.size() + 1;
+                Number submitter = (Number) row.get("submitter_id");
+                Long submitterId = submitter == null ? null : submitter.longValue();
+                boolean isGroup = row.get("person_name") == null && row.get("uid") == null && row.get("group_name") != null;
+                entries.add(new QueueEntry(id, ((Number) row.get("assignment_id")).longValue(),
+                        (String) row.get("name"), submitterId,
+                        (String) (isGroup ? row.get("group_name") : row.get("person_name")),
+                        (String) row.get("uid"),
+                        isGroup ? groupMembers.getOrDefault(submitterId, List.of()) : List.of(),
+                        position, untilNextRun + Math.round(position * perGrade), gradingNow.contains(id)));
+            }
+        }
+        return new QueueSnapshot(isRunning, untilNextRun, perGrade, entries);
+    }
+
+    double secondsPerGrade() {
+        return Math.max(avgGradeSeconds, 60.0 / Math.max(1, gradesPerMinute));
+    }
+
+    void recordGradeSeconds(double seconds) {
+        avgGradeSeconds = avgGradeSeconds * 0.8 + seconds * 0.2;
     }
 
     /** Progress of the latest "fix out-of-range grades" run, polled by the submissions page. */
@@ -254,7 +395,9 @@ public class AssignmentAiRegradeService {
             }
             // Loaded outside a session, so swap the lazy proxy for the already-loaded assignment.
             submission.setAssignment(assignment);
+            long started = System.nanoTime();
             AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
+            recordGradeSeconds((System.nanoTime() - started) / 1e9);
             if ("failed".equals(result.status()) || (!flaggedOnly && !"graded".equals(result.status()))) {
                 return false; // Background job: leave flagged so the next run retries.
             }

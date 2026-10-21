@@ -172,6 +172,16 @@ public class PersonApiController {
                 return new ResponseEntity<>(responseObject.toString(), HttpStatus.FORBIDDEN);
             }
 
+            if (passwordChanged) {
+                // This path encodes directly instead of going through PersonDetailsService.save(),
+                // so apply the same complexity rule as signup and password reset here.
+                Person passwordCheck = new Person();
+                passwordCheck.setPassword(personDto.getPassword());
+                if (!passwordCheck.checkPassword()) {
+                    return weakPasswordResponse();
+                }
+            }
+
             StringBuilder changedFields = new StringBuilder();
             if (emailChanged) {
                 // Check if email is already taken by another person
@@ -387,6 +397,14 @@ public class PersonApiController {
             JSONObject responseObject = new JSONObject();
             responseObject.put("error", "Password is required and no DEFAULT_PASSWORD is configured");
             return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+
+        // Check before save(): there a weak password throws and surfaces as a generic 500,
+        // so signup clients (which only require 8 characters for Flask) can't tell users why.
+        Person passwordCheck = new Person();
+        passwordCheck.setPassword(rawPassword);
+        if (!passwordCheck.checkPassword()) {
+            return weakPasswordResponse();
         }
 
         String profilePicture = personDto.getPfp();
@@ -896,5 +914,15 @@ public class PersonApiController {
     public ResponseEntity<List<Person>> searchPeople(@RequestParam("query") String query) {
         List<Person> people = repository.findByNameContainingIgnoreCaseOrEmailContainingIgnoreCase(query, query);
         return new ResponseEntity<>(people, HttpStatus.OK);
+    }
+
+    // Spells out Person.checkPassword()'s rule so clients can show it to the user.
+    private ResponseEntity<Object> weakPasswordResponse() {
+        HttpHeaders responseHeaders = new HttpHeaders();
+        responseHeaders.setContentType(MediaType.APPLICATION_JSON);
+        JSONObject responseObject = new JSONObject();
+        responseObject.put("error", "Password needs 8+ characters with an uppercase letter, a lowercase letter, "
+                + "a number, and one of ` ~ ! @ # $ % ^ & * ( )");
+        return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.BAD_REQUEST);
     }
 }
