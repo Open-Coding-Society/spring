@@ -727,6 +727,12 @@ public class PersonApiController {
                 }
             }
 
+            // Rejects a weak password (400) before anything on the person changes.
+            // This endpoint had no password rule check before.
+            String newPasswordHash = passwordChanged
+                    ? personDetailsService.encodeNewPassword(personDto.getPassword())
+                    : null;
+
             StringBuilder changedFields = new StringBuilder();
 
             // Check for duplicate email if email is being changed
@@ -755,7 +761,7 @@ public class PersonApiController {
                 changedFields.append("email,");
             }
             if (passwordChanged) {
-                existingPerson.setPassword(passwordEncoder.encode(personDto.getPassword()));
+                existingPerson.setPassword(newPasswordHash);
                 changedFields.append("password,");
             }
             if (nameChanged) {
