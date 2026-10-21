@@ -910,14 +910,4 @@ public class PersonApiController {
         List<Person> people = repository.findByNameContainingIgnoreCaseOrEmailContainingIgnoreCase(query, query);
         return new ResponseEntity<>(people, HttpStatus.OK);
     }
-
-    // Spells out Person.checkPassword()'s rule so clients can show it to the user.
-    private ResponseEntity<Object> weakPasswordResponse() {
-        HttpHeaders responseHeaders = new HttpHeaders();
-        responseHeaders.setContentType(MediaType.APPLICATION_JSON);
-        JSONObject responseObject = new JSONObject();
-        responseObject.put("error", "Password needs 8+ characters with an uppercase letter, a lowercase letter, "
-                + "a number, and one of ` ~ ! @ # $ % ^ & * ( )");
-        return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.BAD_REQUEST);
-    }
 }
