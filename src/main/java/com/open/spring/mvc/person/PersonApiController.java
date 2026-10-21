@@ -399,14 +399,6 @@ public class PersonApiController {
             return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.INTERNAL_SERVER_ERROR);
         }
 
-        // Check before save(): there a weak password throws and surfaces as a generic 500,
-        // so signup clients (which only require 8 characters for Flask) can't tell users why.
-        Person passwordCheck = new Person();
-        passwordCheck.setPassword(rawPassword);
-        if (!passwordCheck.checkPassword()) {
-            return weakPasswordResponse();
-        }
-
         String profilePicture = personDto.getPfp();
         if (profilePicture != null) {
             profilePicture = profilePicture.trim();
@@ -441,6 +433,8 @@ public class PersonApiController {
             JSONObject responseObject = new JSONObject();
             responseObject.put("error", "Unable to create user due to duplicate constrained fields (likely uid/email/sid)");
             return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.CONFLICT);
+        } catch (WeakPasswordException e) {
+            throw e; // ExceptionHandlerAdvice sends the 400 with the rule
         } catch (Exception e) {
             logger.error("Person create failed for uid={} email={}", uid, email, e);
             HttpHeaders responseHeaders = new HttpHeaders();
