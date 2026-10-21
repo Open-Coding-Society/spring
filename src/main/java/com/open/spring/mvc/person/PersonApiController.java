@@ -172,15 +172,10 @@ public class PersonApiController {
                 return new ResponseEntity<>(responseObject.toString(), HttpStatus.FORBIDDEN);
             }
 
-            if (passwordChanged) {
-                // This path encodes directly instead of going through PersonDetailsService.save(),
-                // so apply the same complexity rule as signup and password reset here.
-                Person passwordCheck = new Person();
-                passwordCheck.setPassword(personDto.getPassword());
-                if (!passwordCheck.checkPassword()) {
-                    return weakPasswordResponse();
-                }
-            }
+            // Rejects a weak password (400) before anything on the person changes
+            String newPasswordHash = passwordChanged
+                    ? personDetailsService.encodeNewPassword(personDto.getPassword())
+                    : null;
 
             StringBuilder changedFields = new StringBuilder();
             if (emailChanged) {
@@ -195,7 +190,7 @@ public class PersonApiController {
                 changedFields.append("email,");
             }
             if (passwordChanged) {
-                existingPerson.setPassword(passwordEncoder.encode(personDto.getPassword()));
+                existingPerson.setPassword(newPasswordHash);
                 changedFields.append("password,");
             }
             if (isAdmin && uidChangeRequested) {
