@@ -185,6 +185,9 @@ public class AssignmentSubmissionAPIController {
             return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
         }
 
+        ResponseEntity<?> authorError = validateSubmissionAuthor(userDetails, submitter);
+        if (authorError != null) return authorError;
+
         // Self-assessment is paused (Pages no longer sends it); uncomment this block to require it again.
         // String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
         //         submissionInfo.technicalExcellence,

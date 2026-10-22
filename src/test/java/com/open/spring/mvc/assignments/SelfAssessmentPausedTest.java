@@ -64,6 +64,7 @@ class SelfAssessmentPausedTest {
         ReflectionTestUtils.setField(controller, "assignmentRepo", assignmentRepo);
         ReflectionTestUtils.setField(controller, "personRepo", personRepo);
         ReflectionTestUtils.setField(controller, "aiGradingService", aiGradingService);
+        ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
 
         AssignmentSubmissionUploadService uploadService = new AssignmentSubmissionUploadService(
                 fileHandler, personRepo, assignmentRepo, submissionRepo, aiGradingService);
@@ -111,7 +112,7 @@ class SelfAssessmentPausedTest {
     void jsonSubmissionWithNullSelfAssessmentIsCreated() {
         linkAssignment();
         // Pages sends the five fields as null; a fresh DTO leaves them null too.
-        ResponseEntity<?> response = controller.submitAssignment(20L, linkDto());
+        ResponseEntity<?> response = controller.submitAssignment(20L, linkDto(), studentDetails);
 
         assertEquals(201, response.getStatusCode().value());
         AssignmentSubmission saved = savedSubmission();
@@ -132,7 +133,7 @@ class SelfAssessmentPausedTest {
         dto.aiOrchestration = 2;
         dto.selfAssessmentReflection = "went well";
 
-        ResponseEntity<?> response = controller.submitAssignment(20L, dto);
+        ResponseEntity<?> response = controller.submitAssignment(20L, dto, studentDetails);
 
         assertEquals(201, response.getStatusCode().value());
         AssignmentSubmission saved = savedSubmission();
@@ -141,6 +142,20 @@ class SelfAssessmentPausedTest {
         assertEquals(5, saved.getWorkHabits());
         assertEquals(2, saved.getAiOrchestration());
         assertEquals("went well", saved.getSelfAssessmentReflection());
+    }
+
+    @Test
+    void jsonSubmissionAsAnotherStudentIsStillForbidden() {
+        linkAssignment();
+        Person other = student(2L, "mallory");
+        when(personRepo.findByUid("mallory")).thenReturn(other);
+        UserDetails otherDetails = User.withUsername("mallory").password("ignored").authorities("ROLE_STUDENT").build();
+
+        // Pausing self-assessment must not skip the author check that runs before it.
+        ResponseEntity<?> response = controller.submitAssignment(20L, linkDto(), otherDetails);
+
+        assertEquals(403, response.getStatusCode().value());
+        Mockito.verify(submissionRepo, Mockito.never()).save(any(AssignmentSubmission.class));
     }
 
     @Test
