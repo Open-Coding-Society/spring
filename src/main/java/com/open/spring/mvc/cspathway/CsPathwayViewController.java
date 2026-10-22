@@ -14,10 +14,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
 public class CsPathwayViewController {
     private final CsPathwayScoreService scoreService;
     private final CsPathwaySetupReportService setupReportService;
+    private final CsPathwayHelpRequestService helpRequestService;
 
-    public CsPathwayViewController(CsPathwayScoreService scoreService, CsPathwaySetupReportService setupReportService) {
+    public CsPathwayViewController(CsPathwayScoreService scoreService, CsPathwaySetupReportService setupReportService,
+            CsPathwayHelpRequestService helpRequestService) {
         this.scoreService = scoreService;
         this.setupReportService = setupReportService;
+        this.helpRequestService = helpRequestService;
     }
 
     @GetMapping("/read")
@@ -25,6 +28,7 @@ public class CsPathwayViewController {
         model.addAttribute("levels", CsPathwayLevel.values());
         model.addAttribute("rows", scoreService.getStudentRows());
         model.addAttribute("setupReports", setupReportService.getReportsByUid());
+        model.addAttribute("helpRequests", helpRequestService.getRecentRequests());
         return "cs-pathway/read";
     }
 }

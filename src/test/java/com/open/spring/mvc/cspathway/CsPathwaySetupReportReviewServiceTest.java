@@ -12,6 +12,7 @@ import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -75,6 +76,30 @@ class CsPathwaySetupReportReviewServiceTest {
         assertEquals("INCOMPLETE", result.status());
         assertTrue(result.summary().contains("setup is not complete"));
         assertEquals("ruby installed", result.missingItems().get(0));
+    }
+
+    @Test
+    void reviewListsFailedChecksFromALinuxOrWindowsAgentReport() {
+        CsPathwaySetupReport report = report("FAIL", 11, 0, 1);
+        report.setReport("""
+                === WINDOWS SETUP CHECK v1 ===
+                Started: 2026-10-15 09:30:00 PDT
+                PASS git | Git
+                FAIL vscode | VS Code code command | Install VS Code.
+                Duration: 2 seconds
+                Summary: 11 passed, 0 warned, 1 failed
+                Overall: FAIL
+                === END WINDOWS SETUP CHECK ===
+                """);
+        when(reportService.findReport("toby")).thenReturn(Optional.of(report));
+        geminiResponse = """
+                {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"COMPLETE\\",\\"summary\\":\\"Everything is ready.\\",\\"missingItems\\":[],\\"warnings\\":[]}"}]}}]}
+                """;
+
+        CsPathwaySetupReportReview result = reviewService().review("toby");
+
+        assertEquals("INCOMPLETE", result.status());
+        assertEquals(List.of("VS Code code command"), result.missingItems());
     }
 
     @Test

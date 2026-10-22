@@ -95,6 +95,29 @@ class CsPathwaySetupReportServiceTest {
     }
 
     @Test
+    void saveReportStoresALinuxOrWindowsAgentReport() {
+        CsPathwaySetupReport row = pairedRow("toby", "ABCD2345");
+        when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));
+        String linuxReport = """
+                === LINUX SETUP CHECK v1 ===
+                Started: 2026-10-15 09:30:00 PDT
+                PASS git | Git
+                FAIL vscode | VS Code code command | Install VS Code.
+                Duration: 2 seconds
+                Summary: 11 passed, 0 warned, 1 failed
+                Overall: FAIL
+                === END LINUX SETUP CHECK ===
+                """;
+
+        assertTrue(service.saveReport("ABCD2345", linuxReport));
+
+        assertEquals("FAIL", row.getOverall());
+        assertEquals(11, row.getPassed());
+        assertEquals(1, row.getFailed());
+        assertEquals(linuxReport, row.getReport());
+    }
+
+    @Test
     void saveReportAcceptsASecondRunWithTheSameCode() {
         CsPathwaySetupReport row = pairedRow("toby", "ABCD2345");
         when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));

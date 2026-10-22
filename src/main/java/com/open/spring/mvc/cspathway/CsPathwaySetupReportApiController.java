@@ -46,7 +46,8 @@ public class CsPathwaySetupReportApiController {
 
     /**
      * POST /api/cs-pathway/setup-report/{pairingCode}
-     * Body: the plain-text output of scripts/verifyToolsTerminal.sh.
+     * Body: the plain-text output of scripts/verifyToolsTerminal.sh (macOS) or
+     * scripts/linux_setup_agent.py --check (Linux, Windows/WSL).
      */
     @PostMapping(value = "/{pairingCode}", consumes = MediaType.TEXT_PLAIN_VALUE)
     public ResponseEntity<?> uploadReport(@PathVariable String pairingCode,

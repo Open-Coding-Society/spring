@@ -33,6 +33,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 @Service
 public class CsPathwaySetupReportReviewService {
     private static final Pattern WARN_OR_FAIL_LINE = Pattern.compile("(?m)^\\[(WARN|FAIL)]\\s+(.+?)\\s*$");
+    // Linux/Windows reports (scripts/linux_setup_agent.py --check) write "FAIL <id> | <label> | <fix>".
+    private static final Pattern AGENT_FAIL_LINE = Pattern.compile("(?m)^FAIL\\s+[a-z0-9-]+\\s*\\|\\s*([^|]+?)\\s*(?:\\|.*)?$");
     // Gemini's thinking models can take well over 30s when the service is under load.
     private static final Duration GEMINI_REQUEST_TIMEOUT = Duration.ofSeconds(60);
     // 429/503 and timeouts are usually short demand spikes, so a couple of retries often succeed.
@@ -215,6 +217,10 @@ public class CsPathwaySetupReportReviewService {
             } else {
                 warnings.add(matcher.group(2));
             }
+        }
+        Matcher agentFailures = AGENT_FAIL_LINE.matcher(report.getReport());
+        while (agentFailures.find()) {
+            missingItems.add(agentFailures.group(1));
         }
         return new CsPathwaySetupReportReview(
                 review.status(),
