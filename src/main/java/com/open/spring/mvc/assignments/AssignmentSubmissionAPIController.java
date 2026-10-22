@@ -188,15 +188,16 @@ public class AssignmentSubmissionAPIController {
         ResponseEntity<?> authorError = validateSubmissionAuthor(userDetails, submitter);
         if (authorError != null) return authorError;
 
-        String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
-                submissionInfo.technicalExcellence,
-                submissionInfo.communication,
-                submissionInfo.workHabits,
-                submissionInfo.aiOrchestration,
-                submissionInfo.selfAssessmentReflection);
-        if (selfAssessmentError != null) {
-            return new ResponseEntity<>(Map.of("error", selfAssessmentError), HttpStatus.BAD_REQUEST);
-        }
+        // Self-assessment is paused (Pages no longer sends it); uncomment this block to require it again.
+        // String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
+        //         submissionInfo.technicalExcellence,
+        //         submissionInfo.communication,
+        //         submissionInfo.workHabits,
+        //         submissionInfo.aiOrchestration,
+        //         submissionInfo.selfAssessmentReflection);
+        // if (selfAssessmentError != null) {
+        //     return new ResponseEntity<>(Map.of("error", selfAssessmentError), HttpStatus.BAD_REQUEST);
+        // }
 
         if (assignment != null) {
             if (!hasSubmissionType(submissionInfo.content, assignment)) {
