@@ -1,5 +1,7 @@
 package com.open.spring.mvc.person;
 
+import java.util.Set;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -8,103 +10,72 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import com.open.spring.system.ExceptionHandlerAdvice;
 
-import static org.junit.jupiter.api.Assertions.*;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
+import jakarta.validation.Validation;
+import jakarta.validation.Validator;
 
+import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+
+// The password rule lives on Person (@Pattern on newPassword), and JPA runs it on save.
+// These tests run the same validator JPA uses, without a database.
 public class PasswordCheckTest {
+
+    private static final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
+
+    private Set<ConstraintViolation<Person>> newPasswordViolations(String newPassword) {
+        Person person = new Person();
+        person.setNewPassword(newPassword);
+        return validator.validateProperty(person, "newPassword");
+    }
 
     @Test
     public void testStrongPassword() {
-        Person person = new Person();
-        person.setPassword("Password1!");
-
-        assertTrue(person.checkPassword());
+        assertTrue(newPasswordViolations("Password1!").isEmpty());
     }
 
     @Test
-    public void testNoUppercase() {
-        Person person = new Person();
-        person.setPassword("password1!");
-
-        assertFalse(person.checkPassword());
-    }
-
-    @Test
-    public void testNoLowercase() {
-        Person person = new Person();
-        person.setPassword("PASSWORD1!");
-
-        assertFalse(person.checkPassword());
-    }
-
-    @Test
-    public void testNoNumber() {
-        Person person = new Person();
-        person.setPassword("Password!");
-
-        assertFalse(person.checkPassword());
-    }
-
-    @Test
-    public void testNoSpecialCharacter() {
-        Person person = new Person();
-        person.setPassword("Password1");
-
-        assertFalse(person.checkPassword());
-    }
-
-    @Test
-    public void testTooShort() {
-        Person person = new Person();
-        person.setPassword("Pa1!");
-
-        assertFalse(person.checkPassword());
-    }
-
-    @Test
-    public void testNullFailsTheRule() {
-        assertFalse(Person.meetsPasswordRule(null));
-    }
-
-    @Test
-    public void testStaticRuleMatchesCheckPassword() {
-        for (String pw : new String[] {"Password1!", "password1!", "PASSWORD1!", "Password!", "Password1", "Pa1!"}) {
-            Person person = new Person();
-            person.setPassword(pw);
-            assertEquals(person.checkPassword(), Person.meetsPasswordRule(pw), pw);
+    public void testWeakPasswordsBreakTheRule() {
+        for (String pw : new String[] {"password1!", "PASSWORD1!", "Password!", "Password1", "Pa1!"}) {
+            Set<ConstraintViolation<Person>> violations = newPasswordViolations(pw);
+            assertEquals(1, violations.size(), pw);
+            assertEquals(Person.PASSWORD_RULE, violations.iterator().next().getMessage());
         }
     }
 
-    private PersonDetailsService serviceWithEncoder() {
+    @Test
+    public void testNoNewPasswordMeansNothingToCheck() {
+        // Unrelated profile edits leave newPassword null, so the stored hash is never checked
+        assertTrue(newPasswordViolations(null).isEmpty());
+    }
+
+    @Test
+    public void testSaveHandsThePlaintextToTheManagedCopyJpaValidates() {
+        PersonJpaRepository repo = mock(PersonJpaRepository.class);
+        // save() on an existing person is a merge: JPA hands back a different, managed copy
+        Person managed = new Person();
+        when(repo.save(any(Person.class))).thenReturn(managed);
         PersonDetailsService service = new PersonDetailsService();
         ReflectionTestUtils.setField(service, "passwordEncoder", new BCryptPasswordEncoder());
-        return service;
-    }
+        ReflectionTestUtils.setField(service, "personJpaRepository", repo);
 
-    @Test
-    public void testEncodeNewPasswordRejectsWeakPassword() {
-        WeakPasswordException e = assertThrows(WeakPasswordException.class,
-                () -> serviceWithEncoder().encodeNewPassword("password123"));
-        assertEquals(Person.PASSWORD_RULE, e.getMessage());
-    }
-
-    @Test
-    public void testEncodeNewPasswordEncodesStrongPassword() {
-        String hash = serviceWithEncoder().encodeNewPassword("Password1!");
-        assertTrue(new BCryptPasswordEncoder().matches("Password1!", hash));
-    }
-
-    @Test
-    public void testSaveRejectsWeakPasswordBeforeTouchingTheDatabase() {
         Person person = new Person();
-        person.setPassword("password123");
-        // No repository is set, so reaching the database would throw NullPointerException instead
-        assertThrows(WeakPasswordException.class, () -> serviceWithEncoder().save(person));
-        assertThrows(WeakPasswordException.class, () -> serviceWithEncoder().save(person, false));
+        person.setPassword("Password1!");
+        service.save(person, false);
+
+        assertEquals("Password1!", person.getNewPassword());
+        assertTrue(new BCryptPasswordEncoder().matches("Password1!", person.getPassword()));
+        assertEquals(1L, person.getTokenVersion());
+        // merge skips @Transient fields, so the plaintext must reach the copy JPA validates
+        assertEquals("Password1!", managed.getNewPassword());
+        verify(repo).flush();
     }
 
     @Test
-    public void testWeakPasswordBecomesA400WithTheRule() throws Exception {
-        ResponseEntity<String> response = new ExceptionHandlerAdvice().weakPasswordException(new WeakPasswordException());
+    public void testConstraintViolationBecomesA400WithTheRule() throws Exception {
+        ConstraintViolationException e = new ConstraintViolationException(newPasswordViolations("weak"));
+        ResponseEntity<String> response = new ExceptionHandlerAdvice().constraintViolationException(e);
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
         assertEquals(Person.PASSWORD_RULE, new org.json.JSONObject(response.getBody()).getString("error"));
     }

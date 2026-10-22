@@ -14,8 +14,10 @@ import jakarta.persistence.ManyToMany;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.PrimaryKeyJoinColumn;
+import jakarta.persistence.Transient;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import jakarta.persistence.CascadeType;
 
@@ -96,6 +98,14 @@ public class Person extends Submitter implements Comparable<Person> {
     @NotEmpty
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
+
+    // The plain text of a password that is being changed, kept only until the row is saved.
+    // It is not a column. JPA checks it against PASSWORD_RULE on insert/update and throws
+    // ConstraintViolationException, which ExceptionHandlerAdvice sends back as a 400.
+    @Transient
+    @JsonIgnore
+    @Pattern(regexp = PASSWORD_PATTERN, message = PASSWORD_RULE)
+    private String newPassword;
 
     // Bumped every time the password actually changes (PersonDetailsService.save, when
     // samePassword is false -- the single funnel every reset/update path goes through).
@@ -338,8 +348,7 @@ public class Person extends Submitter implements Comparable<Person> {
         ArrayList<Person> people = new ArrayList<>();
         final Dotenv dotenv = Dotenv.load();
 
-        // Must satisfy checkPassword()'s complexity rule -- seed init goes through
-        // PersonDetailsService.save() like everything else.
+        // Must satisfy PASSWORD_RULE -- seed init is saved through JPA like everything else.
         String defaultPassword = envOrDefault(dotenv, "DEFAULT_PASSWORD", "DefaultPassword123!");
 
         // JSON-like list of person data using Map.ofEntries
@@ -520,17 +529,5 @@ public class Person extends Submitter implements Comparable<Person> {
     // accepted by one is never rejected by another.
     public static final String PASSWORD_RULE = "Password needs 8+ characters with an uppercase letter, "
             + "a lowercase letter, a number, and one of ` ~ ! @ # $ % ^ & * ( )";
-
-    public static boolean meetsPasswordRule(String password) {
-        return password != null
-                && password.length() >= 8
-                && password.matches(".*[A-Z].*")
-                && password.matches(".*[a-z].*")
-                && password.matches(".*[0-9].*")
-                && password.matches(".*[`~!@#$%^&*()].*");
-    }
-
-    public boolean checkPassword() {
-        return meetsPasswordRule(password);
-    }
+    public static final String PASSWORD_PATTERN = "^(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])(?=.*[`~!@#$%^&*()]).{8,}$";
 }

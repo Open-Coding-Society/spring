@@ -627,11 +627,6 @@ public class PersonViewController {
             return new ResponseEntity<Object>(HttpStatus.NO_CONTENT);
         }
 
-        // Check the rule before the single-use reset token is spent on a weak password
-        if (!Person.meetsPasswordRule(requestBody.getNewPassword())) {
-            throw new WeakPasswordException();
-        }
-
         if (!ResetCode.validateAndConsume(personToReset.getUid(), requestBody.getResetToken())) {
             logger.warn("AUDIT oauth_reset_complete_denied uid={} reason=invalid_token", personToReset.getUid());
             return new ResponseEntity<Object>(HttpStatus.FORBIDDEN);

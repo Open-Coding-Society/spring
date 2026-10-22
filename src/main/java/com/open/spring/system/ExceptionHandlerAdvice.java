@@ -9,7 +9,8 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
-import com.open.spring.mvc.person.WeakPasswordException;
+import jakarta.validation.ConstraintViolation;
+import jakarta.validation.ConstraintViolationException;
 
 @ControllerAdvice
 public class ExceptionHandlerAdvice {
@@ -30,11 +31,15 @@ public class ExceptionHandlerAdvice {
                 .body("JSON failed to map");
     }
 
-    // Every endpoint that saves a new password gets the same 400 and message.
-    @ExceptionHandler(WeakPasswordException.class)
-    public ResponseEntity<String> weakPasswordException(WeakPasswordException e) {
+    // JPA validates entities on save (e.g. Person.PASSWORD_RULE) and throws this.
+    // Every endpoint gets the same 400 with the rule's message, so controllers don't check.
+    @ExceptionHandler(ConstraintViolationException.class)
+    public ResponseEntity<String> constraintViolationException(ConstraintViolationException e) {
         JSONObject body = new JSONObject();
-        body.put("error", e.getMessage());
+        body.put("error", e.getConstraintViolations().stream()
+                .map(ConstraintViolation::getMessage)
+                .sorted()
+                .collect(java.util.stream.Collectors.joining("; ")));
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .contentType(MediaType.APPLICATION_JSON)
