@@ -14,8 +14,10 @@ import jakarta.persistence.ManyToMany;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.PrimaryKeyJoinColumn;
+import jakarta.persistence.Transient;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import jakarta.persistence.CascadeType;
 
@@ -96,6 +98,14 @@ public class Person extends Submitter implements Comparable<Person> {
     @NotEmpty
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
+
+    // The plain text of a password that is being changed, kept only until the row is saved.
+    // It is not a column. JPA checks it against PASSWORD_RULE on insert/update and throws
+    // ConstraintViolationException, which ExceptionHandlerAdvice sends back as a 400.
+    @Transient
+    @JsonIgnore
+    @Pattern(regexp = PASSWORD_PATTERN, message = PASSWORD_RULE)
+    private String newPassword;
 
     // Bumped every time the password actually changes (PersonDetailsService.save, when
     // samePassword is false -- the single funnel every reset/update path goes through).
