@@ -419,7 +419,7 @@ public class AssignmentAiRegradeService {
                     "graded".equals(result.status()) ? result.grade() : result.status());
             return "graded".equals(result.status());
         } catch (Exception e) {
-            logger.warn("AI re-grade failed for submission {}: {}", submissionId, e.getMessage());
+            logger.warn("AI re-grade failed submission={} failureType={}", submissionId, e.getClass().getSimpleName());
             return false;
         }
     }
