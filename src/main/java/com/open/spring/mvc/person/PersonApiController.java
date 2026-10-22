@@ -1,5 +1,6 @@
 package com.open.spring.mvc.person;
 
+import jakarta.validation.ConstraintViolationException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -428,8 +429,8 @@ public class PersonApiController {
             JSONObject responseObject = new JSONObject();
             responseObject.put("error", "Unable to create user due to duplicate constrained fields (likely uid/email/sid)");
             return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.CONFLICT);
-        } catch (WeakPasswordException e) {
-            throw e; // ExceptionHandlerAdvice sends the 400 with the rule
+        } catch (ConstraintViolationException e) {
+            throw e; // JPA rejected a field (e.g. weak password); ExceptionHandlerAdvice sends the 400
         } catch (Exception e) {
             logger.error("Person create failed for uid={} email={}", uid, email, e);
             HttpHeaders responseHeaders = new HttpHeaders();
