@@ -173,11 +173,6 @@ public class PersonApiController {
                 return new ResponseEntity<>(responseObject.toString(), HttpStatus.FORBIDDEN);
             }
 
-            // Rejects a weak password (400) before anything on the person changes
-            String newPasswordHash = passwordChanged
-                    ? personDetailsService.encodeNewPassword(personDto.getPassword())
-                    : null;
-
             StringBuilder changedFields = new StringBuilder();
             if (emailChanged) {
                 // Check if email is already taken by another person
@@ -191,7 +186,7 @@ public class PersonApiController {
                 changedFields.append("email,");
             }
             if (passwordChanged) {
-                existingPerson.setPassword(newPasswordHash);
+                existingPerson.setPassword(personDto.getPassword());
                 changedFields.append("password,");
             }
             if (isAdmin && uidChangeRequested) {
@@ -222,17 +217,17 @@ public class PersonApiController {
                 existingPerson.setKasmServerNeeded(personDto.getKasmServerNeeded());
                 changedFields.append("kasmServerNeeded,");
             }
-            // Save the updated person back to the repository
-            Person updatedPerson = repository.save(existingPerson);
+            // Save the updated person; JPA rejects a weak new password with a 400
+            personDetailsService.save(existingPerson, !passwordChanged);
 
             String changed = changedFields.length() == 0
                     ? "none"
                     : changedFields.substring(0, changedFields.length() - 1);
-            logger.info("AUDIT profile_update actor={} target={} fields={} admin={}", email, updatedPerson.getUid(),
+            logger.info("AUDIT profile_update actor={} target={} fields={} admin={}", email, existingPerson.getUid(),
                     changed, isAdmin);
 
             // Return the updated person entity
-            return new ResponseEntity<>(updatedPerson, HttpStatus.OK);
+            return new ResponseEntity<>(existingPerson, HttpStatus.OK);
         }
 
         // Return NOT_FOUND if person not found
