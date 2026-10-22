@@ -520,6 +520,7 @@ public class Person extends Submitter implements Comparable<Person> {
     // accepted by one is never rejected by another.
     public static final String PASSWORD_RULE = "Password needs 8+ characters with an uppercase letter, "
             + "a lowercase letter, a number, and one of ` ~ ! @ # $ % ^ & * ( )";
+    public static final String PASSWORD_PATTERN = "^(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])(?=.*[`~!@#$%^&*()]).{8,}$";
 
     public static boolean meetsPasswordRule(String password) {
         return password != null
