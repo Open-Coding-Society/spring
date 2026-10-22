@@ -723,12 +723,6 @@ public class PersonApiController {
                 }
             }
 
-            // Rejects a weak password (400) before anything on the person changes.
-            // This endpoint had no password rule check before.
-            String newPasswordHash = passwordChanged
-                    ? personDetailsService.encodeNewPassword(personDto.getPassword())
-                    : null;
-
             StringBuilder changedFields = new StringBuilder();
 
             // Check for duplicate email if email is being changed
@@ -757,7 +751,7 @@ public class PersonApiController {
                 changedFields.append("email,");
             }
             if (passwordChanged) {
-                existingPerson.setPassword(newPasswordHash);
+                existingPerson.setPassword(personDto.getPassword());
                 changedFields.append("password,");
             }
             if (nameChanged) {
@@ -782,8 +776,8 @@ public class PersonApiController {
                 existingPerson.setSid(personDto.getSid());
                 changedFields.append("sid,");
             }
-            // Save the updated person back to the repository
-            repository.save(existingPerson);
+            // Save the updated person; JPA rejects a weak new password with a 400
+            personDetailsService.save(existingPerson, !passwordChanged);
 
             String changed = changedFields.length() == 0
                     ? "none"
