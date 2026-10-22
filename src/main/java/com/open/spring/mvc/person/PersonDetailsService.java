@@ -81,15 +81,6 @@ public class PersonDetailsService implements UserDetailsService {  // "implement
         return personJpaRepository.findByLikeTermNative(like_term);
     }
 
-    // Checks a new plaintext password against Person.PASSWORD_RULE and encodes it.
-    // For callers that set the password on an existing person themselves.
-    public String encodeNewPassword(String rawPassword) {
-        if (!Person.meetsPasswordRule(rawPassword)) {
-            throw new WeakPasswordException();
-        }
-        return passwordEncoder.encode(rawPassword);
-    }
-
     // Hashes the plaintext in person.password. The plaintext stays in the transient
     // newPassword field so JPA can check it against Person.PASSWORD_RULE on save.
     private void hashNewPassword(Person person) {

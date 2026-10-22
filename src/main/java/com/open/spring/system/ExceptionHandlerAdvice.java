@@ -9,8 +9,6 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
-import com.open.spring.mvc.person.WeakPasswordException;
-
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 
@@ -42,17 +40,6 @@ public class ExceptionHandlerAdvice {
                 .map(ConstraintViolation::getMessage)
                 .sorted()
                 .collect(java.util.stream.Collectors.joining("; ")));
-        return ResponseEntity
-                .status(HttpStatus.BAD_REQUEST)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body.toString());
-    }
-
-    // Every endpoint that saves a new password gets the same 400 and message.
-    @ExceptionHandler(WeakPasswordException.class)
-    public ResponseEntity<String> weakPasswordException(WeakPasswordException e) {
-        JSONObject body = new JSONObject();
-        body.put("error", e.getMessage());
         return ResponseEntity
                 .status(HttpStatus.BAD_REQUEST)
                 .contentType(MediaType.APPLICATION_JSON)
