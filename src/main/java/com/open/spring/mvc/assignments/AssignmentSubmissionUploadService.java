@@ -58,11 +58,12 @@ public class AssignmentSubmissionUploadService {
         validateAuthentication(userDetails);
         validateRequiredFields(userId, username, file);
 
-        String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
-                technicalExcellence, communication, workHabits, aiOrchestration, selfAssessmentReflection);
-        if (selfAssessmentError != null) {
-            throw new UploadException(HttpStatus.BAD_REQUEST, selfAssessmentError);
-        }
+        // Self-assessment is paused (Pages no longer sends it); uncomment this block to require it again.
+        // String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
+        //         technicalExcellence, communication, workHabits, aiOrchestration, selfAssessmentReflection);
+        // if (selfAssessmentError != null) {
+        //     throw new UploadException(HttpStatus.BAD_REQUEST, selfAssessmentError);
+        // }
 
         Person authenticatedUser = getAuthenticatedUser(userDetails);
         Person targetUser = getTargetUser(userId);
