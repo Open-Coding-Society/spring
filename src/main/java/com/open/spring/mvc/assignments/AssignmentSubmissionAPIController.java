@@ -40,6 +40,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.open.spring.mvc.S3uploads.FileHandler;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.groups.Submitter;
+import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
@@ -165,7 +166,8 @@ public class AssignmentSubmissionAPIController {
     @PostMapping("/submit/{assignmentId}")
     public ResponseEntity<?> submitAssignment(
         @PathVariable Long assignmentId,
-        @RequestBody SubmitAssignmentDto submissionInfo
+        @RequestBody SubmitAssignmentDto submissionInfo,
+        @AuthenticationPrincipal UserDetails userDetails
     ) {
         Assignment assignment = assignmentRepo.findById(assignmentId).orElse(null);
         
@@ -182,6 +184,9 @@ public class AssignmentSubmissionAPIController {
             error.put("error", "Submitter not found");
             return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
         }
+
+        ResponseEntity<?> authorError = validateSubmissionAuthor(userDetails, submitter);
+        if (authorError != null) return authorError;
 
         String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
                 submissionInfo.technicalExcellence,
@@ -244,7 +249,8 @@ public class AssignmentSubmissionAPIController {
     @PostMapping("/{assignmentId}")
     public ResponseEntity<?> submitAssignment(
             @PathVariable Long assignmentId,
-            @RequestBody SubmissionRequestDto requestData
+            @RequestBody SubmissionRequestDto requestData,
+            @AuthenticationPrincipal UserDetails userDetails
     ) {
         Long resolvedAssignmentId = requestData.assignmentId != null ? requestData.assignmentId : assignmentId;
         Assignment assignment = assignmentRepo.findById(resolvedAssignmentId).orElse(null);
@@ -270,6 +276,9 @@ public class AssignmentSubmissionAPIController {
                 error.put("error", "Submitter not found");
                 return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
             }
+
+            ResponseEntity<?> authorError = validateSubmissionAuthor(userDetails, submitter);
+            if (authorError != null) return authorError;
 
             if (!hasSubmissionType(requestData.content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
@@ -554,7 +563,7 @@ public class AssignmentSubmissionAPIController {
                     savedSubmission.getFeedback(),
                     new AssignmentSubmissionReturnDto(savedSubmission)));
         } catch (Exception e) {
-            logger.error("AI grading failed for submission {}", submissionId, e);
+            logger.error("AI grading failed submission={} failureType={}", submissionId, e.getClass().getSimpleName());
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
                     .body(Map.of("status", "failed", "message", "The AI grader could not complete this submission: "
                             + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())));
@@ -822,6 +831,21 @@ public class AssignmentSubmissionAPIController {
         return null;
     }
 
+    /** Payload IDs must not let another student consume the submission author's personal AI quota. */
+    private ResponseEntity<?> validateSubmissionAuthor(UserDetails userDetails, Submitter submitter) {
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (currentUser == null) return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+            .body(Map.of("error", "Authentication required"));
+        if (assignmentAuthorizationService.isTeacherOrAdmin(currentUser)) return null;
+        boolean ownsIdentity = submitter instanceof Person person
+            && Objects.equals(person.getId(), currentUser.getId());
+        boolean groupMember = submitter instanceof Groups group && group.getGroupMembers() != null
+            && group.getGroupMembers().stream().anyMatch(member -> Objects.equals(member.getId(), currentUser.getId()));
+        if (!ownsIdentity && !groupMember) return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            .body(Map.of("error", "You can only submit as yourself or a group you belong to"));
+        return null;
+    }
+
     /**
      * Attempts to AI-grade a freshly created submission immediately, best-effort.
      * Grading failures never fail the submission itself — the student's work is
@@ -835,13 +859,14 @@ public class AssignmentSubmissionAPIController {
                 // Return the caller's instance, not save()'s merged copy: the copy's assignment is a
                 // lazy proxy, and building the response DTO outside a session would throw.
                 submissionRepo.save(submission);
+                logger.info("Auto-grade save completed submission={} grade={}", submission.getId(), submission.getGrade());
                 return submission;
             }
             if ("failed".equals(result.status())) {
                 flagForRegrade(submission);
             }
         } catch (Exception e) {
-            logger.warn("Auto-grade failed for submission {}: {}", submission.getId(), e.getMessage());
+            logger.warn("Auto-grade failed submission={} failureType={}; saved work retained", submission.getId(), e.getClass().getSimpleName());
             flagForRegrade(submission);
         }
         return submission;
