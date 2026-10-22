@@ -142,12 +142,12 @@ public class GroupChatApiController {
         //     return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         // }
 
-        if (message == null || message.getName() == null || message.getMessage() == null) {
+        if (message == null || message.getMessage() == null) {
             return new ResponseEntity<>("name and message are required", HttpStatus.BAD_REQUEST);
         }
 
         try {
-            realtimeService.publishMessage(groupId, message.getName(), message.getMessage(), message.getImage());
+            realtimeService.publishMessage(groupId, message.getMessage(), message.getImage());
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }

@@ -4,7 +4,11 @@ import java.time.Instant;
 import java.util.Optional;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
+
+import com.open.spring.mvc.groups.GroupChatIdentityService.AuthenticatedIdentity;
 
 import lombok.RequiredArgsConstructor;
 
@@ -19,24 +23,31 @@ public class GroupChatRealtimeService {
     public static final String GROUP_TOPIC_PREFIX = "/topic/group/";
 
     private final GroupChatService groupChatService;
+    private final GroupChatIdentityService identityService;
     private final GroupsJpaRepository groupsRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
-    public GroupChatEvent publishMessage(Long groupId, String sender, String message, String image) {
+    public GroupChatEvent publishMessage(Long groupId, String message, String image) {
         Groups group = getGroupOrThrow(groupId);
 
+        AuthenticatedIdentity identity = identityService.getCurrentIdentity();
+        if ((message == null || message.isBlank()) && (image == null || image.isBlank())) {
+            throw new IllegalArgumentException("Message or image must be provided");
+        }
+
         String date = Instant.now().toString();
-        GroupChatMessage persisted = new GroupChatMessage(sender, message, date, image);
+
+        GroupChatMessage persisted = new GroupChatMessage(identity.getDisplayName(), identity.getUid(), message, date, image);
         groupChatService.addMessage(group.getName(), persisted);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("sendMessageServer")
                 .groupId(groupId)
                 .messageId(persisted.getId())
-                .sender(sender)
-                .message(message)
-                .image(image)
-                .date(date)
+                .sender(persisted.getAuthor())
+                .message(persisted.getMessage())
+                .image(persisted.getImage())
+                .date(persisted.getDate())
                 .build();
 
         broadcastToGroup(groupId, event);
@@ -146,5 +157,22 @@ public class GroupChatRealtimeService {
             throw new IllegalArgumentException("Group not found");
         }
         return groupOpt.get();
+    }
+
+    private boolean validateAuthorIdentity(String author_uid) {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+
+        // prelim checks for valid authentication
+        if (auth == null || !auth.isAuthenticated()) {
+            return false;
+        }
+
+        // checks by name (uid) supplied in cookie
+        String name = auth.getName();
+        if (name == null || name.isBlank() || "anonymousUser".equals(name) || !name.equals(author_uid)) {
+            return false;
+        }
+
+        return true;
     }
 }
