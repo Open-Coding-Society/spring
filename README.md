@@ -141,6 +141,8 @@ GAMIFY_API_KEY=your-openai-api-key-here
 GEMINI_API_KEY=your-gemini-api-key-here
 GITHUB_API_TOKEN=your-github-token-here
 
+GIST_TOKEN=your-github-gist-token-here
+
 # Email Configuration (optional - overrides application.properties)
 # spring.mail.username=your-email@gmail.com
 # spring.mail.password=your-app-password
@@ -151,6 +153,8 @@ AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_REGION=us-east-2
 ```
+
+
 
 **Production Configuration:**
 - Production uses the secure defaults from `application.properties` (HTTPS settings)
@@ -357,3 +361,17 @@ first migration; this section is the summary.
 **Headers:** `Cookie: jwt_java_spring=YOUR_TOKEN_HERE`
 
 **Action:** Send request
+
+## Creating a GitHub Gist Token
+
+1. Sign in to [GitHub](https://github.com).
+2. Click your profile picture (top right) → **Settings**.
+3. In the left sidebar, scroll down and click **Developer settings**.
+4. Go to **Personal access tokens** → **Tokens (classic)**.
+5. Click **Generate new token** → **Generate new token (classic)**.
+6. Fill in the form:
+   - **Note:** give it a name you'll recognize (e.g. `my-app-gist`)
+   - **Expiration:** pick how long the token should last
+   - **Scopes:** check only **`gist`**
+7. Scroll down and click **Generate token**.
+8. **Copy the token now.**

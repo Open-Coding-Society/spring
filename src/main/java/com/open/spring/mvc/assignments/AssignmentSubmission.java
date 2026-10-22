@@ -1,5 +1,6 @@
 package com.open.spring.mvc.assignments;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -67,6 +68,13 @@ public class AssignmentSubmission {
     private String aiSummary;
 
     private Integer qualityScore;
+
+    // True when the AI grade came from the default rubric because the assignment's AI rubric
+    // wasn't ready yet; AssignmentAiRegradeService re-grades these once it is.
+    private Boolean needsAiRegrade;
+
+    // When the grade was last set (AI or teacher); drives "recent grade changes" in the gradebook.
+    private LocalDateTime gradedAt;
 
     private String comment;
 

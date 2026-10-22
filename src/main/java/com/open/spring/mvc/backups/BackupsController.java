@@ -143,6 +143,8 @@ public class BackupsController {
 
             // Loop through each table and retrieve its data
             for (String tableName : tableNames) {
+                // Credential ciphertext never belongs in downloadable JSON exports.
+                if ("gist_connections".equalsIgnoreCase(tableName)) continue;
                 List<Map<String, Object>> tableData = getTableData(statement, tableName, connection);
                 result.put(tableName, tableData);
             }

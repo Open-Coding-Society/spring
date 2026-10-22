@@ -11,6 +11,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -19,6 +20,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -44,6 +46,7 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 
 import jakarta.transaction.Transactional;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 @RestController
@@ -74,6 +77,9 @@ public class AssignmentsApiController {
     private AssignmentRubricService rubricService;
 
     @Autowired
+    private AssignmentAiRegradeService aiRegradeService;
+
+    @Autowired
     private AssignmentAuthorizationService assignmentAuthorizationService;
 
     @Autowired
@@ -87,6 +93,7 @@ public class AssignmentsApiController {
 
     @Getter
     @Setter
+    @NoArgsConstructor // lets Jackson read the bulk/create request body
     public static class AssignmentDto {
         public Long id;
         public String name;
@@ -106,6 +113,8 @@ public class AssignmentsApiController {
         public List<String> courseCodes;
         /** Owner uids; null on endpoints that do not load the creator relationship. */
         public List<String> creatorUids;
+        /** Weighted hacks parsed from the page; empty when the assignment is not hack-weighted. */
+        public List<AssignmentRubricService.HackWeight> hackWeights;
 
         public AssignmentDto(
                 Assignment assignment,
@@ -132,6 +141,7 @@ public class AssignmentsApiController {
             this.resourceStoragePath = assignment.getResourceStoragePath();
             this.resourceUploadedBy = extractResourceUploader(assignment);
             this.contentUrl = assignment.getContentUrl();
+            this.hackWeights = AssignmentRubricService.readHackWeights(assignment.getHackWeights());
         }
 
         private static String extractResourceUploader(Assignment assignment) {
@@ -193,6 +203,7 @@ public class AssignmentsApiController {
         } else {
             applyGeneratedRubric(newAssignment, name, description, pageContent);
         }
+        newAssignment.setHackWeights(AssignmentRubricService.hackWeightsJson(pageContent));
         normalizeAssignmentSequenceForSqlite();
         Assignment savedAssignment = assignmentRepo.save(newAssignment);
         return new ResponseEntity<>(new AssignmentDto(savedAssignment), HttpStatus.CREATED);
@@ -409,6 +420,19 @@ public class AssignmentsApiController {
                 assignment.setAssignmentType(requestedAssignmentType);
                 assignment = saveAssignmentWithRetry(assignment);
             }
+            // Keep hack weights in step with the page, so editing a "(Weight: N%)" heading
+            // changes how new submissions are graded.
+            String hackWeights = pageContent == null || pageContent.isBlank()
+                ? assignment.getHackWeights() : AssignmentRubricService.hackWeightsJson(pageContent);
+            if (!Objects.equals(hackWeights, assignment.getHackWeights())) {
+                assignment.setHackWeights(hackWeights);
+                assignment = saveAssignmentWithRetry(assignment);
+                logger.info("Updated hack weights for assignment ID {}: {}", assignment.getId(), hackWeights);
+            }
+            if (pageContent != null && !pageContent.isBlank()
+                    && !AssignmentRubricService.isAiRubricReady(assignment.getAiRubric(), assignment.getPoints())) {
+                aiRegradeService.requestRubric(assignment.getId(), name, description, pageContent);
+            }
             boolean metadataChanged = synchronizeCreators
                 && assignmentCreatorSyncService.applyCreators(assignment, resolvedCreators);
             metadataChanged = (synchronizeCourses
@@ -441,9 +465,9 @@ public class AssignmentsApiController {
                 resolvedDueDate,
                 requestedAssignmentType == null ? "file" : requestedAssignmentType
             );
-            applyGeneratedRubric(newAssignment, name, description, pageContent);
 
             newAssignment.setContentUrl(canonicalUrl);
+            newAssignment.setHackWeights(AssignmentRubricService.hackWeightsJson(pageContent));
             if (synchronizeCreators) {
                 assignmentCreatorSyncService.applyCreators(newAssignment, resolvedCreators);
             }
@@ -453,10 +477,24 @@ public class AssignmentsApiController {
             
             normalizeAssignmentSequenceForSqlite();
             Assignment savedAssignment = saveAssignmentWithRetry(newAssignment);
+            aiRegradeService.requestRubric(savedAssignment.getId(), name, description, pageContent);
             logger.info("Auto-created assignment with ID: " + savedAssignment.getId() + " for contentUrl: " + canonicalUrl);
             return new ResponseEntity<>(
                 toDto(savedAssignment, synchronizeCreators || synchronizeCourses),
                 HttpStatus.CREATED);
+        } catch (DataIntegrityViolationException e) {
+            // Another request can pass the lookup above before inserting the same URL.
+            // The unique index is the final arbiter; return that request's assignment
+            // instead of turning an idempotent operation into a 500.
+            Assignment concurrent = assignmentRepo.findFirstByContentUrlOrderByIdAsc(canonicalUrl);
+            if (concurrent != null) {
+                logger.info("Assignment was created concurrently for contentUrl: {}, ID: {}",
+                    canonicalUrl, concurrent.getId());
+                return ResponseEntity.ok(toDto(concurrent, synchronizeCreators || synchronizeCourses));
+            }
+            logger.error("Assignment uniqueness violation for contentUrl {} with no existing row", canonicalUrl, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .body(Map.of("error", "Assignment could not be created because its content URL is already in use"));
         } catch (Exception e) {
             logger.error("Error auto-creating assignment for contentUrl: " + contentUrl, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
@@ -534,13 +572,17 @@ public class AssignmentsApiController {
      * constructor-assigned {@link Assignment#DEFAULT_AI_RUBRIC} in place.
      */
     private void applyGeneratedRubric(Assignment assignment, String name, String description, String pageContent) {
-        if (pageContent == null || pageContent.isBlank()) {
-            return;
-        }
         try {
-            String generated = rubricService.generateRubric(name, description, pageContent);
+            logger.info("Generating AI rubric for assignment '{}' (pageContentChars={}, descriptionPresent={})",
+                name,
+                pageContent == null ? 0 : pageContent.length(),
+                description != null && !description.isBlank());
+            String generated = rubricService.generateRubric(name, description, pageContent, assignment.getPoints());
             if (generated != null && !generated.isBlank()) {
                 assignment.setAiRubric(generated);
+                logger.info("Generated AI rubric for assignment '{}' ({} characters)", name, generated.length());
+            } else {
+                logger.warn("AI rubric generation returned no rubric for assignment '{}'", name);
             }
         } catch (Exception e) {
             logger.warn("Rubric generation failed for assignment '{}': {}", name, e.getMessage());
@@ -583,6 +625,8 @@ public class AssignmentsApiController {
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             try {
                 return retryTemplate.execute(status -> assignmentRepo.save(assignment));
+            } catch (DataIntegrityViolationException e) {
+                throw e;
             } catch (DataAccessException e) {
                 lastFailure = e;
                 logger.warn("Transient error saving assignment (attempt {}/{}): {}", attempt, maxAttempts, e.getMessage());
@@ -853,7 +897,8 @@ public class AssignmentsApiController {
      * @return A JSON object indicating that the assignment was deleted.
      */
     @PostMapping("/delete/{id}")
-    public ResponseEntity<?> deleteAssignment(@PathVariable Long id) {
+    public ResponseEntity<?> deleteAssignment(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         Assignment assignment = assignmentRepo.findById(id).orElse(null);
         if (assignment != null) {
             assignmentRepo.delete(assignment);
@@ -864,6 +909,117 @@ public class AssignmentsApiController {
         Map<String, String> error = new HashMap<>();
         error.put("error", "Assignment not found");
         return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
+    }
+
+    /** An assignment plus the submission counts and rubric state the tracker filters on. */
+    @Getter
+    @Setter
+    public static class TrackerAssignmentDto extends AssignmentDto {
+        public boolean rubricReady;
+        public long submissionCount;
+        public long ungradedCount;
+        public long pendingAiCount;
+        public Double averageGrade;
+
+        public TrackerAssignmentDto(Assignment assignment, List<String> courseCodes) {
+            super(assignment, null, courseCodes);
+            this.rubricReady = AssignmentRubricService.isAiRubricReady(assignment.getAiRubric(), assignment.getPoints());
+        }
+    }
+
+    /**
+     * Every assignment for the admin tracker, with submission stats from one grouped query
+     * instead of loading each assignment's submissions.
+     */
+    @GetMapping("/tracker")
+    @Transactional
+    public ResponseEntity<?> trackerAssignments(@AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        Map<Long, Map<String, Object>> stats = new HashMap<>();
+        jdbcTemplate.queryForList(
+                "SELECT assignment_id, COUNT(*) AS total, "
+                        + "SUM(CASE WHEN grade IS NULL THEN 1 ELSE 0 END) AS ungraded, "
+                        + "SUM(CASE WHEN needs_ai_regrade = 1 THEN 1 ELSE 0 END) AS pending_ai, "
+                        + "AVG(grade) AS average_grade "
+                        + "FROM assignment_submission GROUP BY assignment_id")
+            .forEach(row -> {
+                Object id = row.get("assignment_id");
+                if (id != null) {
+                    stats.put(((Number) id).longValue(), row);
+                }
+            });
+        List<TrackerAssignmentDto> dtos = new ArrayList<>();
+        for (Assignment assignment : assignmentRepo.findAll()) {
+            TrackerAssignmentDto dto = new TrackerAssignmentDto(
+                    assignment, assignmentCourseSyncService.courseCodesOf(assignment));
+            Map<String, Object> row = stats.get(assignment.getId());
+            if (row != null) {
+                dto.submissionCount = toLong(row.get("total"));
+                dto.ungradedCount = toLong(row.get("ungraded"));
+                dto.pendingAiCount = toLong(row.get("pending_ai"));
+                dto.averageGrade = row.get("average_grade") == null ? null : ((Number) row.get("average_grade")).doubleValue();
+            }
+            dtos.add(dto);
+        }
+        return ResponseEntity.ok(dtos);
+    }
+
+    private static long toLong(Object value) {
+        return value == null ? 0 : ((Number) value).longValue();
+    }
+
+    /** Regenerates the assignment's AI rubric now (about 10-20s), then re-grades anything queued. */
+    @PostMapping("/{id}/ai-rubric/regenerate")
+    public ResponseEntity<?> regenerateAiRubric(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        Assignment assignment = assignmentRepo.findById(id).orElse(null);
+        if (assignment == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Assignment not found"));
+        }
+        String generated = rubricService.generateRubric(
+                assignment.getName(), assignment.getDescription(), null, assignment.getPoints());
+        if (generated == null || generated.isBlank()) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(Map.of("error", "The AI could not generate a rubric right now. Try again in a minute."));
+        }
+        // Update only the rubric column so concurrent edits to the assignment aren't overwritten.
+        jdbcTemplate.update("UPDATE assignment SET ai_rubric = ? WHERE id = ?", generated, id);
+        aiRegradeService.requestRubric(id, assignment.getName(), assignment.getDescription(), null);
+        return ResponseEntity.ok(Map.of("aiRubric", generated,
+                "rubricReady", AssignmentRubricService.isAiRubricReady(generated, assignment.getPoints())));
+    }
+
+    /**
+     * Creates a throwaway "[TEST]" assignment with valid values (text submissions, 1 point, due in
+     * a week, no course) for checking the submit and grading flow without touching a real assignment.
+     */
+    @PostMapping("/test")
+    @Transactional
+    public ResponseEntity<?> createTestAssignment(@AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        String stamp = java.time.LocalDateTime.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        String dueDate = java.time.LocalDate.now().plusWeeks(1).format(java.time.format.DateTimeFormatter.ofPattern("MM/dd/yyyy"));
+        Assignment assignment = new Assignment("[TEST] " + stamp, "test",
+                "Test assignment created from the tracker. Write a short paragraph about what you learned today.",
+                1.0, dueDate, "text");
+        assignment.setContentUrl("/test-assignments/" + stamp);
+        normalizeAssignmentSequenceForSqlite();
+        Assignment saved = saveAssignmentWithRetry(assignment);
+        aiRegradeService.requestRubric(saved.getId(), saved.getName(), saved.getDescription(), null);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(new AssignmentDto(saved, null, assignmentCourseSyncService.courseCodesOf(saved)));
+    }
+
+    /** Health checks for one assignment; see {@link AssignmentRubricService#runChecks}. */
+    @GetMapping("/{id}/checks")
+    @Transactional
+    public ResponseEntity<?> checkAssignment(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
+        Assignment assignment = assignmentRepo.findById(id).orElse(null);
+        if (assignment == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Assignment not found"));
+        }
+        return ResponseEntity.ok(AssignmentRubricService.runChecks(assignment, submissionRepo.findByAssignmentId(id)));
     }
 
     /**
@@ -1038,7 +1194,9 @@ public class AssignmentsApiController {
      * @return A response indicating success or failure.
      */
     @PostMapping("/assignGraders/{id}")
-    public ResponseEntity<?> assignGradersToAssignment( @PathVariable Long id, @RequestBody List<Long> personIds ) {
+    public ResponseEntity<?> assignGradersToAssignment(@PathVariable Long id, @RequestBody List<Long> personIds,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         Optional<Assignment> assignmentOptional = assignmentRepo.findById(id);
         if (!assignmentOptional.isPresent()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Assignment not found");
@@ -1162,7 +1320,8 @@ public class AssignmentsApiController {
      * @return A list of AssignmentDto objects representing all assignments.
      */
     @GetMapping("/bulk/extract")
-    public ResponseEntity<List<AssignmentDto>> bulkExtractAssignments() {
+    public ResponseEntity<List<AssignmentDto>> bulkExtractAssignments(@AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         // Fetch all Assignment entities from the database
         List<Assignment> assignment = assignmentRepo.findAll();
 
@@ -1236,7 +1395,8 @@ public class AssignmentsApiController {
      */
     @PostMapping("/randomizeGraders/{id}")
     @Transactional
-    public ResponseEntity<?> randomizePeerGraders(@PathVariable Long id) {
+    public ResponseEntity<?> randomizePeerGraders(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         Optional<Assignment> assignmentOptional = assignmentRepo.findById(id);
         if (!assignmentOptional.isPresent()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Assignment not found");
@@ -1308,10 +1468,13 @@ public class AssignmentsApiController {
      * @return A ResponseEntity containing the AssignmentDto object if found, or a 404 error if not found.
      */
     @GetMapping("/extract/{id}")
-    public ResponseEntity<AssignmentDto> extractAssignment(@PathVariable Long id) {
+    public ResponseEntity<AssignmentDto> extractAssignment(@PathVariable Long id, @AuthenticationPrincipal UserDetails userDetails) {
+        requireTeacherOrAdmin(userDetails);
         Optional<Assignment> curAssignment = assignmentRepo.findById(id);
-        Assignment assignment = curAssignment.get();
-        AssignmentDto assignmentDto = new AssignmentDto(assignment);
+        if (curAssignment.isEmpty()) {
+            return ResponseEntity.notFound().build();
+        }
+        AssignmentDto assignmentDto = new AssignmentDto(curAssignment.get());
         return new ResponseEntity<>(assignmentDto, HttpStatus.OK);
     }
 
