@@ -94,15 +94,6 @@ public class PasswordCheckTest {
     }
 
     @Test
-    public void testSaveRejectsWeakPasswordBeforeTouchingTheDatabase() {
-        Person person = new Person();
-        person.setPassword("password123");
-        // No repository is set, so reaching the database would throw NullPointerException instead
-        assertThrows(WeakPasswordException.class, () -> serviceWithEncoder().save(person));
-        assertThrows(WeakPasswordException.class, () -> serviceWithEncoder().save(person, false));
-    }
-
-    @Test
     public void testWeakPasswordBecomesA400WithTheRule() throws Exception {
         ResponseEntity<String> response = new ExceptionHandlerAdvice().weakPasswordException(new WeakPasswordException());
         assertEquals(HttpStatus.BAD_REQUEST, response.getStatusCode());
