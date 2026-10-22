@@ -348,8 +348,7 @@ public class Person extends Submitter implements Comparable<Person> {
         ArrayList<Person> people = new ArrayList<>();
         final Dotenv dotenv = Dotenv.load();
 
-        // Must satisfy checkPassword()'s complexity rule -- seed init goes through
-        // PersonDetailsService.save() like everything else.
+        // Must satisfy PASSWORD_RULE -- seed init is saved through JPA like everything else.
         String defaultPassword = envOrDefault(dotenv, "DEFAULT_PASSWORD", "DefaultPassword123!");
 
         // JSON-like list of person data using Map.ofEntries
@@ -531,17 +530,4 @@ public class Person extends Submitter implements Comparable<Person> {
     public static final String PASSWORD_RULE = "Password needs 8+ characters with an uppercase letter, "
             + "a lowercase letter, a number, and one of ` ~ ! @ # $ % ^ & * ( )";
     public static final String PASSWORD_PATTERN = "^(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])(?=.*[`~!@#$%^&*()]).{8,}$";
-
-    public static boolean meetsPasswordRule(String password) {
-        return password != null
-                && password.length() >= 8
-                && password.matches(".*[A-Z].*")
-                && password.matches(".*[a-z].*")
-                && password.matches(".*[0-9].*")
-                && password.matches(".*[`~!@#$%^&*()].*");
-    }
-
-    public boolean checkPassword() {
-        return meetsPasswordRule(password);
-    }
 }

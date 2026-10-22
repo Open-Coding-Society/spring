@@ -228,7 +228,7 @@ public class ModelInit {
                     
                     // Ensure password is not null or empty
                     if (person.getPassword() == null || person.getPassword().isEmpty()) {
-                        person.setPassword("DefaultPassword123!"); // Must satisfy Person.checkPassword()
+                        person.setPassword("DefaultPassword123!"); // Must satisfy Person.PASSWORD_RULE
                     }
                     
                     personDetailsService.save(person);
