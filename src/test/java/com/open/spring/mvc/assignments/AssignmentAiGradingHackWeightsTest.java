@@ -18,6 +18,9 @@ import org.junit.jupiter.api.Test;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.open.spring.mvc.S3uploads.FileHandler;
+import com.open.spring.mvc.aiconnections.AiConnectionService;
+import com.open.spring.mvc.aiconnections.AiGradingRouter;
+import com.open.spring.mvc.aiconnections.AiProviderClient;
 import com.sun.net.httpserver.HttpServer;
 
 /**
@@ -101,8 +104,12 @@ class AssignmentAiGradingHackWeightsTest {
     }
 
     private AssignmentAiGradingService weightedService() {
+        ObjectMapper mapper = new ObjectMapper();
+        AiProviderClient client = new AiProviderClient(mapper,
+                "http://127.0.0.1:" + github.getAddress().getPort() + "/gemini", "");
+        AiGradingRouter router = new AiGradingRouter(mock(AiConnectionService.class), client, "test-key", "");
         return new AssignmentAiGradingService(new ObjectMapper(), mock(FileHandler.class),
-                "test-key", "http://127.0.0.1:" + github.getAddress().getPort() + "/gemini", "http://unused", "", "");
+                router, "http://unused", "", "");
     }
 
     private AssignmentSubmission weightedSubmission() {

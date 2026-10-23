@@ -12,6 +12,8 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.open.spring.mvc.S3uploads.FileHandler;
@@ -21,6 +23,7 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 
 @Service
 public class AssignmentSubmissionUploadService {
+    private static final Logger logger = LoggerFactory.getLogger(AssignmentSubmissionUploadService.class);
 
     private final FileHandler fileHandler;
     private final PersonJpaRepository personRepo;
@@ -58,11 +61,12 @@ public class AssignmentSubmissionUploadService {
         validateAuthentication(userDetails);
         validateRequiredFields(userId, username, file);
 
-        String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
-                technicalExcellence, communication, workHabits, aiOrchestration, selfAssessmentReflection);
-        if (selfAssessmentError != null) {
-            throw new UploadException(HttpStatus.BAD_REQUEST, selfAssessmentError);
-        }
+        // Self-assessment is paused (Pages no longer sends it); uncomment this block to require it again.
+        // String selfAssessmentError = AssignmentSubmission.validateSelfAssessment(
+        //         technicalExcellence, communication, workHabits, aiOrchestration, selfAssessmentReflection);
+        // if (selfAssessmentError != null) {
+        //     throw new UploadException(HttpStatus.BAD_REQUEST, selfAssessmentError);
+        // }
 
         Person authenticatedUser = getAuthenticatedUser(userDetails);
         Person targetUser = getTargetUser(userId);
@@ -122,6 +126,7 @@ public class AssignmentSubmissionUploadService {
                 // Return the caller's instance, not save()'s merged copy: the copy's assignment is a
                 // lazy proxy, and building the response DTO outside a session would throw.
                 submissionRepo.save(submission);
+                logger.info("Auto-grade save completed submission={} grade={}", submission.getId(), submission.getGrade());
                 return submission;
             }
             if ("failed".equals(result.status())) {
@@ -130,7 +135,7 @@ public class AssignmentSubmissionUploadService {
             }
         } catch (Exception e) {
             // Best-effort: the upload already succeeded, so a grading failure is logged, not thrown.
-            System.err.println("Auto-grade failed for submission " + submission.getId() + ": " + e.getMessage());
+            logger.warn("Auto-grade failed submission={} failureType={}; saved upload retained", submission.getId(), e.getClass().getSimpleName());
             submission.setNeedsAiRegrade(true); // AssignmentAiRegradeService retries it later.
             submissionRepo.save(submission);
         }

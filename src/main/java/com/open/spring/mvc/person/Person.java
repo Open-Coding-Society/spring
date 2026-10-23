@@ -14,8 +14,10 @@ import jakarta.persistence.ManyToMany;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.PrimaryKeyJoinColumn;
+import jakarta.persistence.Transient;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotEmpty;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import jakarta.persistence.CascadeType;
 
@@ -96,6 +98,14 @@ public class Person extends Submitter implements Comparable<Person> {
     @NotEmpty
     @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
     private String password;
+
+    // The plain text of a password that is being changed, kept only until the row is saved.
+    // It is not a column. JPA checks it against PASSWORD_RULE on insert/update and throws
+    // ConstraintViolationException, which ExceptionHandlerAdvice sends back as a 400.
+    @Transient
+    @JsonIgnore
+    @Pattern(regexp = PASSWORD_PATTERN, message = PASSWORD_RULE)
+    private String newPassword;
 
     // Bumped every time the password actually changes (PersonDetailsService.save, when
     // samePassword is false -- the single funnel every reset/update path goes through).
@@ -338,8 +348,7 @@ public class Person extends Submitter implements Comparable<Person> {
         ArrayList<Person> people = new ArrayList<>();
         final Dotenv dotenv = Dotenv.load();
 
-        // Must satisfy checkPassword()'s complexity rule -- seed init goes through
-        // PersonDetailsService.save() like everything else.
+        // Must satisfy PASSWORD_RULE -- seed init is saved through JPA like everything else.
         String defaultPassword = envOrDefault(dotenv, "DEFAULT_PASSWORD", "DefaultPassword123!");
 
         // JSON-like list of person data using Map.ofEntries
@@ -515,20 +524,10 @@ public class Person extends Submitter implements Comparable<Person> {
         return all;
     }
 
-    // Complexity rule shared across the whole password-reset pipeline (this field,
-    // flask's model/user.py validate_password, and pages' getPasswordStrength in
-    // support.md) -- keep the required special-character set identical across all
-    // three so a password accepted by one backend is never rejected by the other.
-    public boolean checkPassword() {
-        if (password == null || password.length() < 8) {
-            return false;
-        }
-
-        boolean hasUpper = password.matches(".*[A-Z].*");
-        boolean hasLower = password.matches(".*[a-z].*");
-        boolean hasNumber = password.matches(".*[0-9].*");
-        boolean hasSpecial = password.matches(".*[`~!@#$%^&*()].*");
-
-        return hasUpper && hasLower && hasNumber && hasSpecial;
-    }
+    // The one password rule for every account. Same rule in flask's model/user.py
+    // (meets_password_rule) and pages' assets/js/api/passwordRules.js, so a password
+    // accepted by one is never rejected by another.
+    public static final String PASSWORD_RULE = "Password needs 8+ characters with an uppercase letter, "
+            + "a lowercase letter, a number, and one of ` ~ ! @ # $ % ^ & * ( )";
+    public static final String PASSWORD_PATTERN = "^(?=.*[A-Z])(?=.*[a-z])(?=.*[0-9])(?=.*[`~!@#$%^&*()]).{8,}$";
 }

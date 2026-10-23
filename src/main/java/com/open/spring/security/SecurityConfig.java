@@ -103,6 +103,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/scraper/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // Personal connections and Gist creation require the caller's login.
                         .requestMatchers("/api/gist-connection", "/api/gist-connection/").authenticated()
+                        .requestMatchers("/api/ai-connections", "/api/ai-connections/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/grades/create-gist").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/grades/create-gist/").authenticated()
                         // (DELETE/PUT /api/person/** are declared above, ahead of the create permit.)
@@ -189,6 +190,13 @@ public class SecurityConfig {
                             .hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT", "ROLE_ASSIGNMENT_SYNC")
                         // =============================================
 
+                        // ========== ASSIGNMENT SUBMISSION ==========
+                        // Submission authors must be authenticated before their personal AI keys can be used.
+                        .requestMatchers(HttpMethod.POST, "/api/submissions/**").authenticated()
+                        // Assignment file uploads - public (student identity passed in multipart fields)
+                        .requestMatchers(HttpMethod.POST, "/api/assignment-submissions/upload").permitAll()
+                        // ==========================================
+
                         // ========== OCS ANALYTICS ==========
                         // OCS Analytics endpoints - require authentication to associate data with user
                         .requestMatchers("/api/ocs-analytics/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
@@ -233,6 +241,9 @@ public class SecurityConfig {
         policy.put("/api/face/**", "ROLE_TEACHER|ROLE_ADMIN");
         policy.put("POST /api/assignments/auto-create", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT|ROLE_ASSIGNMENT_SYNC");
         policy.put("/api/gist-connection", "authenticated");
+        policy.put("/api/ai-connections", "authenticated");
+        policy.put("/api/ai-connections/**", "authenticated");
+        policy.put("POST /api/submissions/**", "authenticated");
         policy.put("POST /api/grades/create-gist", "authenticated");
         policy.put("/api/exports/**", "ROLE_ADMIN");
         policy.put("/api/imports/**", "ROLE_ADMIN");

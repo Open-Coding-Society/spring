@@ -116,7 +116,7 @@ USER_NAME=Grace Hopper
 USER_UID=hop
 USER_EMAIL=hop@example.com
 USER_SID=0000003
-USER_PASSWORD=123Hop!
+USER_PASSWORD=123Grace!
 USER_PFP=/images/hop.png
 
 # Trusted Pages assignment synchronization bot (use a unique local password)
