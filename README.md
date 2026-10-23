@@ -152,6 +152,8 @@ AWS_BUCKET_NAME=your-bucket-name
 AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_REGION=us-east-2
+# if developing locally, set the endoint heree
+# AWS_S3_ENDPOINT=http://localhost:9000
 ```
 
 
@@ -335,6 +337,18 @@ The step-by-step production procedure -- with the gates, the rollback paths, and
 of what was wrong with the old scripts -- lives at
 <https://pages.opencodingsociety.com/documentation/migration-runbook>. Read it before your
 first migration; this section is the summary.
+
+## Local S3 Development
+
+1. Start the local instance of RustFS:
+```
+docker compose --f rustfs.yml up -d
+```
+2. Uncomment this line in `.env`:
+```
+AWS_S3_ENDPOINT=http://localhost:9000
+```
+
 
 # Testing Grade FRQs API with Postman
 
