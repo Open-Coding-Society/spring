@@ -163,7 +163,7 @@ public class GradeController {
     }
 
     @GetMapping("/read-gist/{id}")
-    @PreAuthorize("permitAll()")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Map<String, Object>> readGist(@PathVariable String id) {
         Map<?, ?> data = gitHubGistClient.read(id, gistToken);
         Map<String, Object> files = new LinkedHashMap<>();

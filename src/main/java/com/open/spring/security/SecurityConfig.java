@@ -89,37 +89,26 @@ public class SecurityConfig {
                 .requestCache(cache -> cache.disable())
                 .authorizeHttpRequests(auth -> auth
 
-                        // ========== AUTHENTICATION & USER MANAGEMENT ==========
-                        // Public endpoint - no authentication required, supports user login
-                        .requestMatchers(HttpMethod.OPTIONS, "/api/**", "/authenticate", "/run/**").permitAll()  // Allow only relevant CORS preflight requests
-                        .requestMatchers("/authenticate").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/authenticate").permitAll() // allow POST on auth
+                        // Only login, signup and CORS preflight are anonymous.
+                        // All feature APIs, including reads and uploads, require a JWT.
+                        .requestMatchers(HttpMethod.OPTIONS, "/api/**", "/authenticate").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/authenticate").permitAll()
                         // Admin-only writes are listed FIRST: rules are first-match-wins, and a
                         // method-less permitAll on /api/person/create would otherwise also permit
                         // DELETE and PUT on that path, shadowing the ROLE_ADMIN rules below.
                         .requestMatchers(HttpMethod.DELETE, "/api/person/**").hasAuthority("ROLE_ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/person/**").hasAuthority("ROLE_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/person/create").permitAll()
-                        // Public grades submission - no authentication required
-                        .requestMatchers(HttpMethod.POST, "/api/grades").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/grades/").permitAll()
                         // updated so that it takes auth to actually hit endpoint
                         .requestMatchers("/api/scraper/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // Personal connections and Gist creation require the caller's login.
                         .requestMatchers("/api/gist-connection", "/api/gist-connection/").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/grades/create-gist").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/grades/create-gist/").authenticated()
-                        // Gist reading stays public; an unlisted URL is
-                        //    already shareable, so reading one adds no exposure)
-                        .requestMatchers(HttpMethod.GET, "/api/grades/read-gist/**").permitAll()
-                        // ← MAKE DEBUGGER - PUBLIC (NO AUTH)
-                        .requestMatchers("/api/make/**").permitAll()
                         // (DELETE/PUT /api/person/** are declared above, ahead of the create permit.)
-                        .requestMatchers(HttpMethod.GET, "/api/person/uid/**").permitAll()
                         // Face biometric data:
                         //   GET /faces  - teacher/admin only (scanner feed)
                         //   POST /register - any authenticated user (self-service face enrollment)
-                        .requestMatchers(HttpMethod.POST, "/api/face/register/public", "/api/face/register/public/").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/face/faces").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/face/register").hasAnyAuthority("ROLE_USER", "ROLE_STUDENT", "ROLE_TEACHER", "ROLE_ADMIN")
                         .requestMatchers("/api/face/**").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
@@ -130,11 +119,6 @@ public class SecurityConfig {
                         // ========== API ENDPOINTS (REQUIRE AT LEAST USER) ==========
                         // Previously public endpoints now require authenticated roles
                         .requestMatchers("/api/jokes/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
-                        // Pause Menu APIs should be public
-                        .requestMatchers("/api/pausemenu/**").permitAll()
-                        // Leaderboard should be public - displays scores without authentication
-                        .requestMatchers("/api/leaderboard/**").permitAll()
-                        // Frontend calls gamer score endpoint; make it public
                         .requestMatchers("/api/gamer/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // ==========================================
                         .requestMatchers("/api/exports/**").hasAuthority("ROLE_ADMIN")
@@ -205,13 +189,6 @@ public class SecurityConfig {
                             .hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT", "ROLE_ASSIGNMENT_SYNC")
                         // =============================================
 
-                        // ========== ASSIGNMENT SUBMISSION ==========
-                        // Assignment text/link submissions - public (student identity passed in payload)
-                        .requestMatchers(HttpMethod.POST, "/api/submissions/**").permitAll()
-                        // Assignment file uploads - public (student identity passed in multipart fields)
-                        .requestMatchers(HttpMethod.POST, "/api/assignment-submissions/upload").permitAll()
-                        // ==========================================
-
                         // ========== OCS ANALYTICS ==========
                         // OCS Analytics endpoints - require authentication to associate data with user
                         .requestMatchers("/api/ocs-analytics/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
@@ -219,7 +196,7 @@ public class SecurityConfig {
 
                         // ========== DEFAULT: ALL OTHER API ENDPOINTS ==========
                         // Secure by default - any endpoint not explicitly listed above requires authentication
-                        .requestMatchers("/api/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
+                        .anyRequest().hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // ======================================================
                        
                 )
@@ -245,27 +222,18 @@ public class SecurityConfig {
     @Bean(name = "apiEndpointRolePolicy")
     public Map<String, String> apiEndpointRolePolicy() {
         Map<String, String> policy = new LinkedHashMap<>();
-        policy.put("/authenticate", "permitAll");
+        policy.put("OPTIONS /api/**, /authenticate", "permitAll");
         policy.put("POST /authenticate", "permitAll");
-        policy.put("/api/person/create", "permitAll");
-        policy.put("/api/person/create/", "permitAll");
         policy.put("POST /api/person/create", "permitAll");
-        policy.put("POST /api/grades", "permitAll");
-        policy.put("POST /api/grades/", "permitAll");
         policy.put("DELETE /api/person/**", "ROLE_ADMIN");
         policy.put("PUT /api/person/**", "ROLE_ADMIN");
-        policy.put("GET /api/person/uid/**", "permitAll");
         // Face biometric endpoints
-        policy.put("POST /api/face/register/public", "permitAll");
         policy.put("GET /api/face/faces", "ROLE_TEACHER|ROLE_ADMIN");
         policy.put("POST /api/face/register", "ROLE_USER|ROLE_STUDENT|ROLE_TEACHER|ROLE_ADMIN");
         policy.put("/api/face/**", "ROLE_TEACHER|ROLE_ADMIN");
-        policy.put("POST /api/assignment-submissions/upload", "permitAll");
         policy.put("POST /api/assignments/auto-create", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT|ROLE_ASSIGNMENT_SYNC");
         policy.put("/api/gist-connection", "authenticated");
         policy.put("POST /api/grades/create-gist", "authenticated");
-        policy.put("/api/pausemenu/**", "permitAll");
-        policy.put("/api/leaderboard/**", "permitAll");
         policy.put("/api/exports/**", "ROLE_ADMIN");
         policy.put("/api/imports/**", "ROLE_ADMIN");
         policy.put("/api/**", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT");
