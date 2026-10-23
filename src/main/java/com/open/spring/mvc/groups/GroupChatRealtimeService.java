@@ -158,21 +158,4 @@ public class GroupChatRealtimeService {
         }
         return groupOpt.get();
     }
-
-    private boolean validateAuthorIdentity(String author_uid) {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-
-        // prelim checks for valid authentication
-        if (auth == null || !auth.isAuthenticated()) {
-            return false;
-        }
-
-        // checks by name (uid) supplied in cookie
-        String name = auth.getName();
-        if (name == null || name.isBlank() || "anonymousUser".equals(name) || !name.equals(author_uid)) {
-            return false;
-        }
-
-        return true;
-    }
 }
