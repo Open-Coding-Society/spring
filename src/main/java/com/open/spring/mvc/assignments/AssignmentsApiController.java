@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -536,9 +537,24 @@ public class AssignmentsApiController {
                 .body(Map.of("error", "Authentication required"));
         }
 
-        List<Assignment> managed = assignmentAuthorizationService.isTeacherOrAdmin(user)
-            ? assignmentRepo.findAllWithCreators()
-            : assignmentRepo.findByCreatorId(user.getId());
+        List<Assignment> managed;
+        if (assignmentAuthorizationService.isTeacherOrAdmin(user)) {
+            managed = assignmentRepo.findAllWithCreators();
+        } else {
+            // Owning an assignment and being assigned to grade it are separate grants (see
+            // AssignmentAuthorizationService.canManage) - a grader who owns nothing here
+            // would otherwise see an empty dashboard despite being able to actually grade.
+            // Deduplicated by id, not entity equality: Assignment's generated equals/hashCode
+            // isn't safe to run across two separately-loaded lists of lazy collections.
+            Map<Long, Assignment> byId = new LinkedHashMap<>();
+            for (Assignment assignment : assignmentRepo.findByCreatorId(user.getId())) {
+                byId.put(assignment.getId(), assignment);
+            }
+            for (Assignment assignment : assignmentRepo.findByAssignedGraders(user)) {
+                byId.putIfAbsent(assignment.getId(), assignment);
+            }
+            managed = new ArrayList<>(byId.values());
+        }
 
         List<AssignmentDto> dtos = managed.stream()
             .map(assignment -> toDto(assignment, true))
