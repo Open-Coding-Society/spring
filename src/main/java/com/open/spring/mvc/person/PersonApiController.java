@@ -1,5 +1,6 @@
 package com.open.spring.mvc.person;
 
+import jakarta.validation.ConstraintViolationException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -74,7 +75,8 @@ public class PersonApiController {
     @Autowired
     private TinkleJPARepository tinkleRepository;
 
-    @Value("${DEFAULT_PASSWORD:defaultPassword123}")
+    // application.properties default, overridden by DEFAULT_PASSWORD in .env
+    @Value("${person.default-password}")
     private String defaultPassword;
 
     /**
@@ -172,16 +174,6 @@ public class PersonApiController {
                 return new ResponseEntity<>(responseObject.toString(), HttpStatus.FORBIDDEN);
             }
 
-            if (passwordChanged) {
-                // This path encodes directly instead of going through PersonDetailsService.save(),
-                // so apply the same complexity rule as signup and password reset here.
-                Person passwordCheck = new Person();
-                passwordCheck.setPassword(personDto.getPassword());
-                if (!passwordCheck.checkPassword()) {
-                    return weakPasswordResponse();
-                }
-            }
-
             StringBuilder changedFields = new StringBuilder();
             if (emailChanged) {
                 // Check if email is already taken by another person
@@ -195,7 +187,7 @@ public class PersonApiController {
                 changedFields.append("email,");
             }
             if (passwordChanged) {
-                existingPerson.setPassword(passwordEncoder.encode(personDto.getPassword()));
+                existingPerson.setPassword(personDto.getPassword());
                 changedFields.append("password,");
             }
             if (isAdmin && uidChangeRequested) {
@@ -226,17 +218,17 @@ public class PersonApiController {
                 existingPerson.setKasmServerNeeded(personDto.getKasmServerNeeded());
                 changedFields.append("kasmServerNeeded,");
             }
-            // Save the updated person back to the repository
-            Person updatedPerson = repository.save(existingPerson);
+            // Save the updated person; JPA rejects a weak new password with a 400
+            personDetailsService.save(existingPerson, !passwordChanged);
 
             String changed = changedFields.length() == 0
                     ? "none"
                     : changedFields.substring(0, changedFields.length() - 1);
-            logger.info("AUDIT profile_update actor={} target={} fields={} admin={}", email, updatedPerson.getUid(),
+            logger.info("AUDIT profile_update actor={} target={} fields={} admin={}", email, existingPerson.getUid(),
                     changed, isAdmin);
 
             // Return the updated person entity
-            return new ResponseEntity<>(updatedPerson, HttpStatus.OK);
+            return new ResponseEntity<>(existingPerson, HttpStatus.OK);
         }
 
         // Return NOT_FOUND if person not found
@@ -399,14 +391,6 @@ public class PersonApiController {
             return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.INTERNAL_SERVER_ERROR);
         }
 
-        // Check before save(): there a weak password throws and surfaces as a generic 500,
-        // so signup clients (which only require 8 characters for Flask) can't tell users why.
-        Person passwordCheck = new Person();
-        passwordCheck.setPassword(rawPassword);
-        if (!passwordCheck.checkPassword()) {
-            return weakPasswordResponse();
-        }
-
         String profilePicture = personDto.getPfp();
         if (profilePicture != null) {
             profilePicture = profilePicture.trim();
@@ -441,6 +425,8 @@ public class PersonApiController {
             JSONObject responseObject = new JSONObject();
             responseObject.put("error", "Unable to create user due to duplicate constrained fields (likely uid/email/sid)");
             return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.CONFLICT);
+        } catch (ConstraintViolationException e) {
+            throw e; // JPA rejected a field (e.g. weak password); ExceptionHandlerAdvice sends the 400
         } catch (Exception e) {
             logger.error("Person create failed for uid={} email={}", uid, email, e);
             HttpHeaders responseHeaders = new HttpHeaders();
@@ -766,7 +752,7 @@ public class PersonApiController {
                 changedFields.append("email,");
             }
             if (passwordChanged) {
-                existingPerson.setPassword(passwordEncoder.encode(personDto.getPassword()));
+                existingPerson.setPassword(personDto.getPassword());
                 changedFields.append("password,");
             }
             if (nameChanged) {
@@ -791,8 +777,8 @@ public class PersonApiController {
                 existingPerson.setSid(personDto.getSid());
                 changedFields.append("sid,");
             }
-            // Save the updated person back to the repository
-            repository.save(existingPerson);
+            // Save the updated person; JPA rejects a weak new password with a 400
+            personDetailsService.save(existingPerson, !passwordChanged);
 
             String changed = changedFields.length() == 0
                     ? "none"
@@ -914,15 +900,5 @@ public class PersonApiController {
     public ResponseEntity<List<Person>> searchPeople(@RequestParam("query") String query) {
         List<Person> people = repository.findByNameContainingIgnoreCaseOrEmailContainingIgnoreCase(query, query);
         return new ResponseEntity<>(people, HttpStatus.OK);
-    }
-
-    // Spells out Person.checkPassword()'s rule so clients can show it to the user.
-    private ResponseEntity<Object> weakPasswordResponse() {
-        HttpHeaders responseHeaders = new HttpHeaders();
-        responseHeaders.setContentType(MediaType.APPLICATION_JSON);
-        JSONObject responseObject = new JSONObject();
-        responseObject.put("error", "Password needs 8+ characters with an uppercase letter, a lowercase letter, "
-                + "a number, and one of ` ~ ! @ # $ % ^ & * ( )");
-        return new ResponseEntity<>(responseObject.toString(), responseHeaders, HttpStatus.BAD_REQUEST);
     }
 }

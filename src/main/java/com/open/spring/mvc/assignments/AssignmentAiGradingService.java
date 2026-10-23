@@ -16,24 +16,19 @@ import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.open.spring.mvc.S3uploads.FileHandler;
+import com.open.spring.mvc.aiconnections.AiGradingRouter;
+import com.open.spring.mvc.aiconnections.AiProviderFailure;
 
 @Service
 public class AssignmentAiGradingService {
-    private static final String DEFAULT_GEMINI_API_URL =
-            "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent";
-    // grade() runs synchronously inside the submit request (instant auto-grade) and inside
-    // the manual re-grade endpoint. 5 attempts x a 30s per-attempt timeout let a single call
-    // block for up to ~3 minutes when Gemini is genuinely down (a real, observed sustained
-    // "high demand" 503 outage on Google's side) - the caller's own request timed out long
-    // before that ever finished. During a real outage, more attempts don't help: every
-    // retry just hits the same overloaded backend. Bounded low so a submission never hangs.
-    private static final int MAX_GEMINI_ATTEMPTS = 3;
-    private static final Duration GEMINI_REQUEST_TIMEOUT = Duration.ofSeconds(12);
-    private static final long MAX_BACKOFF_MILLIS = 4000L;
+    private static final Logger logger = LoggerFactory.getLogger(AssignmentAiGradingService.class);
     private static final Pattern GITHUB_ISSUE_URL = Pattern.compile(
             "^https?://github\\.com/([^/]+)/([^/#?]+)/issues/(\\d+)/?$",
             Pattern.CASE_INSENSITIVE);
@@ -54,8 +49,7 @@ public class AssignmentAiGradingService {
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
     private final FileHandler fileHandler;
-    private final String geminiApiKey;
-    private final String geminiApiUrl;
+    private final AiGradingRouter aiRouter;
     private final String githubApiBaseUrl;
     private final String githubApiToken;
     private final String gistToken;
@@ -63,15 +57,13 @@ public class AssignmentAiGradingService {
     public AssignmentAiGradingService(
             ObjectMapper objectMapper,
             FileHandler fileHandler,
-            @Value("${gemini.api.key:}") String geminiApiKey,
-            @Value("${gemini.api.url:" + DEFAULT_GEMINI_API_URL + "}") String geminiApiUrl,
+            AiGradingRouter aiRouter,
             @Value("${github.api.base-url:https://api.github.com}") String githubApiBaseUrl,
             @Value("${github.api.token:}") String githubApiToken,
             @Value("${gist.token:}") String gistToken) {
         this.objectMapper = objectMapper;
         this.fileHandler = fileHandler;
-        this.geminiApiKey = geminiApiKey;
-        this.geminiApiUrl = geminiApiUrl;
+        this.aiRouter = aiRouter;
         this.githubApiBaseUrl = githubApiBaseUrl;
         this.githubApiToken = githubApiToken;
         this.gistToken = gistToken;
@@ -94,6 +86,27 @@ public class AssignmentAiGradingService {
     }
 
     public GradeResult grade(AssignmentSubmission submission) throws Exception {
+        String previous = MDC.get("aiSubmissionId");
+        MDC.put("aiSubmissionId", String.valueOf(submission.getId()));
+        long started = System.nanoTime();
+        logger.info("AI grading started submission={}", submission.getId());
+        try {
+            GradeResult result = gradeSubmission(submission);
+            logger.info("AI grading result submission={} status={} grade={} defaultRubric={} elapsedMs={}",
+                submission.getId(), result.status(), result.grade(), result.usedDefaultRubric(),
+                (System.nanoTime() - started) / 1_000_000);
+            return result;
+        } catch (Exception e) {
+            // Exception messages and stack traces can contain provider output or fetched student content.
+            logger.warn("AI grading exception submission={} failureType={} elapsedMs={}", submission.getId(),
+                e.getClass().getSimpleName(), (System.nanoTime() - started) / 1_000_000);
+            throw e;
+        } finally {
+            if (previous == null) MDC.remove("aiSubmissionId"); else MDC.put("aiSubmissionId", previous);
+        }
+    }
+
+    private GradeResult gradeSubmission(AssignmentSubmission submission) throws Exception {
         Map<String, Object> content = submission.getContent();
         String contentType = content == null ? null : String.valueOf(content.getOrDefault("type", "")).trim();
 
@@ -111,11 +124,10 @@ public class AssignmentAiGradingService {
         }
 
         if (submissionText.notGradeableReason != null) {
+            logger.info("AI grading skipped submission={} reason=content_not_gradeable", submission.getId());
             return GradeResult.notGradeable(submissionText.notGradeableReason);
         }
-        if (geminiApiKey == null || geminiApiKey.isBlank()) {
-            return GradeResult.failed("AI grading is not configured on the server.");
-        }
+        logger.info("AI grading content resolved submission={} characters={}", submission.getId(), submissionText.text.length());
 
         // Until the assignment has its own AI rubric, grade against the default rubric (written
         // out of 1) and flag the result so AssignmentAiRegradeService re-grades it later.
@@ -134,9 +146,16 @@ public class AssignmentAiGradingService {
 
         String prompt = buildPrompt(rubric, topScore, hacks, submissionText.kind, submissionText.text);
 
-        JsonNode response = objectMapper.readTree(callGemini(prompt));
-        String text = response.path("candidates").path(0).path("content").path("parts").path(0).path("text").asText("");
+        String text;
+        try {
+            text = aiRouter.generate(prompt, submission.getSubmitter(), hacks.size());
+        } catch (AiProviderFailure e) {
+            logger.warn("AI grading stopped submission={} reason=provider_failure httpStatus={} operational={}",
+                submission.getId(), e.getHttpStatus(), e.isOperational());
+            return GradeResult.failed(e.getMessage());
+        }
         if (text.isBlank()) {
+            logger.warn("AI grading rejected submission={} reason=empty_response", submission.getId());
             return GradeResult.failed("The AI returned no grading result.");
         }
         JsonNode result = parseJsonResult(text);
@@ -165,6 +184,9 @@ public class AssignmentAiGradingService {
             breakdown = parts.append(". ").toString();
         }
         if (!Double.isFinite(score) || score < 0 || score > topScore + 1e-9 || quality == 0 || feedback.isBlank()) {
+            logger.warn("AI grading rejected submission={} reason=invalid_grading_result scoreFinite={} scoreInRange={} qualityValid={} feedbackPresent={} maximumScore={}",
+                submission.getId(), Double.isFinite(score), Double.isFinite(score) && score >= 0 && score <= topScore + 1e-9,
+                quality != 0, !feedback.isBlank(), topScore);
             return GradeResult.failed("The AI returned an invalid grading result.");
         }
         double grade = Math.round(score / rubricScale * maxScore * 100.0) / 100.0;
@@ -548,62 +570,6 @@ public class AssignmentAiGradingService {
                 .header("X-GitHub-Api-Version", "2022-11-28")
                 .header("User-Agent", "OpenCodingSociety-assignment-grader")
                 .GET();
-    }
-
-    private String callGemini(String prompt) throws Exception {
-        Map<String, Object> part = Map.of("text", prompt);
-        Map<String, Object> requestBody = Map.of(
-            "contents", List.of(Map.of("parts", List.of(part))),
-            "generationConfig", Map.of(
-                "responseMimeType", "application/json",
-                "temperature", 0.2));
-        String requestBodyJson = objectMapper.writeValueAsString(requestBody);
-        for (int attempt = 0; attempt < MAX_GEMINI_ATTEMPTS; attempt++) {
-            HttpRequest request = HttpRequest.newBuilder(URI.create(geminiApiUrl + "?key=" + geminiApiKey))
-                    .timeout(GEMINI_REQUEST_TIMEOUT)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(requestBodyJson))
-                    .build();
-            HttpResponse<String> response;
-            try {
-                response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            } catch (java.net.http.HttpTimeoutException timeout) {
-                // Slow responses are as transient as a 503: retry rather than leave the submission ungraded.
-                if (attempt == MAX_GEMINI_ATTEMPTS - 1) {
-                    throw timeout;
-                }
-                continue;
-            }
-            if (response.statusCode() == 200) {
-                return response.body();
-            }
-            if (!isRetryableGeminiStatus(response.statusCode()) || attempt == MAX_GEMINI_ATTEMPTS - 1) {
-                throw new IllegalStateException("Gemini returned HTTP " + response.statusCode());
-            }
-            waitBeforeRetry(attempt, response);
-        }
-        throw new IllegalStateException("Gemini request was not completed");
-    }
-
-    private void waitBeforeRetry(int attempt, HttpResponse<String> response) throws InterruptedException {
-        long retryAfter = response.headers().firstValue("Retry-After")
-                .map(this::parseRetryAfterMillis)
-                .orElse(0L);
-        long exponentialDelay = Math.min(MAX_BACKOFF_MILLIS, 1000L << attempt);
-        Thread.sleep(retryAfter > 0 ? Math.min(retryAfter, MAX_BACKOFF_MILLIS) : exponentialDelay);
-    }
-
-    private long parseRetryAfterMillis(String value) {
-        try {
-            return Long.parseLong(value.trim()) * 1000L;
-        } catch (NumberFormatException exception) {
-            return 0L;
-        }
-    }
-
-    private boolean isRetryableGeminiStatus(int statusCode) {
-        return statusCode == 429 || statusCode == 500 || statusCode == 502
-                || statusCode == 503 || statusCode == 504;
     }
 
     private String limitSubmission(String text) {
