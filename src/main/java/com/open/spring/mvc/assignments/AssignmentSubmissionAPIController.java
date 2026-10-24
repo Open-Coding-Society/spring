@@ -785,11 +785,12 @@ public class AssignmentSubmissionAPIController {
 
     /**
      * Teachers and admins keep their existing reach; a creator may only manage submissions
-     * belonging to an assignment they own. The denial message is deliberately generic so a
-     * failed attempt never confirms anything about another assignment's submissions.
+     * belonging to an assignment they own; a grader assigned to the whole assignment or to
+     * this specific submission may manage it too. The denial message is deliberately generic
+     * so a failed attempt never confirms anything about another assignment's submissions.
      */
     private boolean canManageSubmission(Person currentUser, AssignmentSubmission submission) {
-        return assignmentAuthorizationService.canManage(currentUser, submission.getAssignment());
+        return assignmentAuthorizationService.canManageSubmission(currentUser, submission);
     }
 
     private boolean hasSubmissionType(Map<String, Object> content, Assignment assignment) {
