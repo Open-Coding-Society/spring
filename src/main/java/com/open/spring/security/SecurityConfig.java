@@ -213,6 +213,25 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/assignment-submissions/upload").permitAll()
                         // ==========================================
 
+                        // ========== CS PATHWAY SETUP REPORT ==========
+                        // A student's Terminal has no JWT cookie, so the report upload is public and
+                        // is tied to a student by the short-lived pairing code in its path. The
+                        // pairing-code rule comes FIRST (first match wins) so only signed-in users get codes.
+                        .requestMatchers(HttpMethod.POST, "/api/cs-pathway/setup-report/pairing-code").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
+                        .requestMatchers(HttpMethod.POST, "/api/cs-pathway/setup-report/review/**").hasAnyAuthority("ROLE_ADMIN", "ROLE_TEACHER")
+                        .requestMatchers(HttpMethod.POST, "/api/cs-pathway/setup-report/*").permitAll()
+                        // =============================================
+
+                        // ========== TOOLCHAIN TRAIL DEVICE PAIRING ==========
+                        // The local agent has no JWT cookie. /pair is guarded by the one-time pairing
+                        // code; /next and /results by the scoped agent token. Both are checked in
+                        // ToolchainService. Starting, polling and requesting checks (POST /sessions,
+                        // GET /sessions/*, POST /sessions/*/check) stay under the default /api/** rule.
+                        .requestMatchers(HttpMethod.POST, "/api/toolchain/pair").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/toolchain/sessions/*/next").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/toolchain/sessions/*/results").permitAll()
+                        // ====================================================
+
                         // ========== OCS ANALYTICS ==========
                         // OCS Analytics endpoints - require authentication to associate data with user
                         .requestMatchers("/api/ocs-analytics/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
@@ -268,6 +287,12 @@ public class SecurityConfig {
         policy.put("/api/ai-connections/**", "authenticated");
         policy.put("POST /api/submissions/**", "authenticated");
         policy.put("POST /api/grades/create-gist", "authenticated");
+        policy.put("POST /api/cs-pathway/setup-report/pairing-code", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT");
+        policy.put("POST /api/cs-pathway/setup-report/review/**", "ROLE_ADMIN|ROLE_TEACHER");
+        policy.put("POST /api/cs-pathway/setup-report/*", "permitAll");
+        policy.put("POST /api/toolchain/pair", "permitAll");
+        policy.put("GET /api/toolchain/sessions/*/next", "permitAll");
+        policy.put("POST /api/toolchain/sessions/*/results", "permitAll");
         policy.put("/api/pausemenu/**", "permitAll");
         policy.put("/api/leaderboard/**", "permitAll");
         policy.put("/api/exports/**", "ROLE_ADMIN");
