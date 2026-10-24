@@ -605,11 +605,15 @@ public class AssignmentAiGradingService {
         public void applyTo(AssignmentSubmission submission) {
             submission.setGrade(grade);
             submission.setQualityScore(qualityScore);
-            // feedback is varchar(255) on MySQL; the AI summary column holds the full text.
-            submission.setFeedback(feedback.length() > 255 ? feedback.substring(0, 254) + "…" : feedback);
+            submission.setFeedback(storedFeedback());
             submission.setAiSummary(feedback);
             submission.setNeedsAiRegrade(usedDefaultRubric);
             submission.setGradedAt(LocalDateTime.now());
+        }
+
+        /** feedback is varchar(255) on MySQL; the AI summary column holds the full text. */
+        public String storedFeedback() {
+            return feedback.length() > 255 ? feedback.substring(0, 254) + "…" : feedback;
         }
     }
 }

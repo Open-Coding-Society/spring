@@ -468,6 +468,10 @@ class AssignmentsApiControllerCreatorTest {
         @BeforeEach
         void openRegradeMocks() {
             MockitoAnnotations.openMocks(this);
+            // Mocks skip default methods; run the real one so a graded result reaches the
+            // guarded UPDATE, which matches the row as long as nobody graded it manually.
+            when(submissionRepo.saveAiGradeUnlessManuallyGraded(any(), any())).thenCallRealMethod();
+            when(submissionRepo.applyAiGradeUnlessManuallyGraded(any(), any(), any(), any(), any(), any(), any())).thenReturn(1);
         }
 
         @Mock AssignmentSubmissionJPA submissionRepo;
@@ -520,7 +524,7 @@ class AssignmentsApiControllerCreatorTest {
 
             verify(jdbcTemplate).update("UPDATE assignment SET ai_rubric = ? WHERE id = ?", READY_RUBRIC, 1L);
             ArgumentCaptor<AssignmentSubmission> saved = ArgumentCaptor.forClass(AssignmentSubmission.class);
-            verify(submissionRepo).save(saved.capture());
+            verify(submissionRepo).saveAiGradeUnlessManuallyGraded(saved.capture(), any());
             assertEquals(0.85, saved.getValue().getGrade());
             assertFalse(saved.getValue().getNeedsAiRegrade());
         }
@@ -548,6 +552,7 @@ class AssignmentsApiControllerCreatorTest {
             service().runOnce();
 
             verify(submissionRepo, never()).save(any());
+            verify(submissionRepo, never()).saveAiGradeUnlessManuallyGraded(any(), any());
         }
 
         // ---- fix out-of-range grades ----
@@ -577,7 +582,7 @@ class AssignmentsApiControllerCreatorTest {
             assertEquals(new AssignmentAiRegradeService.FixGradesStatus(false, 2, 2, 1, 1), service.getFixStatus());
             verify(aiGradingService, org.mockito.Mockito.times(2)).grade(any());
             ArgumentCaptor<AssignmentSubmission> saved = ArgumentCaptor.forClass(AssignmentSubmission.class);
-            verify(submissionRepo).save(saved.capture());
+            verify(submissionRepo).saveAiGradeUnlessManuallyGraded(saved.capture(), any());
             assertEquals(10L, saved.getValue().getId());
             assertEquals(0.8, saved.getValue().getGrade());
             assertFalse(Boolean.TRUE.equals(bad.getNeedsAiRegrade()));

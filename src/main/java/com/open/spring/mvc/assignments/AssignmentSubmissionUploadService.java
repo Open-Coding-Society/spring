@@ -121,12 +121,11 @@ public class AssignmentSubmissionUploadService {
     private AssignmentSubmission tryAutoGrade(AssignmentSubmission submission) {
         try {
             AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
+            // Conditional write: a teacher or creator may grade while the AI is still working.
             if ("graded".equals(result.status())) {
-                result.applyTo(submission);
-                // Return the caller's instance, not save()'s merged copy: the copy's assignment is a
-                // lazy proxy, and building the response DTO outside a session would throw.
-                submissionRepo.save(submission);
-                logger.info("Auto-grade save completed submission={} grade={}", submission.getId(), submission.getGrade());
+                if (submissionRepo.saveAiGradeUnlessManuallyGraded(submission, result)) {
+                    logger.info("Auto-grade save completed submission={} grade={}", submission.getId(), submission.getGrade());
+                }
                 return submission;
             }
             if ("failed".equals(result.status())) {

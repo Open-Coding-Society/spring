@@ -63,6 +63,9 @@ public class AssignmentSubmissionAPIController {
     private static final String MANAGE_DENIED_MESSAGE =
             "You do not have permission to manage this submission";
 
+    private static final String MANUAL_GRADE_MESSAGE =
+            "This submission was graded manually, so the AI will not replace that grade";
+
     @Autowired
     private AssignmentSubmissionJPA submissionRepo;
 
@@ -393,6 +396,7 @@ public class AssignmentSubmissionAPIController {
             submission.setAiSummary(null);
             submission.setQualityScore(null);
             submission.setNeedsAiRegrade(null);
+            submission.setGradedManually(false);
         }
 
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
@@ -439,7 +443,9 @@ public class AssignmentSubmissionAPIController {
         submission.setGrade(grade);
         submission.setFeedback(feedback);
         submission.setGradedAt(LocalDateTime.now());
-        // A teacher's grade is final; don't let a pending AI re-grade replace it.
+        // A person's grade is final: the AI must not replace it, even if its grading is still
+        // running, and a pending AI re-grade is cancelled.
+        submission.setGradedManually(true);
         submission.setNeedsAiRegrade(false);
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
         return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
@@ -549,20 +555,24 @@ public class AssignmentSubmissionAPIController {
         if (submission == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Submission not found"));
         }
+        if (submission.hasManualGrade()) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", MANUAL_GRADE_MESSAGE));
+        }
 
         try {
             AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
             if (!"graded".equals(result.status())) {
                 return ResponseEntity.unprocessableEntity().body(result);
             }
-            result.applyTo(submission);
-                AssignmentSubmission savedSubmission = submissionRepo.save(submission);
+            if (!submissionRepo.saveAiGradeUnlessManuallyGraded(submission, result)) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", MANUAL_GRADE_MESSAGE));
+            }
                 return ResponseEntity.ok(new AiGradeResponse(
                     result.status(),
                     result.grade(),
-                    savedSubmission.getQualityScore(),
-                    savedSubmission.getFeedback(),
-                    new AssignmentSubmissionReturnDto(savedSubmission)));
+                    submission.getQualityScore(),
+                    submission.getFeedback(),
+                    new AssignmentSubmissionReturnDto(submission)));
         } catch (Exception e) {
             logger.error("AI grading failed submission={} failureType={}", submissionId, e.getClass().getSimpleName());
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
@@ -857,11 +867,11 @@ public class AssignmentSubmissionAPIController {
         try {
             AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
             if ("graded".equals(result.status())) {
-                result.applyTo(submission);
-                // Return the caller's instance, not save()'s merged copy: the copy's assignment is a
-                // lazy proxy, and building the response DTO outside a session would throw.
-                submissionRepo.save(submission);
-                logger.info("Auto-grade save completed submission={} grade={}", submission.getId(), submission.getGrade());
+                if (submissionRepo.saveAiGradeUnlessManuallyGraded(submission, result)) {
+                    logger.info("Auto-grade save completed submission={} grade={}", submission.getId(), submission.getGrade());
+                } else {
+                    logger.info("Skipped AI grade for submission {}: it was graded manually first", submission.getId());
+                }
                 return submission;
             }
             if ("failed".equals(result.status())) {

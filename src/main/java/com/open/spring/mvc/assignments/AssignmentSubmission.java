@@ -76,6 +76,10 @@ public class AssignmentSubmission {
     // When the grade was last set (AI or teacher); drives "recent grade changes" in the gradebook.
     private LocalDateTime gradedAt;
 
+    // True once a teacher or the assignment creator sets the grade by hand. AI grading never
+    // overwrites such a grade; null on older rows means "not manually graded".
+    private Boolean gradedManually;
+
     private String comment;
 
     private Long assignmentid;
@@ -103,6 +107,10 @@ public class AssignmentSubmission {
         this.comment = comment;
         this.assignmentid = assignment.getId();
         this.isLate = isLate;
+    }
+
+    public boolean hasManualGrade() {
+        return Boolean.TRUE.equals(gradedManually);
     }
 
     // Getter for assignment_id (foreign key column)

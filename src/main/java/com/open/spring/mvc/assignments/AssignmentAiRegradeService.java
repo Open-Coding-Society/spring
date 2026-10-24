@@ -410,11 +410,14 @@ public class AssignmentAiRegradeService {
                 return false;
             }
             if ("graded".equals(result.status())) {
-                result.applyTo(current);
+                // Conditional write: a manual grade made in the meantime always wins.
+                if (!submissionRepo.saveAiGradeUnlessManuallyGraded(current, result)) {
+                    return false;
+                }
             } else {
                 current.setNeedsAiRegrade(false);
+                submissionRepo.save(current);
             }
-            submissionRepo.save(current);
             logger.info("AI re-grade: submission {} -> {}", submissionId,
                     "graded".equals(result.status()) ? result.grade() : result.status());
             return "graded".equals(result.status());

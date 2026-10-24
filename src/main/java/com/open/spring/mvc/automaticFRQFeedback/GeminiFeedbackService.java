@@ -114,6 +114,12 @@ public class GeminiFeedbackService {
 
         Feedback saved = feedbackRepository.save(fb);
 
+        // Keep the structured feedback, but never replace a grade a person set by hand.
+        if (submission.hasManualGrade()) {
+            log.info("Kept manual grade for submission {}; AI feedback saved without a grade change", submissionId);
+            return saved;
+        }
+
         // Update assignment submission with short feedback and normalized grade
         String shortFeedback = parsed.getOverallFeedback() != null && !parsed.getOverallFeedback().isEmpty()
                 ? String.join("; ", parsed.getOverallFeedback().subList(0, Math.min(3, parsed.getOverallFeedback().size())))
