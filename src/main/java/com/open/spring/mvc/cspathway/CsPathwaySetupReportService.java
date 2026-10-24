@@ -17,23 +17,34 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 /**
- * Lets a student's Terminal upload its Toolchain Trail setup report.
- * The Terminal has no login cookie, so the signed-in game page asks for a
- * short-lived pairing code and the verify script sends that code with the report.
- * Reports are self-reported output: they show setup gaps, they are not proof.
+ * Service for managing the Toolchain Trail setup reports uploaded by students' terminals.
+ * 
+ * <p>This service facilitates the pairing process between a public web server and a 
+ * local client terminal using short-lived pairing codes. It validates the format 
+ * of the uploaded reports and persists the results.</p>
  */
 @Service
 public class CsPathwaySetupReportService {
+    /** The duration for which a pairing code remains valid. */
     static final Duration PAIRING_CODE_LIFETIME = Duration.ofMinutes(30);
-    static final int MAX_REPORT_LENGTH = 20000; // same cap as the game's paste box
+    
+    /** The maximum allowed length for a report text to prevent abuse. */
+    static final int MAX_REPORT_LENGTH = 20000;
+    
+    /** The fixed length of the generated pairing codes. */
     static final int PAIRING_CODE_LENGTH = 8;
-    // No 0/O or 1/I/L, so a code read off the screen cannot be mistyped.
+    
+    /** The alphabet used for pairing codes, excluding ambiguous characters (0/O, 1/I/L). */
     private static final String PAIRING_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+    
+    /** Regex pattern to validate the format of a pairing code. */
     private static final Pattern PAIRING_CODE_FORMAT =
             Pattern.compile("[" + PAIRING_CODE_ALPHABET + "]{" + PAIRING_CODE_LENGTH + "}");
 
-    // Must match what scripts/verifyToolsTerminal.sh prints in the pages repository.
+    /** Regex pattern to identify the 'Overall' status line in a report. */
     private static final Pattern OVERALL_LINE = Pattern.compile("(?m)^Overall:\\s*(PASS|WARN|FAIL)\\s*$");
+    
+    /** Regex pattern to identify the 'Summary' line in a report. */
     private static final Pattern SUMMARY_LINE =
             Pattern.compile("(?m)^Summary:\\s*(\\d{1,4}) passed, (\\d{1,4}) warned, (\\d{1,4}) failed\\s*$");
 
@@ -43,20 +54,35 @@ public class CsPathwaySetupReportService {
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
 
+    /**
+     * Standard constructor using the system UTC clock.
+     * 
+     * @param repository The repository for persisting setup reports.
+     */
     @Autowired
     public CsPathwaySetupReportService(CsPathwaySetupReportRepository repository) {
         this(repository, Clock.systemUTC());
     }
 
+    /**
+     * Constructor for testing, allowing for a mocked clock.
+     * 
+     * @param repository The repository for persisting setup reports.
+     * @param clock      The clock to use for time-based operations.
+     */
     CsPathwaySetupReportService(CsPathwaySetupReportRepository repository, Clock clock) {
         this.repository = repository;
         this.clock = clock;
     }
 
     /**
-     * Gives the student a code to put in their verify command.
-     * An unexpired code is kept and extended, so a command the student already
-     * copied keeps working when they reopen the panel.
+     * Issues a new pairing code for a student.
+     * If an unexpired code already exists for the student, it is reused and its 
+     * expiration is extended.
+     *
+     * @param uid The unique identifier of the student.
+     * @return A {@link CsPathwayPairingCode} containing the code and its expiration timestamp.
+     * @throws IllegalArgumentException if the uid is invalid.
      */
     public CsPathwayPairingCode issuePairingCode(String uid) {
         requireUid(uid);
@@ -74,8 +100,10 @@ public class CsPathwaySetupReportService {
      * Saves a report uploaded with a pairing code, replacing the student's earlier report.
      * The code stays valid until it expires so the student can fix things and run the verifier again.
      *
-     * @return false when the code is unknown or expired
-     * @throws IllegalArgumentException when the text is not verifier output
+     * @param pairingCode The code provided by the terminal.
+     * @param reportText  The raw text output from the terminal verifier.
+     * @return true if the report was successfully saved; false if the code is unknown or expired.
+     * @throws IllegalArgumentException when the text is not verifier output or exceeds length limits.
      */
     public boolean saveReport(String pairingCode, String reportText) {
         if (pairingCode == null || !PAIRING_CODE_FORMAT.matcher(pairingCode).matches()) {
@@ -109,24 +137,36 @@ public class CsPathwaySetupReportService {
         return true;
     }
 
-    /** The student's latest report; empty until their Terminal has uploaded one. */
+    /** 
+     * Finds the student's latest report. 
+     * 
+     * @param uid The unique identifier of the student.
+     * @return An {@link Optional} containing the report if it exists and contains data.
+     */
     public Optional<CsPathwaySetupReport> findReport(String uid) {
         requireUid(uid);
         return repository.findById(uid).filter(CsPathwaySetupReport::hasReport);
     }
 
-    /** Latest report of every student who has uploaded one, keyed by uid, for the teacher view. */
+    /** 
+     * Retrieves all reports that have been successfully uploaded, keyed by student UID.
+     * Useful for the teacher's overview page.
+     * 
+     * @return A map of UIDs to their respective {@link CsPathwaySetupReport}.
+     */
     public Map<String, CsPathwaySetupReport> getReportsByUid() {
         List<CsPathwaySetupReport> reports = repository.findAllByReportedAtIsNotNull();
         return reports.stream().collect(Collectors.toMap(CsPathwaySetupReport::getUid, Function.identity()));
     }
 
+    /** Checks if the pairing code in the given row is non-null and not expired. */
     private static boolean isPairingCodeActive(CsPathwaySetupReport row, long now) {
         return row.getPairingCode() != null
                 && row.getPairingCodeExpiresAt() != null
                 && row.getPairingCodeExpiresAt() > now;
     }
 
+    /** Generates a new, unique pairing code that does not currently exist in the repository. */
     private String newUnusedPairingCode() {
         String code;
         do {
@@ -139,6 +179,7 @@ public class CsPathwaySetupReportService {
         return code;
     }
 
+    /** Validates that the provided UID is not null or blank. */
     private static void requireUid(String uid) {
         if (uid == null || uid.isBlank()) {
             throw new IllegalArgumentException("Student uid is required.");

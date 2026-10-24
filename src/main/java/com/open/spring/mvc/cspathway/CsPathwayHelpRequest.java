@@ -9,10 +9,13 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * One "I need help" flag a student raised from a CS Pathway level.
- * Rows are kept (not replaced) so the teacher page shows every request.
- * Times are epoch milliseconds so the same column type works on SQLite and MySQL.
- * The table is created by CsPathwayHelpRequestMigration (ddl-auto is none).
+ * Represents a single "I need help" request raised by a student during a CS Pathway level.
+ * Each request is persisted as a unique row to allow teachers to view a history of all requests.
+ * 
+ * This entity is mapped to the cs_pathway_help_request table.
+ * 
+ * Timestamps are stored as epoch milliseconds to ensure compatibility between 
+ * SQLite (development) and MySQL (production) environments.
  */
 @Entity
 @Table(name = "cs_pathway_help_request")
@@ -20,16 +23,31 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 public class CsPathwayHelpRequest {
 
+    /** Unique identifier for the request (random UUID). */
     @Id
-    private String id; // random UUID: auto-increment syntax differs between SQLite and MySQL
+    private String id;
 
+    /** The unique identifier of the student who raised the request. */
     private String uid;
+
+    /** The identifier for the CS Pathway level where the request occurred. */
     private String levelKey;
-    private String station; // station or area the student was on; null when the level has none
+
+    /** The specific station or area the student was on; may be null if the level has no stations. */
+    private String station;
+
+    /** The content of the student's help message. */
     private String message;
+
+    /** The creation timestamp of the request in epoch milliseconds. */
     private Long createdAt;
 
-    /** For the teacher page's date formatting. */
+    /**
+     * Converts the epoch millisecond timestamp to a {@link Date} object.
+     * Used primarily for date formatting in the teacher's view.
+     *
+     * @return The {@link Date} representation of the creation time, or null if createdAt is null.
+     */
     public Date getCreatedAtDate() {
         return createdAt == null ? null : new Date(createdAt);
     }
