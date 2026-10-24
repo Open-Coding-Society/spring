@@ -21,10 +21,10 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/cs-pathway")
-public class CsPathwayApiController {
+public class PathwayHelpApiRestControllerScore {
     private final CsPathwayScoreService scoreService;
 
-    public CsPathwayApiController(CsPathwayScoreService scoreService) {
+    public PathwayHelpApiRestControllerScore(CsPathwayScoreService scoreService) {
         this.scoreService = scoreService;
     }
 

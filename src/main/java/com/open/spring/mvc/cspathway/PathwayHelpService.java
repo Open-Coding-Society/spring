@@ -20,23 +20,23 @@ import com.open.spring.mvc.person.PersonJpaRepository;
  * and lists them for the teacher page.
  */
 @Service
-public class CsPathwayHelpRequestService {
+public class PathwayHelpService {
     static final Duration COOLDOWN = Duration.ofMinutes(1);
     static final int MAX_MESSAGE_LENGTH = 500;
     static final int MAX_STATION_LENGTH = 120;
 
-    private static final Logger logger = LoggerFactory.getLogger(CsPathwayHelpRequestService.class);
+    private static final Logger logger = LoggerFactory.getLogger(PathwayHelpService.class);
 
-    private final CsPathwayHelpRequestRepository repository;
+    private final PathwayHelpJpaRepository repository;
     private final PersonJpaRepository personRepository;
     private final Clock clock;
 
     @Autowired
-    public CsPathwayHelpRequestService(CsPathwayHelpRequestRepository repository, PersonJpaRepository personRepository) {
+    public PathwayHelpService(PathwayHelpJpaRepository repository, PersonJpaRepository personRepository) {
         this(repository, personRepository, Clock.systemUTC());
     }
 
-    CsPathwayHelpRequestService(CsPathwayHelpRequestRepository repository, PersonJpaRepository personRepository, Clock clock) {
+    PathwayHelpService(PathwayHelpJpaRepository repository, PersonJpaRepository personRepository, Clock clock) {
         this.repository = repository;
         this.personRepository = personRepository;
         this.clock = clock;
@@ -46,9 +46,9 @@ public class CsPathwayHelpRequestService {
      * Records a help request from the signed-in student.
      *
      * @throws IllegalArgumentException when the level is unknown or the text is empty or too long
-     * @throws CsPathwayHelpRequestTooSoonException when the student sent one less than a minute ago
+     * @throws PathwayHelpExceptionTooSoon when the student sent one less than a minute ago
      */
-    public CsPathwayHelpRequest send(String uid, CsPathwayHelpRequestBody body) {
+    public PathwayHelpEntity send(String uid, PathwayHelpDtoRecord body) {
         if (uid == null || uid.isBlank()) {
             throw new IllegalArgumentException("Student uid is required.");
         }
@@ -66,27 +66,27 @@ public class CsPathwayHelpRequestService {
         repository.findFirstByUidOrderByCreatedAtDesc(uid).ifPresent(previous -> {
             long waitMillis = previous.getCreatedAt() + COOLDOWN.toMillis() - now;
             if (waitMillis > 0) {
-                throw new CsPathwayHelpRequestTooSoonException(Math.max(1, Duration.ofMillis(waitMillis).toSeconds()));
+                throw new PathwayHelpExceptionTooSoon(Math.max(1, Duration.ofMillis(waitMillis).toSeconds()));
             }
         });
 
-        CsPathwayHelpRequest request = new CsPathwayHelpRequest();
+        PathwayHelpEntity request = new PathwayHelpEntity();
         request.setId(UUID.randomUUID().toString());
         request.setUid(uid);
         request.setLevelKey(level.getKey());
         request.setStation(station);
         request.setMessage(message);
         request.setCreatedAt(now);
-        CsPathwayHelpRequest saved = repository.save(request);
+        PathwayHelpEntity saved = repository.save(request);
         logger.info("CS Pathway help request from {} at {} / {}", uid, level.getKey(), station);
         return saved;
     }
 
     /** Most recent requests first, for the teacher page. */
-    public List<CsPathwayHelpRequestRow> getRecentRequests() {
+    public List<PathwayHelpDtoRecordView> getRecentRequests() {
         Map<String, String> namesByUid = new HashMap<>();
         return repository.findTop200ByOrderByCreatedAtDesc().stream()
-                .map(request -> new CsPathwayHelpRequestRow(
+                .map(request -> new PathwayHelpDtoRecordView(
                         namesByUid.computeIfAbsent(request.getUid(), this::displayName),
                         request.getUid(),
                         CsPathwayLevel.fromKey(request.getLevelKey())

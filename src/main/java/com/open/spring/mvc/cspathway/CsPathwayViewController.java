@@ -14,10 +14,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 public class CsPathwayViewController {
     private final CsPathwayScoreService scoreService;
     private final CsPathwaySetupReportService setupReportService;
-    private final CsPathwayHelpRequestService helpRequestService;
+    private final PathwayHelpService helpRequestService;
 
     public CsPathwayViewController(CsPathwayScoreService scoreService, CsPathwaySetupReportService setupReportService,
-            CsPathwayHelpRequestService helpRequestService) {
+            PathwayHelpService helpRequestService) {
         this.scoreService = scoreService;
         this.setupReportService = setupReportService;
         this.helpRequestService = helpRequestService;

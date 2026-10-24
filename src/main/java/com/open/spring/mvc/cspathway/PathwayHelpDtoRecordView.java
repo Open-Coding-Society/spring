@@ -5,7 +5,7 @@ import java.util.Date;
 /**
  * One help request as the teacher page shows it.
  */
-public record CsPathwayHelpRequestRow(
+public record PathwayHelpDtoRecordView(
         String name,
         String uid,
         String levelName,

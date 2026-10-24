@@ -21,7 +21,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "cs_pathway_help_request")
 @Data
 @NoArgsConstructor
-public class CsPathwayHelpRequest {
+public class PathwayHelpEntity {
 
     /** Unique identifier for the request (random UUID). */
     @Id

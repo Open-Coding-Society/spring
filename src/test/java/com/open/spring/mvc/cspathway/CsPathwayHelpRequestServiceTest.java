@@ -27,26 +27,26 @@ class CsPathwayHelpRequestServiceTest {
     private static final String MESSAGE = "I need help at Git Village Hall in Toolchain Trail (Windows).";
 
     @Mock
-    private CsPathwayHelpRequestRepository repository;
+    private PathwayHelpJpaRepository repository;
     @Mock
     private PersonJpaRepository personRepository;
 
     private MutableClock clock;
-    private CsPathwayHelpRequestService service;
+    private PathwayHelpService service;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         clock = new MutableClock(Instant.parse("2026-10-21T16:00:00Z"));
-        service = new CsPathwayHelpRequestService(repository, personRepository, clock);
-        when(repository.save(any(CsPathwayHelpRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        service = new PathwayHelpService(repository, personRepository, clock);
+        when(repository.save(any(PathwayHelpEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(repository.findFirstByUidOrderByCreatedAtDesc("toby")).thenReturn(Optional.empty());
     }
 
     @Test
     void sendSavesTheStudentsRequestWithTheTimeItWasSent() {
-        CsPathwayHelpRequest saved = service.send("toby",
-                new CsPathwayHelpRequestBody("toolchain-trail", "  Git Village Hall ", " " + MESSAGE + " "));
+        PathwayHelpEntity saved = service.send("toby",
+                new PathwayHelpDtoRecord("toolchain-trail", "  Git Village Hall ", " " + MESSAGE + " "));
 
         assertEquals("toby", saved.getUid());
         assertEquals("toolchain-trail", saved.getLevelKey());
@@ -57,7 +57,7 @@ class CsPathwayHelpRequestServiceTest {
 
     @Test
     void sendAllowsALevelWithoutAStation() {
-        CsPathwayHelpRequest saved = service.send("toby", new CsPathwayHelpRequestBody("toolchain-trail", " ", MESSAGE));
+        PathwayHelpEntity saved = service.send("toby", new PathwayHelpDtoRecord("toolchain-trail", " ", MESSAGE));
 
         assertNull(saved.getStation());
     }
@@ -65,32 +65,32 @@ class CsPathwayHelpRequestServiceTest {
     @Test
     void sendRejectsAnUnknownLevelAnEmptyMessageAndAnOverlongMessage() {
         assertThrows(IllegalArgumentException.class,
-                () -> service.send("toby", new CsPathwayHelpRequestBody("not-a-level", null, MESSAGE)));
+                () -> service.send("toby", new PathwayHelpDtoRecord("not-a-level", null, MESSAGE)));
         assertThrows(IllegalArgumentException.class,
-                () -> service.send("toby", new CsPathwayHelpRequestBody("toolchain-trail", null, "   ")));
+                () -> service.send("toby", new PathwayHelpDtoRecord("toolchain-trail", null, "   ")));
         assertThrows(IllegalArgumentException.class,
-                () -> service.send("toby", new CsPathwayHelpRequestBody("toolchain-trail", null, "x".repeat(501))));
+                () -> service.send("toby", new PathwayHelpDtoRecord("toolchain-trail", null, "x".repeat(501))));
         verify(repository, never()).save(any());
     }
 
     @Test
     void sendRefusesASecondRequestWithinAMinuteSoDoubleClicksDoNotFloodTheTeacher() {
-        CsPathwayHelpRequest previous = new CsPathwayHelpRequest();
+        PathwayHelpEntity previous = new PathwayHelpEntity();
         previous.setCreatedAt(clock.millis());
         when(repository.findFirstByUidOrderByCreatedAtDesc("toby")).thenReturn(Optional.of(previous));
         clock.advance(Duration.ofSeconds(20));
 
-        CsPathwayHelpRequestTooSoonException error = assertThrows(CsPathwayHelpRequestTooSoonException.class,
-                () -> service.send("toby", new CsPathwayHelpRequestBody("toolchain-trail", null, MESSAGE)));
+        PathwayHelpExceptionTooSoon error = assertThrows(PathwayHelpExceptionTooSoon.class,
+                () -> service.send("toby", new PathwayHelpDtoRecord("toolchain-trail", null, MESSAGE)));
         assertEquals(40, error.getRetryAfterSeconds());
 
         clock.advance(Duration.ofSeconds(40));
-        assertEquals(MESSAGE, service.send("toby", new CsPathwayHelpRequestBody("toolchain-trail", null, MESSAGE)).getMessage());
+        assertEquals(MESSAGE, service.send("toby", new PathwayHelpDtoRecord("toolchain-trail", null, MESSAGE)).getMessage());
     }
 
     @Test
     void getRecentRequestsShowsTheStudentsNameAndTheLevelsDisplayName() {
-        CsPathwayHelpRequest request = new CsPathwayHelpRequest();
+        PathwayHelpEntity request = new PathwayHelpEntity();
         request.setUid("toby");
         request.setLevelKey("toolchain-trail");
         request.setStation("Git Village Hall");
@@ -101,7 +101,7 @@ class CsPathwayHelpRequestServiceTest {
         toby.setName("Toby Leung");
         when(personRepository.findByUid("toby")).thenReturn(toby);
 
-        CsPathwayHelpRequestRow row = service.getRecentRequests().get(0);
+        PathwayHelpDtoRecordView row = service.getRecentRequests().get(0);
 
         assertEquals("Toby Leung", row.name());
         assertEquals("Toolchain Trail", row.levelName());
