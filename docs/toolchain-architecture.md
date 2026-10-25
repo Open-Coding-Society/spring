@@ -8,25 +8,88 @@ Toolchain is the Java feature area for the CS Pathway learning experience. It su
 - Scoring: record and display progress through the five learning levels.
 - Help: let a student send a request to a teacher. This is a teacher help-request queue, not OCS chat. OCS chat is a possible future direction and is not implemented by this package.
 
-The Java implementation is consolidated under `src/main/java/com/open/spring/mvc/toolchain/`. The teacher dashboard template remains `src/main/resources/templates/cs-pathway/read.html`. Java package names and public URL prefixes do not need to match: the package is `mvc.toolchain`, while existing `/api/cs-pathway/...` and `/mvc/cs-pathway/...` routes remain unchanged for client compatibility.
+| Area | Location or prefix | Notes |
+| --- | --- | --- |
+| Java implementation | `src/main/java/com/open/spring/mvc/toolchain/` | Toolchain Java classes are consolidated in the `mvc.toolchain` package. |
+| Teacher dashboard | `src/main/resources/templates/cs-pathway/read.html` | The existing dashboard template remains in the `cs-pathway` folder. |
+| Public routes | `/api/cs-pathway/...` and `/mvc/cs-pathway/...` | URL prefixes do not have to match the Java package; these routes remain unchanged for client compatibility. |
 
 ## Toolchain agent
 
-The Toolchain agent is a local program that runs on the student's computer. The browser cannot run local commands by itself, so the student starts or installs the agent separately. This Spring repository contains the REST API, session storage, and server-side evaluation rules, not the local agent implementation. The Java station rules refer to `scripts/toolchain_agent.py` in the Pages repository as the client that collects evidence.
+The Toolchain agent is a separate local program on the student's computer; this Spring repository provides its REST API, session storage, and server-side evaluation rules, not the agent implementation. The agent performs predefined checks for the station selected in the game and submits evidence. Spring evaluates that evidence; it never executes local commands.
 
-The agent's job is to perform predefined checks for the station currently selected in the game. The student pairs it with the game using a one-time code; the agent should ask the student to enter the code when prompted. It reports check identifiers, process exit codes, and output as evidence. The server—not the browser or agent—decides pass/fail using `ToolchainStationRules`. The agent should not accept arbitrary shell commands from the server.
+### Interactive session flow
 
-The interactive session flow is:
+Follow the API exchange from session creation through server evaluation and game status:
 
-1. The signed-in game starts a session with `POST /api/toolchain/sessions`, sending a `stationId`. Spring ties the session to the authenticated student's UID and returns a session UUID and one-time pairing code.
-2. The student enters the pairing code into the local agent when prompted.
-3. The agent exchanges the code once at `POST /api/toolchain/pair`. Spring consumes the code and returns a scoped bearer token. The token is valid only for that session.
-4. The game asks for checks as the student reaches stations using `POST /api/toolchain/sessions/{sessionId}/check`. The agent polls `GET /api/toolchain/sessions/{sessionId}/next` using its bearer token, runs its predefined checks for the requested station, and submits evidence to `POST /api/toolchain/sessions/{sessionId}/results`.
-5. Spring validates the session token and that results refer to the current station, evaluates the evidence against the server's station rules, and saves the status. The signed-in game reads the result from `GET /api/toolchain/sessions/{sessionId}`.
+1. **Start pairing - game to Spring.** The signed-in game calls `POST /api/toolchain/sessions` with a `stationId`. Spring associates the session with the student's UID and returns a session UUID and one-time pairing code.
+2. **Pair the local agent.** The student enters the code into the local agent. The agent exchanges it once at `POST /api/toolchain/pair`; Spring consumes the code and returns a bearer token scoped to that session.
+3. **Request a station check - game to Spring.** As the student reaches a station, the game calls `POST /api/toolchain/sessions/{sessionId}/check`. Spring updates the current station for the paired agent.
+4. **Get the request and submit evidence - agent to Spring.** The agent polls `GET /api/toolchain/sessions/{sessionId}/next` with its bearer token, runs only its predefined checks for the requested station, then submits check identifiers, exit codes, and output to `POST /api/toolchain/sessions/{sessionId}/results`.
+5. **Evaluate and report - Spring to game.** Spring validates the agent token and requested station, evaluates evidence with `ToolchainStationRules`, and stores the results. The signed-in game reads the current station status and checks from `GET /api/toolchain/sessions/{sessionId}` as a `StationView`.
 
-One pairing covers the trail; the game can request another station without pairing again. Pairing-code and agent-token lifetimes are configurable in `application.properties`. Only hashes of the pairing code and agent token are stored. The raw code and token are credentials and should not be logged or shared.
+One pairing covers the trail, so the game can request later station checks without pairing again. Before running any local command, the agent must require both explicit student confirmation and its own confirmation that the requested station maps to predefined checks. Pairing is not blanket approval. This approval gate belongs to the local agent and is not enforced by the Spring API. The agent must not accept executable commands from the server.
 
-The agent does not write directly to the database. All communication goes through Spring REST endpoints. For request examples, see [`api/toolchain.http`](../api/toolchain.http). The earlier macOS zsh shell helper is separate: it only observes selected commands in an interactive shell and does not pair with the game or report station results.
+Pairing codes and agent tokens are credentials: only their hashes are stored, and raw values must not be logged or shared. Their configured lifetimes are described below. The earlier macOS zsh shell helper is separate; it observes selected commands in an interactive shell but does not pair with the game or report station results.
+
+### Pairing and station-check architecture
+
+This flow is the agent-specific path through the otherwise shared Toolchain feature area. It is a reusable Web-to-Machine pairing pattern: authenticate the person in the web application, exchange a short-lived one-time code for a session-scoped machine credential, request bounded work, then evaluate submitted evidence on the server.
+
+<!-- mermaid-checked: no \n, no em-dash/en-dash, no {} in labels, subgraphs are id["label"], arrows are -->|"label"|, all subgraphs closed by end, ids unique -->
+```mermaid
+flowchart LR
+    subgraph UserSide["User and local machine"]
+        Student["Student"]
+        Game["Signed-in game"]
+        Agent["Local Toolchain agent"]
+        Gate["User approval and agent check gate"]
+    end
+    subgraph ServerSide["Spring Toolchain agent workflow"]
+        Api["ToolchainAgentApiRestController"]
+        Service["ToolchainAgentService"]
+        Pair["PairResponse"]
+        View["StationView DTO"]
+        Rules["ToolchainStationRules"]
+        Repo["ToolchainAgentSessionJpaRepository"]
+        Session[("toolchain_session")]
+    end
+
+    Student -->|"uses"| Game
+    Game -->|"starts session"| Api
+    Api -->|"delegates"| Service
+    Service -->|"creates session and code"| Repo
+    Repo -->|"persists"| Session
+    Game -->|"shows one-time code"| Student
+    Student -->|"enters code"| Agent
+    Agent -->|"exchanges code"| Api
+    Api -->|"pairs agent"| Service
+    Service -->|"consumes code and stores token hash"| Repo
+    Service -->|"returns scoped token"| Pair
+    Pair -->|"agent credential"| Agent
+    Game -->|"requests current station"| Api
+    Api -->|"requests station check"| Service
+    Service -->|"stores station request"| Repo
+    Service -->|"returns current state"| View
+    View -->|"shown to game"| Game
+    Agent -->|"polls for requested station"| Api
+    Api -->|"validates scoped token"| Service
+    Service -->|"returns current state"| View
+    View -->|"station and status"| Agent
+    Agent -->|"requires both approvals before local commands"| Gate
+    Gate -->|"runs predefined local checks"| Agent
+    Agent -->|"submits evidence only"| Api
+    Api -->|"validates session and station"| Service
+    Service -->|"evaluates evidence"| Rules
+    Rules -->|"returns CheckResult list"| Service
+    Service -->|"stores evaluated results"| Repo
+    Service -->|"returns evaluated state"| View
+    View -->|"status and checks"| Game
+```
+
+`StationView` is the response shape for requesting a station check, agent polling, result submission, and game status polling. It carries the session identifier, current `stationId`, lifecycle `status`, and evaluated `List<CheckResult>`; it is not the agent's raw evidence. The local agent's predefined commands are outside this Spring repository. `ToolchainStationRules` defines the server-side station/check allow-list and evaluates the agent's submitted evidence; it does not execute or authorize local commands.
+
+The pairing code currently expires after **5 minutes**, and the scoped agent token after **4 hours**, as configured by `toolchain.pairing-code-lifetime` and `toolchain.agent-token-lifetime` in `application.properties`. These bounded credential lifetimes are configurable; keep machine credentials scoped to one session and require re-pairing after expiry. Expiration does not automatically delete the persisted session or its results. If the agent-token lifetime is tightened, update the property and this documentation together.
 
 ## Two setup/report mechanisms
 
@@ -51,7 +114,7 @@ The package follows the Spring MVC and persistence pattern used by the rest of t
 - `JpaRepository` interfaces provide persistence operations and derived queries. They are the Java persistence interface, not a separate SQL database or a hand-written SQL layer.
 - Services contain business rules and coordinate repositories or external systems. `ToolchainSetupReviewService` calls Gemini; the other services manage pairing reports, scores, help requests, agent sessions, and station rules.
 - `ToolchainMvcController` serves the Thymeleaf teacher/admin page at `/mvc/cs-pathway/read`. It supplies dashboard data to `templates/cs-pathway/read.html`; this is a server-rendered UI route, not a REST endpoint.
-- `ToolchainApiRestControllerAgent`, `ToolchainAgentService`, `ToolchainStationRules`, and `ToolchainAgentSessionEntity` implement the agent session lifecycle and station evidence evaluation.
+- `ToolchainAgentApiRestController`, `ToolchainAgentService`, `StationView`, `ToolchainStationRules`, and `ToolchainAgentSessionEntity` implement the agent session lifecycle and station evidence evaluation.
 
 ## Current behavior
 
@@ -75,11 +138,11 @@ The package follows the Spring MVC and persistence pattern used by the rest of t
 
 These routes provide reads and specific create/update actions. There is no delete endpoint, and not every resource offers all four CRUD operations.
 
-For the Toolchain Trail, one pairing covers the whole trail; the game changes the current station request as the student advances. The session UUID is not a student UID or a level key. Spring associates the session with the authenticated student's UID, issues a single-use pairing code, and returns a short-lived agent token after pairing. Only a hash of each code/token is stored. The agent polls for the requested `stationId`, submits allow-listed check evidence, and Spring evaluates pass/fail. The browser then reads the resulting status. Lifetimes are configured by `toolchain.pairing-code-lifetime` and `toolchain.agent-token-lifetime` in `application.properties`.
+The session UUID is not a student UID or a level key. The current pairing-code lifetime is 5 minutes and the agent-token lifetime is 4 hours; both are configurable in `application.properties`.
 
 ### Testing the REST API in VS Code
 
-Use the VS Code REST Client extension with the two HTTP request files:
+Use the VS Code REST Client extension with the two HTTP request files to exercise the API flows described above:
 
 - [`api/cspathway.http`](../api/cspathway.http) tests the existing `/api/cs-pathway/...` compatibility routes for setup reports, help requests, and scores. Those routes remain unchanged even though the Java types now live in `mvc.toolchain`.
 - [`api/toolchain.http`](../api/toolchain.http) tests the interactive `/api/toolchain/...` agent/session API, including start, pair, poll, result submission, and session status.
@@ -116,6 +179,7 @@ The persisted record is keyed by student UID in `cs_pathway_setup_report`. It st
 - `cs_pathway_setup_report`, `cs_pathway_help_request`, and `toolchain_session` are initialized by `ToolchainSetupReportTableInitializer`, `ToolchainHelpRequestTableInitializer`, and `ToolchainAgentSessionTableInitializer`. These `ApplicationRunner` components are needed because Hibernate uses `ddl-auto=none`. Keep their DDL and corresponding entity mappings aligned for both SQLite and MySQL.
 - Score data is stored in the shared `Stats` table. Pathway queries are isolated in `ToolchainJpaRepositoryStats`; do not create a second score table without a deliberate data migration.
 - Interactive station sessions are stored in `toolchain_session`; this is separate from score rows and setup-report rows because it has its own pairing, token-expiry, station-request, and result lifecycle. `ToolchainStationRules` is the server-side allow-list and evaluator; a client must not determine its own pass/fail result.
+- The server evaluates submitted check evidence but never runs commands on a student's machine. The external local agent must map station requests to predefined checks and require both explicit student approval and its own safety confirmation before executing any local command. Pairing alone must not authorize arbitrary command execution.
 - The score and help endpoints use the authenticated student principal. The pairing-code issue route and AI review route have explicit role rules. The text report upload is public at the HTTP layer and relies on a valid, unexpired pairing code in the service. The MVC dashboard is restricted to teachers and administrators. See `SecurityConfig` and `MvcSecurityConfig` for the actual access rules.
 - Toolchain pair, poll, and result routes are public at the Spring Security matcher layer because the local agent has no browser JWT cookie; `ToolchainAgentService` requires a valid one-time pairing code or the session's scoped, unexpired bearer token. The game session routes require the signed-in owner.
 - Treat pairing codes and agent tokens as credentials: keep them random, short-lived, validated on every use, and out of logs. Avoid logging raw verifier reports or command output, which may contain local machine details.
