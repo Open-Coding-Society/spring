@@ -35,6 +35,8 @@ import lombok.NoArgsConstructor;
 @Entity
 @JsonIgnoreProperties({"assignedGraders"})
 public class AssignmentSubmission {
+    public static final int FIRST_REVISION = 1;
+
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
@@ -58,27 +60,65 @@ public class AssignmentSubmission {
     )
     private List<Person> assignedGraders;
 
+    // ========== CONTENT AND GRADING STATE ==========
+    // Every column in this block is updatable = false: saving the entity never writes them, so a
+    // stale copy saved by any code path can't revert a grade or the content. They change only
+    // through the conditional UPDATEs in AssignmentSubmissionJPA, which SubmissionGradingService
+    // runs (one place for the grading policy, and one history entry per change).
+    //
+    // Three grades are kept apart:
+    //   aiGrade      - the AI's latest grade for the current revision, kept even when overridden
+    //   manualGrade  - a person's grade, present only while manualOverride is true
+    //   grade        - the effective grade everyone sees: manualGrade if overridden, else aiGrade
+    //
+    // manualOverride is set when a teacher, student teacher or assignment creator grades by hand
+    // (POST /api/submissions/grade/{id}). It is cleared when that person removes the override, and
+    // when the student submits new content: an override applies to the revision the person
+    // reviewed, so a revision is a new grading decision. AI grading never sets or clears it; an AI
+    // grade made while it is set is stored in aiGrade/aiSummary without changing grade.
+
     @Convert(converter = SubmissionContentConverter.class)
-    @Column(columnDefinition = "text")
+    @Column(columnDefinition = "text", updatable = false)
     private Map<String, Object> content;
+
+    // Starts at 1 and goes up each time the content changes. Every grading write names the
+    // revision it applies to, so a grade computed for older content is never saved on newer.
+    @Column(updatable = false)
+    private Integer revision = FIRST_REVISION;
+
+    @Column(updatable = false)
     private Double grade;
+
+    @Column(columnDefinition = "text", updatable = false)
     private String feedback;
 
-    @Column(columnDefinition = "text")
+    @Column(updatable = false)
+    private Double aiGrade;
+
+    // The AI's full feedback for the current revision.
+    @Column(columnDefinition = "text", updatable = false)
     private String aiSummary;
 
+    @Column(updatable = false)
     private Integer qualityScore;
 
-    // True when the AI grade came from the default rubric because the assignment's AI rubric
-    // wasn't ready yet; AssignmentAiRegradeService re-grades these once it is.
+    @Column(updatable = false)
+    private Boolean manualOverride = false;
+
+    @Column(updatable = false)
+    private Double manualGrade;
+
+    @Column(columnDefinition = "text", updatable = false)
+    private String manualFeedback;
+
+    // True when the AI should (re-)grade this revision: it failed, or used the default rubric
+    // because the assignment's AI rubric wasn't ready. Never true while manualOverride is.
+    @Column(updatable = false)
     private Boolean needsAiRegrade;
 
-    // When the grade was last set (AI or teacher); drives "recent grade changes" in the gradebook.
+    // When the effective grade last changed; drives "recent grade changes" in the gradebook.
+    @Column(updatable = false)
     private LocalDateTime gradedAt;
-
-    // True once a teacher or the assignment creator sets the grade by hand. AI grading never
-    // overwrites such a grade; null on older rows means "not manually graded".
-    private Boolean gradedManually;
 
     private String comment;
 
@@ -109,8 +149,12 @@ public class AssignmentSubmission {
         this.isLate = isLate;
     }
 
-    public boolean hasManualGrade() {
-        return Boolean.TRUE.equals(gradedManually);
+    public boolean hasManualOverride() {
+        return Boolean.TRUE.equals(manualOverride);
+    }
+
+    public int currentRevision() {
+        return revision == null ? FIRST_REVISION : revision;
     }
 
     // Getter for assignment_id (foreign key column)

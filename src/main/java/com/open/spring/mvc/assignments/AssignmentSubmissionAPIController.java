@@ -63,9 +63,6 @@ public class AssignmentSubmissionAPIController {
     private static final String MANAGE_DENIED_MESSAGE =
             "You do not have permission to manage this submission";
 
-    private static final String MANUAL_GRADE_MESSAGE =
-            "This submission was graded manually, so the AI will not replace that grade";
-
     @Autowired
     private AssignmentSubmissionJPA submissionRepo;
 
@@ -82,7 +79,10 @@ public class AssignmentSubmissionAPIController {
     private FileHandler fileHandler;
 
     @Autowired
-    private AssignmentAiGradingService aiGradingService;
+    private SubmissionGradingService gradingService;
+
+    @Autowired
+    private SubmissionAiGrader aiGrader;
 
     @Autowired
     private AssignmentAiRegradeService aiRegradeService;
@@ -216,8 +216,8 @@ public class AssignmentSubmissionAPIController {
             submission.setWorkHabits(submissionInfo.workHabits);
             submission.setAiOrchestration(submissionInfo.aiOrchestration);
             submission.setSelfAssessmentReflection(submissionInfo.selfAssessmentReflection);
-            AssignmentSubmission savedSubmission = submissionRepo.save(submission);
-            savedSubmission = tryAutoGrade(savedSubmission);
+            AssignmentSubmission savedSubmission = gradingService.submit(submission, getAuthenticatedPerson(userDetails));
+            aiGrader.autoGrade(savedSubmission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
         }
         Map<String, String> error = new HashMap<>();
@@ -298,8 +298,8 @@ public class AssignmentSubmissionAPIController {
             submission.setWorkHabits(requestData.workHabits);
             submission.setAiOrchestration(requestData.aiOrchestration);
             submission.setSelfAssessmentReflection(requestData.selfAssessmentReflection);
-            AssignmentSubmission savedSubmission = submissionRepo.save(submission);
-            savedSubmission = tryAutoGrade(savedSubmission);
+            AssignmentSubmission savedSubmission = gradingService.submit(submission, getAuthenticatedPerson(userDetails));
+            aiGrader.autoGrade(savedSubmission);
             return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
         }
         Map<String, String> error = new HashMap<>();
@@ -307,8 +307,12 @@ public class AssignmentSubmissionAPIController {
         return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);
     }
 
+    /**
+     * Edits a submission. New content becomes a new revision, which is re-graded by the AI and
+     * releases any manual override (see {@link SubmissionGradingService}). Deliberately not
+     * transactional: the AI grading below must not run while a database transaction is open.
+     */
     @PutMapping(value = "/{submissionId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @Transactional
     public ResponseEntity<?> updateSubmission(
             @PathVariable Long submissionId,
             @RequestParam String contentType,
@@ -340,6 +344,7 @@ public class AssignmentSubmissionAPIController {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("error", "You can only edit your own submissions"));
         }
+        loadAssignment(submission);
 
         String normalizedContentType = contentType == null ? "" : contentType.trim().toLowerCase(Locale.ROOT);
         Map<String, Object> updatedContent;
@@ -381,47 +386,73 @@ public class AssignmentSubmissionAPIController {
                     .body(Map.of("error", "contentType must be either link or file"));
         }
 
-        // Preserve existing content map for change detection
-        Map<String, Object> existingContent = submission.getContent() != null ? submission.getContent() : Collections.emptyMap();
-        boolean contentChanged = !Objects.equals(existingContent, updatedContent);
-
-        submission.setContent(updatedContent);
         submission.setComment(comment == null ? "" : comment);
         submission.setIsLate(Boolean.TRUE.equals(isLate));
 
-        // Only clear grade/feedback/AI summary/quality score when the content actually changed
-        if (contentChanged) {
-            submission.setGrade(null);
-            submission.setFeedback(null);
-            submission.setAiSummary(null);
-            submission.setQualityScore(null);
-            submission.setNeedsAiRegrade(null);
-            submission.setGradedManually(false);
+        GradingResult revision = gradingService.revise(submission, updatedContent, currentUser);
+        if (revision.outcome() == GradingOutcome.REVISION_CREATED) {
+            aiGrader.autoGrade(submission);
+        } else if (revision.outcome() != GradingOutcome.CONTENT_UNCHANGED) {
+            return GradingResponse.from(revision);
         }
-
-        AssignmentSubmission savedSubmission = submissionRepo.save(submission);
-        if (contentChanged) {
-            savedSubmission = tryAutoGrade(savedSubmission);
-        }
-        return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
+        return ResponseEntity.ok(new AssignmentSubmissionReturnDto(submission));
     }
 
     /**
-     * Grade an existing assignment submission.
-     * 
-     * @param submissionId the ID of the submission to be graded
-     * @param grade        the grade to be assigned to the submission
-     * @param feedback     optional feedback for the submission
-     * @return a ResponseEntity indicating success or an error if the submission is not found
+     * Manually grade a submission (manual override). The grade becomes the effective grade and
+     * stays effective through any AI grading, until it is cleared or the student revises.
+     *
+     * @param grade    0 to the assignment's points
+     * @param feedback optional feedback for the student
+     * @param revision the revision the grader reviewed; if the student has revised since, nothing
+     *                 is saved and the response is STALE_REVISION. Optional for older clients.
+     *
+     * Not transactional: the service finds, authorizes and grades the submission in one
+     * transaction of its own that takes the submission's lock first.
      */
     @PostMapping("/grade/{submissionId}")
-    @Transactional
     public ResponseEntity<?> gradeSubmission(
             @PathVariable Long submissionId,
             @AuthenticationPrincipal UserDetails userDetails,
             @RequestParam Double grade,
-            @RequestParam(required = false) String feedback
+            @RequestParam(required = false) String feedback,
+            @RequestParam(required = false) Integer revision
     ) {
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Authentication required"));
+        }
+        return GradingResponse.from(gradingService.applyManualGrade(submissionId, currentUser, revision, grade, feedback));
+    }
+
+    /**
+     * Remove a manual override so the AI grade is effective again (the AI grades the revision
+     * first if it hasn't yet). Not transactional, for the same reason as gradeSubmission.
+     */
+    @DeleteMapping("/grade/{submissionId}")
+    public ResponseEntity<?> clearManualGrade(
+            @PathVariable Long submissionId,
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestParam(required = false) Integer revision
+    ) {
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Authentication required"));
+        }
+        return GradingResponse.from(gradingService.clearManualOverride(submissionId, currentUser, revision));
+    }
+
+    /**
+     * A submission's grading history, oldest first, with its current grading state. Visible to
+     * whoever may grade the submission and to its submitter.
+     */
+    @GetMapping("/{submissionId}/grading-history")
+    @Transactional
+    public ResponseEntity<?> getGradingHistory(
+            @PathVariable Long submissionId,
+            @AuthenticationPrincipal UserDetails userDetails) {
         Person currentUser = getAuthenticatedPerson(userDetails);
         if (currentUser == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
@@ -430,25 +461,35 @@ public class AssignmentSubmissionAPIController {
 
         AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
         if (submission == null) {
-            Map<String, String> error = new HashMap<>();
-            error.put("error", "Submission not found");
-            return new ResponseEntity<>(error, HttpStatus.NOT_FOUND);    
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Submission not found"));
         }
-        if (!canManageSubmission(currentUser, submission)) {
+        if (!canManageSubmission(currentUser, submission) && !canEditSubmission(currentUser, submission)) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
                     .body(Map.of("error", MANAGE_DENIED_MESSAGE));
         }
 
-        // we have a correct submission
-        submission.setGrade(grade);
-        submission.setFeedback(feedback);
-        submission.setGradedAt(LocalDateTime.now());
-        // A person's grade is final: the AI must not replace it, even if its grading is still
-        // running, and a pending AI re-grade is cancelled.
-        submission.setGradedManually(true);
-        submission.setNeedsAiRegrade(false);
-        AssignmentSubmission savedSubmission = submissionRepo.save(submission);
-        return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
+        List<SubmissionGradeEvent> events = gradingService.history(submissionId);
+        Set<Long> actorIds = events.stream().map(SubmissionGradeEvent::getActorId)
+                .filter(Objects::nonNull).collect(Collectors.toSet());
+        Map<Long, String> actorNames = personRepo.findAllById(actorIds).stream()
+                .collect(Collectors.toMap(Person::getId, Person::getName, (first, second) -> first));
+        return ResponseEntity.ok(new GradingHistoryResponse(
+                SubmissionGradingState.of(submission),
+                events.stream().map(event -> GradeEventDto.of(event, actorNames.get(event.getActorId()))).toList()));
+    }
+
+    public record GradingHistoryResponse(SubmissionGradingState current, List<GradeEventDto> events) {
+    }
+
+    /** One history entry; actorName is null for the AI or a deleted account. */
+    public record GradeEventDto(Long id, Integer revision, SubmissionGradeEvent.Type type, Double grade,
+            String feedback, Boolean effective, Long actorId, String actorName, Map<String, Object> content,
+            LocalDateTime createdAt) {
+        static GradeEventDto of(SubmissionGradeEvent event, String actorName) {
+            return new GradeEventDto(event.getId(), event.getRevision(), event.getType(), event.getGrade(),
+                    event.getFeedback(), event.getEffective(), event.getActorId(), actorName, event.getContent(),
+                    event.getCreatedAt());
+        }
     }
 
     /**
@@ -536,8 +577,12 @@ public class AssignmentSubmissionAPIController {
         return null;
     }
 
+    /**
+     * AI-grade a submission now. The AI grade and feedback are always saved; if a manual override
+     * is active it stays effective (outcome MANUAL_OVERRIDE_KEPT). Deliberately not transactional,
+     * so no database transaction is held open during the AI call.
+     */
     @PostMapping("/ai-grade/{submissionId}")
-    @Transactional
     public ResponseEntity<?> aiGradeSubmission(
             @PathVariable Long submissionId,
             @AuthenticationPrincipal UserDetails userDetails) {
@@ -555,39 +600,9 @@ public class AssignmentSubmissionAPIController {
         if (submission == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Submission not found"));
         }
-        if (submission.hasManualGrade()) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", MANUAL_GRADE_MESSAGE));
-        }
-
-        try {
-            AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
-            if (!"graded".equals(result.status())) {
-                return ResponseEntity.unprocessableEntity().body(result);
-            }
-            if (!submissionRepo.saveAiGradeUnlessManuallyGraded(submission, result)) {
-                return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("error", MANUAL_GRADE_MESSAGE));
-            }
-                return ResponseEntity.ok(new AiGradeResponse(
-                    result.status(),
-                    result.grade(),
-                    submission.getQualityScore(),
-                    submission.getFeedback(),
-                    new AssignmentSubmissionReturnDto(submission)));
-        } catch (Exception e) {
-            logger.error("AI grading failed submission={} failureType={}", submissionId, e.getClass().getSimpleName());
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
-                    .body(Map.of("status", "failed", "message", "The AI grader could not complete this submission: "
-                            + (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage())));
-        }
+        loadAssignment(submission);
+        return GradingResponse.from(aiGrader.grade(submission));
     }
-
-                public record AiGradeResponse(
-                    String status,
-                    Double score,
-                    Integer qualityScore,
-                    String feedback,
-                    AssignmentSubmissionReturnDto submission) {
-                }
 
     /**
      * Persist an AI-generated summary for a submission (admin/teacher only).
@@ -620,12 +635,10 @@ public class AssignmentSubmissionAPIController {
                     .body(Map.of("error", MANAGE_DENIED_MESSAGE));
         }
 
-        submission.setAiSummary(summary);
-        if (qualityScore != null && qualityScore >= 1 && qualityScore <= 5) {
-            submission.setQualityScore(qualityScore);
-        }
-        AssignmentSubmission savedSubmission = submissionRepo.save(submission);
-        return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
+        Integer validQualityScore = qualityScore != null && qualityScore >= 1 && qualityScore <= 5 ? qualityScore : null;
+        gradingService.saveAiSummary(submissionId, summary, validQualityScore)
+                .ifPresent(state -> state.copyTo(submission));
+        return ResponseEntity.ok(new AssignmentSubmissionReturnDto(submission));
     }
 
     /**
@@ -859,35 +872,13 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Attempts to AI-grade a freshly created submission immediately, best-effort.
-     * Grading failures never fail the submission itself — the student's work is
-     * saved either way, ungraded if the AI grader can't produce a result.
+     * Replaces the submission's lazy assignment proxy with the loaded assignment, for methods that
+     * run outside a transaction (the AI grader and the response DTO both read it).
      */
-    private AssignmentSubmission tryAutoGrade(AssignmentSubmission submission) {
-        try {
-            AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
-            if ("graded".equals(result.status())) {
-                if (submissionRepo.saveAiGradeUnlessManuallyGraded(submission, result)) {
-                    logger.info("Auto-grade save completed submission={} grade={}", submission.getId(), submission.getGrade());
-                } else {
-                    logger.info("Skipped AI grade for submission {}: it was graded manually first", submission.getId());
-                }
-                return submission;
-            }
-            if ("failed".equals(result.status())) {
-                flagForRegrade(submission);
-            }
-        } catch (Exception e) {
-            logger.warn("Auto-grade failed submission={} failureType={}; saved work retained", submission.getId(), e.getClass().getSimpleName());
-            flagForRegrade(submission);
+    private void loadAssignment(AssignmentSubmission submission) {
+        if (submission.getAssignment() != null) {
+            assignmentRepo.findById(submission.getAssignment().getId()).ifPresent(submission::setAssignment);
         }
-        return submission;
-    }
-
-    /** Lets AssignmentAiRegradeService retry a grade that failed (e.g. Gemini timed out). */
-    private void flagForRegrade(AssignmentSubmission submission) {
-        submission.setNeedsAiRegrade(true);
-        submissionRepo.save(submission);
     }
 
     private Person getAuthenticatedPerson(UserDetails userDetails) {

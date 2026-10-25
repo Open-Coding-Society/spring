@@ -6,7 +6,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.Base64;
 import java.util.Iterator;
 import java.util.List;
@@ -595,25 +594,14 @@ public class AssignmentAiGradingService {
      */
     public record GradeResult(String status, Double grade, Integer qualityScore, String feedback, String message,
             boolean usedDefaultRubric) {
-        static GradeResult graded(double grade, int qualityScore, String feedback, boolean usedDefaultRubric) {
+        public static GradeResult graded(double grade, Integer qualityScore, String feedback, boolean usedDefaultRubric) {
             return new GradeResult("graded", grade, qualityScore, feedback, null, usedDefaultRubric);
         }
         static GradeResult notGradeable(String message) { return new GradeResult("not_gradeable", null, null, null, message, false); }
         static GradeResult failed(String message) { return new GradeResult("failed", null, null, null, message, false); }
 
-        /** Copies a graded result onto the submission, flagging it for re-grade if the default rubric was used. */
-        public void applyTo(AssignmentSubmission submission) {
-            submission.setGrade(grade);
-            submission.setQualityScore(qualityScore);
-            submission.setFeedback(storedFeedback());
-            submission.setAiSummary(feedback);
-            submission.setNeedsAiRegrade(usedDefaultRubric);
-            submission.setGradedAt(LocalDateTime.now());
-        }
-
-        /** feedback is varchar(255) on MySQL; the AI summary column holds the full text. */
-        public String storedFeedback() {
-            return feedback.length() > 255 ? feedback.substring(0, 254) + "…" : feedback;
+        public boolean isGraded() {
+            return "graded".equals(status);
         }
     }
 }

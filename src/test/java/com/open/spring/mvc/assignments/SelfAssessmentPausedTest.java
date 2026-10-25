@@ -49,6 +49,9 @@ class SelfAssessmentPausedTest {
     @Mock
     private FileHandler fileHandler;
 
+    @Mock
+    private SubmissionGradeEventJPA eventRepo;
+
     private AssignmentSubmissionAPIController controller;
     private AssignmentSubmissionFileApiController fileController;
 
@@ -63,11 +66,15 @@ class SelfAssessmentPausedTest {
         ReflectionTestUtils.setField(controller, "submissionRepo", submissionRepo);
         ReflectionTestUtils.setField(controller, "assignmentRepo", assignmentRepo);
         ReflectionTestUtils.setField(controller, "personRepo", personRepo);
-        ReflectionTestUtils.setField(controller, "aiGradingService", aiGradingService);
+        SubmissionGradingService gradingService = new SubmissionGradingService(submissionRepo, eventRepo,
+                new AssignmentAuthorizationService());
+        SubmissionAiGrader aiGrader = new SubmissionAiGrader(aiGradingService, gradingService);
+        ReflectionTestUtils.setField(controller, "gradingService", gradingService);
+        ReflectionTestUtils.setField(controller, "aiGrader", aiGrader);
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
 
         AssignmentSubmissionUploadService uploadService = new AssignmentSubmissionUploadService(
-                fileHandler, personRepo, assignmentRepo, submissionRepo, aiGradingService);
+                fileHandler, personRepo, assignmentRepo, gradingService, aiGrader);
         fileController = new AssignmentSubmissionFileApiController(uploadService);
 
         student = student(1L, "toby");

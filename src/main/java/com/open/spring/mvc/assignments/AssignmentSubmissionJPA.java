@@ -3,13 +3,14 @@ package com.open.spring.mvc.assignments;
 import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
-import org.springframework.transaction.annotation.Transactional;
 
 import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.person.Person;
@@ -21,45 +22,96 @@ public interface AssignmentSubmissionJPA extends JpaRepository<AssignmentSubmiss
     List<AssignmentSubmission> findByAssignedGraders(Person grader);
 
     // Note: This used to just be a method signature, but now there's a query too because students is now many to many instead of many to one
-    List<AssignmentSubmission> findBySubmitterId(Long id);  
+    List<AssignmentSubmission> findBySubmitterId(Long id);
     List<AssignmentSubmission> findBySubmitter(Submitter submitter);
 
-    /**
-     * Writes an AI grade only if no person has graded the submission yet. AI grading takes
-     * seconds, so a teacher or creator can grade in the meantime; checking the flag in the
-     * same UPDATE keeps their grade from being overwritten by the slower AI result.
-     *
-     * @return 1 if the AI grade was saved, 0 if a manual grade already exists
-     */
-    @Modifying
-    @Transactional
-    @Query("UPDATE AssignmentSubmission s SET s.grade = :grade, s.qualityScore = :qualityScore, "
-            + "s.feedback = :feedback, s.aiSummary = :aiSummary, s.needsAiRegrade = :needsAiRegrade, "
-            + "s.gradedAt = :gradedAt "
-            + "WHERE s.id = :id AND (s.gradedManually IS NULL OR s.gradedManually = false)")
-    int applyAiGradeUnlessManuallyGraded(
-            @Param("id") Long id,
-            @Param("grade") Double grade,
-            @Param("qualityScore") Integer qualityScore,
-            @Param("feedback") String feedback,
-            @Param("aiSummary") String aiSummary,
-            @Param("needsAiRegrade") Boolean needsAiRegrade,
-            @Param("gradedAt") LocalDateTime gradedAt);
+    // ========== GRADING WRITES ==========
+    // The only statements that write a submission's content and grading columns (the entity maps
+    // them updatable = false). Each one names the revision it applies to, so it matches no row if
+    // the student has since submitted new content, and each checks and writes in one statement,
+    // so a concurrent writer can't slip in between. Call them through SubmissionGradingService.
 
     /**
-     * Saves a graded AI result unless the submission was graded manually, and mirrors it onto
-     * the in-memory entity only when the write succeeded.
-     *
-     * @return true if the AI grade was saved
+     * Takes the submission's write lock for the rest of the transaction with a no-op UPDATE: a row
+     * lock on MySQL, the database write lock on SQLite (which has no SELECT ... FOR UPDATE).
+     * Grading transactions run this first, so concurrent grading writes wait their turn instead of
+     * failing: on SQLite a transaction that reads before it writes gets SQLITE_BUSY if another
+     * write commits in between. Returns 0 if the submission doesn't exist.
      */
-    default boolean saveAiGradeUnlessManuallyGraded(
-            AssignmentSubmission submission, AssignmentAiGradingService.GradeResult result) {
-        int updated = applyAiGradeUnlessManuallyGraded(submission.getId(), result.grade(), result.qualityScore(),
-                result.storedFeedback(), result.feedback(), result.usedDefaultRubric(), LocalDateTime.now());
-        if (updated == 0) {
-            return false;
-        }
-        result.applyTo(submission);
-        return true;
-    }
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE AssignmentSubmission s SET s.revision = s.revision WHERE s.id = :id")
+    int lockForGrading(@Param("id") Long id);
+
+    /** Reads the grading columns from the database, bypassing any stale entity in the session. */
+    @Query("SELECT new com.open.spring.mvc.assignments.SubmissionGradingState("
+            + "s.id, s.revision, s.grade, s.feedback, s.gradedAt, s.aiGrade, s.aiSummary, s.qualityScore, "
+            + "s.manualOverride, s.manualGrade, s.manualFeedback, s.needsAiRegrade) "
+            + "FROM AssignmentSubmission s WHERE s.id = :id")
+    Optional<SubmissionGradingState> findGradingState(@Param("id") Long id);
+
+    /** Stores the AI's grade and feedback for the revision, whether or not it becomes effective. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE AssignmentSubmission s SET s.aiGrade = :grade, s.aiSummary = :feedback, "
+            + "s.qualityScore = :qualityScore "
+            + "WHERE s.id = :id AND s.revision = :revision")
+    int recordAiGrade(@Param("id") Long id, @Param("revision") int revision, @Param("grade") Double grade,
+            @Param("feedback") String feedback, @Param("qualityScore") Integer qualityScore);
+
+    /** Makes the stored AI grade effective, unless a manual override is active. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE AssignmentSubmission s SET s.grade = s.aiGrade, s.feedback = s.aiSummary, "
+            + "s.gradedAt = :now, s.needsAiRegrade = :needsAiRegrade "
+            + "WHERE s.id = :id AND s.revision = :revision "
+            + "AND (s.manualOverride IS NULL OR s.manualOverride = false)")
+    int makeAiGradeEffective(@Param("id") Long id, @Param("revision") int revision,
+            @Param("needsAiRegrade") boolean needsAiRegrade, @Param("now") LocalDateTime now);
+
+    /** Sets a person's grade as the effective grade and cancels any pending AI re-grade. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE AssignmentSubmission s SET s.manualOverride = true, s.manualGrade = :grade, "
+            + "s.manualFeedback = :feedback, s.grade = :grade, s.feedback = :feedback, s.gradedAt = :now, "
+            + "s.needsAiRegrade = false "
+            + "WHERE s.id = :id AND s.revision = :revision")
+    int applyManualOverride(@Param("id") Long id, @Param("revision") int revision, @Param("grade") Double grade,
+            @Param("feedback") String feedback, @Param("now") LocalDateTime now);
+
+    /** Removes an active manual override; the stored AI grade (possibly none) becomes effective. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE AssignmentSubmission s SET s.manualOverride = false, s.manualGrade = null, "
+            + "s.manualFeedback = null, s.grade = s.aiGrade, s.feedback = s.aiSummary, s.gradedAt = :now "
+            + "WHERE s.id = :id AND s.revision = :revision AND s.manualOverride = true")
+    int clearManualOverride(@Param("id") Long id, @Param("revision") int revision, @Param("now") LocalDateTime now);
+
+    /**
+     * Saves new content as the next revision and resets its grading, including any manual
+     * override, which applied to the revision the person reviewed.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE AssignmentSubmission s SET s.content = :content, s.revision = s.revision + 1, "
+            + "s.grade = null, s.feedback = null, s.gradedAt = null, s.aiGrade = null, s.aiSummary = null, "
+            + "s.qualityScore = null, s.needsAiRegrade = null, s.manualOverride = false, s.manualGrade = null, "
+            + "s.manualFeedback = null "
+            + "WHERE s.id = :id AND s.revision = :revision")
+    int startRevision(@Param("id") Long id, @Param("revision") int revision,
+            @Param("content") Map<String, Object> content);
+
+    /** Queues the revision for an AI (re-)grade, unless a person has overridden its grade. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE AssignmentSubmission s SET s.needsAiRegrade = true "
+            + "WHERE s.id = :id AND s.revision = :revision "
+            + "AND (s.manualOverride IS NULL OR s.manualOverride = false)")
+    int flagForAiRegrade(@Param("id") Long id, @Param("revision") int revision);
+
+    /** Takes the revision out of the AI queue (e.g. the AI can't grade it). */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE AssignmentSubmission s SET s.needsAiRegrade = false "
+            + "WHERE s.id = :id AND s.revision = :revision")
+    int clearAiRegradeFlag(@Param("id") Long id, @Param("revision") int revision);
+
+    /** Saves a summary from the submission summarizer; a null quality score leaves the old one. */
+    @Modifying(flushAutomatically = true)
+    @Query("UPDATE AssignmentSubmission s SET s.aiSummary = :summary, "
+            + "s.qualityScore = COALESCE(:qualityScore, s.qualityScore) WHERE s.id = :id")
+    int saveAiSummary(@Param("id") Long id, @Param("summary") String summary,
+            @Param("qualityScore") Integer qualityScore);
 }

@@ -12,8 +12,6 @@ import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.open.spring.mvc.S3uploads.FileHandler;
@@ -23,25 +21,24 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 
 @Service
 public class AssignmentSubmissionUploadService {
-    private static final Logger logger = LoggerFactory.getLogger(AssignmentSubmissionUploadService.class);
 
     private final FileHandler fileHandler;
     private final PersonJpaRepository personRepo;
     private final AssignmentJpaRepository assignmentRepo;
-    private final AssignmentSubmissionJPA submissionRepo;
-    private final AssignmentAiGradingService aiGradingService;
+    private final SubmissionGradingService gradingService;
+    private final SubmissionAiGrader aiGrader;
 
     public AssignmentSubmissionUploadService(
             FileHandler fileHandler,
             PersonJpaRepository personRepo,
             AssignmentJpaRepository assignmentRepo,
-            AssignmentSubmissionJPA submissionRepo,
-            AssignmentAiGradingService aiGradingService) {
+            SubmissionGradingService gradingService,
+            SubmissionAiGrader aiGrader) {
         this.fileHandler = fileHandler;
         this.personRepo = personRepo;
         this.assignmentRepo = assignmentRepo;
-        this.submissionRepo = submissionRepo;
-        this.aiGradingService = aiGradingService;
+        this.gradingService = gradingService;
+        this.aiGrader = aiGrader;
     }
 
     public Map<String, Object> upload(
@@ -100,7 +97,8 @@ public class AssignmentSubmissionUploadService {
             aiOrchestration,
             selfAssessmentReflection);
 
-        savedSubmission = tryAutoGrade(savedSubmission);
+        // Best-effort: a grading failure never fails the upload; the revision is queued for a retry.
+        aiGrader.autoGrade(savedSubmission);
 
         return buildResponse(
             assignment,
@@ -112,33 +110,6 @@ public class AssignmentSubmissionUploadService {
                 s3Filename,
             storedFilename,
             savedSubmission);
-    }
-
-    /**
-     * Attempts to AI-grade a freshly uploaded submission immediately (e.g. a .ipynb
-     * notebook), best-effort. Grading failures never fail the upload itself.
-     */
-    private AssignmentSubmission tryAutoGrade(AssignmentSubmission submission) {
-        try {
-            AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
-            // Conditional write: a teacher or creator may grade while the AI is still working.
-            if ("graded".equals(result.status())) {
-                if (submissionRepo.saveAiGradeUnlessManuallyGraded(submission, result)) {
-                    logger.info("Auto-grade save completed submission={} grade={}", submission.getId(), submission.getGrade());
-                }
-                return submission;
-            }
-            if ("failed".equals(result.status())) {
-                submission.setNeedsAiRegrade(true); // AssignmentAiRegradeService retries it later.
-                submissionRepo.save(submission);
-            }
-        } catch (Exception e) {
-            // Best-effort: the upload already succeeded, so a grading failure is logged, not thrown.
-            logger.warn("Auto-grade failed submission={} failureType={}; saved upload retained", submission.getId(), e.getClass().getSimpleName());
-            submission.setNeedsAiRegrade(true); // AssignmentAiRegradeService retries it later.
-            submissionRepo.save(submission);
-        }
-        return submission;
     }
 
     private void validateAuthentication(UserDetails userDetails) {
@@ -278,7 +249,7 @@ public class AssignmentSubmissionUploadService {
         submission.setAiOrchestration(aiOrchestration);
         submission.setSelfAssessmentReflection(selfAssessmentReflection);
 
-        return submissionRepo.save(submission);
+        return gradingService.submit(submission, authenticatedUser);
     }
 
     private Map<String, Object> buildResponse(

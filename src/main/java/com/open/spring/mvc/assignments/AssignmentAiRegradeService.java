@@ -5,7 +5,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
@@ -47,7 +46,8 @@ public class AssignmentAiRegradeService {
 
     private final AssignmentSubmissionJPA submissionRepo;
     private final AssignmentJpaRepository assignmentRepo;
-    private final AssignmentAiGradingService aiGradingService;
+    private final SubmissionAiGrader aiGrader;
+    private final SubmissionGradingService gradingService;
     private final AssignmentRubricService rubricService;
     private final JdbcTemplate jdbcTemplate;
     private final AtomicBoolean running = new AtomicBoolean(false);
@@ -73,12 +73,14 @@ public class AssignmentAiRegradeService {
     public AssignmentAiRegradeService(
             AssignmentSubmissionJPA submissionRepo,
             AssignmentJpaRepository assignmentRepo,
-            AssignmentAiGradingService aiGradingService,
+            SubmissionAiGrader aiGrader,
+            SubmissionGradingService gradingService,
             AssignmentRubricService rubricService,
             JdbcTemplate jdbcTemplate) {
         this.submissionRepo = submissionRepo;
         this.assignmentRepo = assignmentRepo;
-        this.aiGradingService = aiGradingService;
+        this.aiGrader = aiGrader;
+        this.gradingService = gradingService;
         this.rubricService = rubricService;
         this.jdbcTemplate = jdbcTemplate;
     }
@@ -311,9 +313,10 @@ public class AssignmentAiRegradeService {
     }
 
     /**
-     * Re-grades every submission whose grade is above its assignment's points (e.g. 4/1 from
-     * the old 2-4 scale) against the assignment's rubric. Each submission is attempted exactly
-     * once per run; a failure is counted and left alone (no flag, no retry), so it can't loop.
+     * Re-grades every AI-graded submission whose grade is above its assignment's points (e.g. 4/1
+     * from the old 2-4 scale) against the assignment's rubric; manual overrides are left alone.
+     * Each submission is attempted exactly once per run; a failure is counted and left alone (no
+     * flag, no retry), so it can't loop.
      */
     public synchronized FixGradesStatus startFixOutOfRangeGrades() {
         if (fixStatus.running()) {
@@ -321,7 +324,7 @@ public class AssignmentAiRegradeService {
         }
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "SELECT s.id, s.assignment_id FROM assignment_submission s JOIN assignment a ON a.id = s.assignment_id "
-                        + "WHERE s.grade IS NOT NULL "
+                        + "WHERE s.grade IS NOT NULL AND (s.manual_override IS NULL OR s.manual_override = 0) "
                         + "AND s.grade > (CASE WHEN a.points IS NULL OR a.points <= 0 THEN 1 ELSE a.points END) + 0.000001 "
                         + "ORDER BY s.assignment_id, s.id");
         Map<Long, List<Long>> byAssignment = groupByAssignment(rows);
@@ -386,41 +389,38 @@ public class AssignmentAiRegradeService {
     /**
      * Grades one submission once. {@code flaggedOnly} is the background-job mode: skip it unless it
      * is still flagged, and clear the flag when it turns out not gradeable. Returns true if graded.
+     *
+     * The result is saved against the revision that was graded, so a student's edit made while the
+     * AI was working discards it, and a teacher's manual grade stays effective (the AI grade is
+     * still kept for reference).
      */
     private boolean regrade(Long submissionId, Assignment assignment, boolean flaggedOnly) {
         try {
             AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
-            if (submission == null) {
+            if (submission == null || (flaggedOnly && !Boolean.TRUE.equals(submission.getNeedsAiRegrade()))) {
                 return false;
             }
             // Loaded outside a session, so swap the lazy proxy for the already-loaded assignment.
             submission.setAssignment(assignment);
             long started = System.nanoTime();
-            AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
+            GradingResult result = aiGrader.grade(submission);
             recordGradeSeconds((System.nanoTime() - started) / 1e9);
-            if ("failed".equals(result.status()) || (!flaggedOnly && !"graded".equals(result.status()))) {
-                return false; // Background job: leave flagged so the next run retries.
-            }
-            // Reload so a teacher's manual grade or a student's edit made while the AI was
-            // grading isn't overwritten with a grade for stale content.
-            AssignmentSubmission current = submissionRepo.findById(submissionId).orElse(null);
-            if (current == null
-                    || (flaggedOnly && !Boolean.TRUE.equals(current.getNeedsAiRegrade()))
-                    || !Objects.equals(current.getContent(), submission.getContent())) {
-                return false;
-            }
-            if ("graded".equals(result.status())) {
-                // Conditional write: a manual grade made in the meantime always wins.
-                if (!submissionRepo.saveAiGradeUnlessManuallyGraded(current, result)) {
+            switch (result.outcome()) {
+                case AI_GRADE_APPLIED, MANUAL_OVERRIDE_KEPT -> {
+                    logger.info("AI re-grade: submission {} -> {} ({})", submissionId,
+                            result.state().aiGrade(), result.outcome());
+                    return true;
+                }
+                case AI_NOT_GRADEABLE -> {
+                    if (flaggedOnly) {
+                        gradingService.clearAiRegradeFlag(submissionId, submission.currentRevision());
+                    }
                     return false;
                 }
-            } else {
-                current.setNeedsAiRegrade(false);
-                submissionRepo.save(current);
+                default -> {
+                    return false; // Failed (stays flagged for the next run) or revised meanwhile.
+                }
             }
-            logger.info("AI re-grade: submission {} -> {}", submissionId,
-                    "graded".equals(result.status()) ? result.grade() : result.status());
-            return "graded".equals(result.status());
         } catch (Exception e) {
             logger.warn("AI re-grade failed submission={} failureType={}", submissionId, e.getClass().getSimpleName());
             return false;
