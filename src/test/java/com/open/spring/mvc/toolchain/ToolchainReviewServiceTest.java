@@ -16,14 +16,14 @@ import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.open.spring.mvc.toolchain.ToolchainSetupReviewService.EvidenceRecord;
+import com.open.spring.mvc.toolchain.ToolchainReviewService.EvidenceRecord;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class ToolchainSetupReviewServiceTest {
-    private final ToolchainSetupReportService reportService = mock(ToolchainSetupReportService.class);
+class ToolchainReviewServiceTest {
+    private final ToolchainReportService reportService = mock(ToolchainReportService.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private HttpServer server;
     private String geminiResponse;
@@ -66,7 +66,7 @@ class ToolchainSetupReviewServiceTest {
 
     @Test
     void reviewReturnsAiAssessmentAndNeverCallsAReportWithFailedChecksComplete() {
-        ToolchainSetupReportEntity report = report("FAIL", 14, 1, 2);
+        ToolchainReportEntity report = report("FAIL", 14, 1, 2);
         when(reportService.findReport("toby")).thenReturn(Optional.of(report));
         geminiResponse = """
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"COMPLETE\\",\\"summary\\":\\"Everything is ready.\\",\\"missingItems\\":[],\\"warnings\\":[]}"}]}}]}
@@ -81,7 +81,7 @@ class ToolchainSetupReviewServiceTest {
 
     @Test
     void reviewListsFailedChecksFromALinuxOrWindowsAgentReport() {
-        ToolchainSetupReportEntity report = report("FAIL", 11, 0, 1);
+        ToolchainReportEntity report = report("FAIL", 11, 0, 1);
         report.setReport("""
                 === WINDOWS SETUP CHECK v1 ===
                 Started: 2026-10-15 09:30:00 PDT
@@ -105,7 +105,7 @@ class ToolchainSetupReviewServiceTest {
 
     @Test
     void reviewParsesMissingChecksFromAiResponseForAnOtherwisePassingReport() {
-        ToolchainSetupReportEntity report = report("PASS", 17, 0, 0);
+        ToolchainReportEntity report = report("PASS", 17, 0, 0);
         when(reportService.findReport("toby")).thenReturn(Optional.of(report));
         geminiResponse = """
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"REVIEW_NEEDED\\",\\"summary\\":\\"The report is ambiguous.\\",\\"missingItems\\":[\\"editor check\\"],\\"warnings\\":[\\"The output is self-reported.\\"]}"}]}}]}
@@ -185,13 +185,13 @@ class ToolchainSetupReviewServiceTest {
         verify(reportService).findReport("toby");
     }
 
-    private ToolchainSetupReviewService reviewService() {
+    private ToolchainReviewService reviewService() {
         String apiUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/generate";
-        return new ToolchainSetupReviewService(reportService, objectMapper, "test-key", apiUrl);
+        return new ToolchainReviewService(reportService, objectMapper, "test-key", apiUrl);
     }
 
-    private ToolchainSetupReportEntity report(String overall, int passed, int warned, int failed) {
-        ToolchainSetupReportEntity report = new ToolchainSetupReportEntity("toby");
+    private ToolchainReportEntity report(String overall, int passed, int warned, int failed) {
+        ToolchainReportEntity report = new ToolchainReportEntity("toby");
         report.setOverall(overall);
         report.setPassed(passed);
         report.setWarned(warned);

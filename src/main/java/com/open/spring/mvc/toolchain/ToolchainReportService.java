@@ -23,7 +23,7 @@ import org.springframework.stereotype.Service;
  * short-lived code. It validates the uploaded report format and persists the result.
  */
 @Service
-public class ToolchainSetupReportService {
+public class ToolchainReportService {
     /**
      * DTO pairing a student's browser with a local setup-report terminal.
      *
@@ -56,9 +56,9 @@ public class ToolchainSetupReportService {
     private static final Pattern SUMMARY_LINE =
             Pattern.compile("(?m)^Summary:\\s*(\\d{1,4}) passed, (\\d{1,4}) warned, (\\d{1,4}) failed\\s*$");
 
-    private static final Logger logger = LoggerFactory.getLogger(ToolchainSetupReportService.class);
+    private static final Logger logger = LoggerFactory.getLogger(ToolchainReportService.class);
 
-    private final ToolchainSetupReportJpaRepository repository;
+    private final ToolchainReportJpaRepository repository;
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
 
@@ -68,7 +68,7 @@ public class ToolchainSetupReportService {
      * @param repository The repository for persisting setup reports.
      */
     @Autowired
-    public ToolchainSetupReportService(ToolchainSetupReportJpaRepository repository) {
+    public ToolchainReportService(ToolchainReportJpaRepository repository) {
         this(repository, Clock.systemUTC());
     }
 
@@ -78,7 +78,7 @@ public class ToolchainSetupReportService {
      * @param repository The repository for persisting setup reports.
      * @param clock      The clock to use for time-based operations.
      */
-    ToolchainSetupReportService(ToolchainSetupReportJpaRepository repository, Clock clock) {
+    ToolchainReportService(ToolchainReportJpaRepository repository, Clock clock) {
         this.repository = repository;
         this.clock = clock;
     }
@@ -95,7 +95,7 @@ public class ToolchainSetupReportService {
     public PairingRecord issuePairingCode(String uid) {
         requireUid(uid);
         long now = clock.millis();
-        ToolchainSetupReportEntity row = repository.findById(uid).orElseGet(() -> new ToolchainSetupReportEntity(uid));
+        ToolchainReportEntity row = repository.findById(uid).orElseGet(() -> new ToolchainReportEntity(uid));
         if (!isPairingCodeActive(row, now)) {
             row.setPairingCode(newUnusedPairingCode());
         }
@@ -130,7 +130,7 @@ public class ToolchainSetupReportService {
         }
 
         long now = clock.millis();
-        ToolchainSetupReportEntity row = repository.findByPairingCode(pairingCode).orElse(null);
+        ToolchainReportEntity row = repository.findByPairingCode(pairingCode).orElse(null);
         if (row == null || !isPairingCodeActive(row, now)) {
             return false;
         }
@@ -151,24 +151,24 @@ public class ToolchainSetupReportService {
      * @param uid The unique identifier of the student.
      * @return An {@link Optional} containing the report if it exists and contains data.
      */
-    public Optional<ToolchainSetupReportEntity> findReport(String uid) {
+    public Optional<ToolchainReportEntity> findReport(String uid) {
         requireUid(uid);
-        return repository.findById(uid).filter(ToolchainSetupReportEntity::hasReport);
+        return repository.findById(uid).filter(ToolchainReportEntity::hasReport);
     }
 
     /** 
      * Retrieves all reports that have been successfully uploaded, keyed by student UID.
      * Useful for the teacher's overview page.
      * 
-     * @return A map of UIDs to their respective {@link ToolchainSetupReportEntity}.
+     * @return A map of UIDs to their respective {@link ToolchainReportEntity}.
      */
-    public Map<String, ToolchainSetupReportEntity> getReportsByUid() {
-        List<ToolchainSetupReportEntity> reports = repository.findAllByReportedAtIsNotNull();
-        return reports.stream().collect(Collectors.toMap(ToolchainSetupReportEntity::getUid, Function.identity()));
+    public Map<String, ToolchainReportEntity> getReportsByUid() {
+        List<ToolchainReportEntity> reports = repository.findAllByReportedAtIsNotNull();
+        return reports.stream().collect(Collectors.toMap(ToolchainReportEntity::getUid, Function.identity()));
     }
 
     /** Checks if the pairing code in the given row is non-null and not expired. */
-    private static boolean isPairingCodeActive(ToolchainSetupReportEntity row, long now) {
+    private static boolean isPairingCodeActive(ToolchainReportEntity row, long now) {
         return row.getPairingCode() != null
                 && row.getPairingCodeExpiresAt() != null
                 && row.getPairingCodeExpiresAt() > now;

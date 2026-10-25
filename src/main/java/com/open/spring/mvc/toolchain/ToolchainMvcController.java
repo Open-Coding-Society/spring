@@ -13,11 +13,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 @RequestMapping("/mvc/cs-pathway")
 public class ToolchainMvcController {
     private final ToolchainScoresService scoreService;
-    private final ToolchainSetupReportService setupReportService;
-    private final ToolchainHelpRequestService helpRequestService;
+    private final ToolchainReportService setupReportService;
+    private final ToolchainHelpService helpRequestService;
 
-    public ToolchainMvcController(ToolchainScoresService scoreService, ToolchainSetupReportService setupReportService,
-            ToolchainHelpRequestService helpRequestService) {
+    public ToolchainMvcController(ToolchainScoresService scoreService, ToolchainReportService setupReportService,
+            ToolchainHelpService helpRequestService) {
         this.scoreService = scoreService;
         this.setupReportService = setupReportService;
         this.helpRequestService = helpRequestService;

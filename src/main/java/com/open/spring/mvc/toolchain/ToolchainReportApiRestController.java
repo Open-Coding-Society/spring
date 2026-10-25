@@ -24,13 +24,13 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/cs-pathway/setup-report")
-public class ToolchainSetupReportApiRestController {
-    private final ToolchainSetupReportService reportService;
-    private final ToolchainSetupReviewService reviewService;
+public class ToolchainReportApiRestController {
+    private final ToolchainReportService reportService;
+    private final ToolchainReviewService reviewService;
 
-    public ToolchainSetupReportApiRestController(
-            ToolchainSetupReportService reportService,
-            ToolchainSetupReviewService reviewService) {
+    public ToolchainReportApiRestController(
+            ToolchainReportService reportService,
+            ToolchainReviewService reviewService) {
         this.reportService = reportService;
         this.reviewService = reviewService;
     }
@@ -70,7 +70,7 @@ public class ToolchainSetupReportApiRestController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to load setup results."));
         }
         Map<String, Object> body = new LinkedHashMap<>(); // Map.of rejects the null "no report yet" values
-        ToolchainSetupReportEntity report = reportService.findReport(user.getUsername()).orElse(null);
+        ToolchainReportEntity report = reportService.findReport(user.getUsername()).orElse(null);
         body.put("report", report == null ? null : report.getReport());
         body.put("overall", report == null ? null : report.getOverall());
         body.put("reportedAt", report == null ? null : report.getReportedAt());

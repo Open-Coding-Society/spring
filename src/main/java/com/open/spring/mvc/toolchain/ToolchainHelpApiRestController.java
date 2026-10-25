@@ -30,9 +30,9 @@ public class ToolchainHelpApiRestController {
     public record HelpRequestRecord(String levelKey, String station, String message) {
     }
 
-    private final ToolchainHelpRequestService helpRequestService;
+    private final ToolchainHelpService helpRequestService;
 
-    public ToolchainHelpApiRestController(ToolchainHelpRequestService helpRequestService) {
+    public ToolchainHelpApiRestController(ToolchainHelpService helpRequestService) {
         this.helpRequestService = helpRequestService;
     }
 
@@ -58,7 +58,7 @@ public class ToolchainHelpApiRestController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to ask your teacher for help."));
         }
         try {
-            ToolchainHelpRequestEntity saved = helpRequestService.send(user.getUsername(), body);
+            ToolchainHelpEntity saved = helpRequestService.send(user.getUsername(), body);
             return ResponseEntity.ok(Map.of("sent", true, "createdAt", saved.getCreatedAt()));
         } catch (ToolchainExceptionHelpTooSoon error) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)

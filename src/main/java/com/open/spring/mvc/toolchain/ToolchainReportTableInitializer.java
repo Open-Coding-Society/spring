@@ -13,9 +13,9 @@ import lombok.RequiredArgsConstructor;
 /** Initializes the setup-report table for databases managed with ddl-auto=none. */
 @Component
 @RequiredArgsConstructor
-public class ToolchainSetupReportTableInitializer {
+public class ToolchainReportTableInitializer {
 
-    private static final Logger logger = LoggerFactory.getLogger(ToolchainSetupReportTableInitializer.class);
+    private static final Logger logger = LoggerFactory.getLogger(ToolchainReportTableInitializer.class);
 
     private final JdbcTemplate jdbcTemplate;
 

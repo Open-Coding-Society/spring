@@ -13,9 +13,9 @@ import lombok.RequiredArgsConstructor;
 /** Initializes the help-request table for databases managed with ddl-auto=none. */
 @Component
 @RequiredArgsConstructor
-public class ToolchainHelpRequestTableInitializer {
+public class ToolchainHelpTableInitializer {
 
-    private static final Logger logger = LoggerFactory.getLogger(ToolchainHelpRequestTableInitializer.class);
+    private static final Logger logger = LoggerFactory.getLogger(ToolchainHelpTableInitializer.class);
 
     private final JdbcTemplate jdbcTemplate;
 
