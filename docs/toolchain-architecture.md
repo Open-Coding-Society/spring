@@ -38,7 +38,7 @@ This flow is the agent-specific path through the otherwise shared Toolchain feat
 
 <!-- mermaid-checked: no \n, no em-dash/en-dash, no {} in labels, subgraphs are id["label"], arrows are -->|"label"|, all subgraphs closed by end, ids unique -->
 ```mermaid
-flowchart LR
+flowchart TD 
     subgraph UserSide["User and local machine"]
         Student["Student"]
         Game["Signed-in game"]
