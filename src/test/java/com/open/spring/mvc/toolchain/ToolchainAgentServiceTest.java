@@ -28,7 +28,7 @@ import org.springframework.web.server.ResponseStatusException;
 import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.CheckEvidence;
 import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.PairResponse;
 import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.ResultsRequest;
-import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.SessionView;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.StationView;
 import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.StartResponse;
 
 class ToolchainAgentServiceTest {
@@ -118,7 +118,7 @@ class ToolchainAgentServiceTest {
         StartResponse started = service.start("toby", "git-village-hall");
         PairResponse paired = service.pair(started.pairingCode());
 
-        SessionView result = service.submitResults(started.sessionId().toString(), "Bearer " + paired.agentToken(),
+        StationView result = service.submitResults(started.sessionId().toString(), "Bearer " + paired.agentToken(),
                 new ResultsRequest("windows", null, List.of(
                         new CheckEvidence("git", 0, "git version 2.46.0.windows.1"),
                         new CheckEvidence("git-name", 0, "Toby Ledger"),
@@ -134,7 +134,7 @@ class ToolchainAgentServiceTest {
         StartResponse started = service.start("toby", "git-village-hall");
         PairResponse paired = service.pair(started.pairingCode());
 
-        SessionView result = service.submitResults(started.sessionId().toString(), "Bearer " + paired.agentToken(),
+        StationView result = service.submitResults(started.sessionId().toString(), "Bearer " + paired.agentToken(),
                 new ResultsRequest("linux", null, List.of(
                         new CheckEvidence("git", 0, "git version 2.43.0"),
                         new CheckEvidence("git-name", 1, ""))));
@@ -197,7 +197,7 @@ class ToolchainAgentServiceTest {
         String id = started.sessionId().toString();
 
         service.submitResults(id, auth, new ResultsRequest("linux", null, List.of(new CheckEvidence("editor", 0, "1.94.2\nabc123\nx64"))));
-        SessionView again = service.submitResults(id, auth, new ResultsRequest("linux", null, List.of(new CheckEvidence("editor", 127, "command not found: code"))));
+        StationView again = service.submitResults(id, auth, new ResultsRequest("linux", null, List.of(new CheckEvidence("editor", 127, "command not found: code"))));
 
         assertEquals(ToolchainAgentSessionEntity.VERIFIED, again.status());
     }
@@ -213,15 +213,15 @@ class ToolchainAgentServiceTest {
                 new CheckEvidence("trail-folder", 0, "/home/toby/toolchain-trail"))));
 
         clock.advanceSeconds(60);
-        SessionView requested = service.requestCheck("toby", id, "editor-isle-tower");
+        StationView requested = service.requestCheck("toby", id, "editor-isle-tower");
         assertEquals(ToolchainAgentSessionEntity.CHECKING, requested.status());
         assertTrue(requested.checks().isEmpty());
 
-        SessionView next = service.nextRequest(id, auth);
+        StationView next = service.nextRequest(id, auth);
         assertEquals("editor-isle-tower", next.stationId());
         assertEquals(requested.requestedAt(), next.requestedAt());
 
-        SessionView result = service.submitResults(id, auth, new ResultsRequest("linux", "editor-isle-tower",
+        StationView result = service.submitResults(id, auth, new ResultsRequest("linux", "editor-isle-tower",
                 List.of(new CheckEvidence("editor", 0, "1.94.2"))));
         assertEquals(ToolchainAgentSessionEntity.VERIFIED, result.status());
         assertEquals("editor-isle-tower", result.stationId());

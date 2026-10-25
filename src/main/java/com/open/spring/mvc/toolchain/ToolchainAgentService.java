@@ -26,7 +26,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.PairResponse;
 import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.ResultsRequest;
-import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.SessionView;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.StationView;
 import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.StartResponse;
 import com.open.spring.mvc.toolchain.ToolchainStationRules.CheckResult;
 import com.open.spring.mvc.toolchain.ToolchainStationRules.Evidence;
@@ -130,7 +130,7 @@ public class ToolchainAgentService {
      * The game reached another station (or wants a re-check): point the paired agent at it.
      * Fails with 409 when no agent is connected, so the game can show a new pairing code.
      */
-    public SessionView requestCheck(String studentId, String sessionId, String stationId) {
+    public StationView requestCheck(String studentId, String sessionId, String stationId) {
         ToolchainAgentSessionEntity session = requireOwnSession(studentId, sessionId);
         stationRules.requireAccessible(studentId, stationId);
         if (!agentConnected(session)) {
@@ -151,12 +151,12 @@ public class ToolchainAgentService {
     }
 
     /** The agent's poll: which station the game wants checked, and when it asked. */
-    public SessionView nextRequest(String sessionId, String authorization) {
+    public StationView nextRequest(String sessionId, String authorization) {
         return view(requireAgentSession(sessionId, authorization));
     }
 
     /** Checks the agent's evidence for its own session and stores the outcome. */
-    public SessionView submitResults(String sessionId, String authorization, ResultsRequest request) {
+    public StationView submitResults(String sessionId, String authorization, ResultsRequest request) {
         ToolchainAgentSessionEntity session = requireAgentSession(sessionId, authorization);
         boolean namesAStation = request != null && request.stationId() != null;
         boolean forCurrentStation = namesAStation && request.stationId().equals(session.getStationId());
@@ -189,7 +189,7 @@ public class ToolchainAgentService {
     }
 
     /** The game's poll: only the student who started the session can read it. */
-    public SessionView getSession(String studentId, String sessionId) {
+    public StationView getSession(String studentId, String sessionId) {
         return view(requireOwnSession(studentId, sessionId));
     }
 
@@ -232,7 +232,7 @@ public class ToolchainAgentService {
         }
     }
 
-    private SessionView view(ToolchainAgentSessionEntity session) {
+    private StationView view(ToolchainAgentSessionEntity session) {
         String status = session.getStatus();
         boolean waitingForAgent = ToolchainAgentSessionEntity.WAITING_FOR_AGENT.equals(status);
         if (waitingForAgent) {
@@ -243,7 +243,7 @@ public class ToolchainAgentService {
             // Paired before, but the agent's token has run out.
             status = ToolchainAgentSessionEntity.AGENT_EXPIRED;
         }
-        return new SessionView(
+        return new StationView(
                 UUID.fromString(session.getId()),
                 session.getStationId(),
                 session.getRequestedAt(),

@@ -61,7 +61,13 @@ public class ToolchainAgentApiRestController {
     public record ResultsRequest(String os, String stationId, List<CheckEvidence> checks) {}
     public record CheckRequest(@NotBlank String stationId) {}
 
-    public record SessionView(
+    /**
+     * The game's view of the current station check in a paired Toolchain Trail session.
+     * The game requests a station check, the agent reports evidence, and the server
+     * evaluates it using {@link ToolchainStationRules}. {@code checks} contains those
+     * evaluated results, not the agent's raw evidence.
+     */
+    public record StationView(
         UUID sessionId,
         String stationId,
         Long requestedAt,
@@ -89,7 +95,7 @@ public class ToolchainAgentApiRestController {
 
     /** POST /api/toolchain/sessions/{id}/check - the game reached a station; ask the paired agent to check it. */
     @PostMapping("/sessions/{sessionId}/check")
-    public SessionView requestCheck(
+    public StationView requestCheck(
         Principal student,
         @PathVariable String sessionId,
         @RequestBody @Valid CheckRequest request
@@ -99,7 +105,7 @@ public class ToolchainAgentApiRestController {
 
     /** GET /api/toolchain/sessions/{id}/next - the agent polls for the station the game wants checked. */
     @GetMapping("/sessions/{sessionId}/next")
-    public SessionView nextRequest(
+    public StationView nextRequest(
         @PathVariable String sessionId,
         @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization
     ) {
@@ -108,7 +114,7 @@ public class ToolchainAgentApiRestController {
 
     /** POST /api/toolchain/sessions/{id}/results - the agent's check results, sent with its bearer token. */
     @PostMapping("/sessions/{sessionId}/results")
-    public SessionView submitResults(
+    public StationView submitResults(
         @PathVariable String sessionId,
         @RequestHeader(value = HttpHeaders.AUTHORIZATION, required = false) String authorization,
         @RequestBody ResultsRequest request
@@ -118,7 +124,7 @@ public class ToolchainAgentApiRestController {
 
     /** GET /api/toolchain/sessions/{id} - the game polls for verified progress. */
     @GetMapping("/sessions/{sessionId}")
-    public SessionView getSession(Principal student, @PathVariable String sessionId) {
+    public StationView getSession(Principal student, @PathVariable String sessionId) {
         return service.getSession(student.getName(), sessionId);
     }
 
