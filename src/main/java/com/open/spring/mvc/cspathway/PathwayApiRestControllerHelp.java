@@ -13,8 +13,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * The game's red flag button: a student asks their teacher for help.
- * Teachers read the requests on /mvc/cs-pathway/read.
+ * Accepts help requests from signed-in CS Pathway students.
+ * This is a teacher request queue, not a chat endpoint. Teachers read requests
+ * on /mvc/cs-pathway/read.
  */
 @RestController
 @RequestMapping("/api/cs-pathway/help-requests")
@@ -26,8 +27,18 @@ public class PathwayApiRestControllerHelp {
     }
 
     /**
+     * Records a student's request for help.
+     *
+     * The student identity comes from the authenticated principal. The service
+     * validates the level and message and enforces the per-student cooldown.
+     *
      * POST /api/cs-pathway/help-requests
      * Body: {"levelKey": "toolchain-trail", "station": "Git Village Hall", "message": "I need help..."}
+     *
+     * @param user the signed-in student
+     * @param body the request details; station may be omitted
+     * @return 200 when saved, 401 when signed out, 400 for invalid content, or
+     *         429 while the student's cooldown is active
      */
     @PostMapping
     public ResponseEntity<?> sendHelpRequest(

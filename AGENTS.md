@@ -46,6 +46,13 @@ Single Spring Boot app, root package `com.open.spring`, three layers:
 - **`security/`** — cookie-based JWT auth. `POST /authenticate` (JwtApiController) returns the JWT in an httpOnly `jwt_java_spring` cookie (12h, SameSite=None in prod). `JwtRequestFilter` reads that cookie on every `/api/*` request and populates the SecurityContext via `PersonDetailsService`. `RateLimitFilter` caps 1000 req/min/IP (5000 for admins). There is no Authorization-header bearer flow.
 - **`mvc/`** — ~70 feature subpackages (person, groups, jokes, bathroom, assignments, quiz, games, blackjack, plant, S3uploads, …). The convention per domain is JPA `@Entity` + `*JpaRepository` + `*ApiController` (REST under `/api/...`) and optionally `*ViewController` (Thymeleaf under `/`) and a service class for non-trivial logic. Follow this pattern when adding a new domain.
 
+### CS Pathway
+
+- The package is `src/main/java/com/open/spring/mvc/cspathway/`. Its current feature areas are Setup, Scoring, and student-to-teacher Help requests. Help is not OCS chat; chat is only a possible future direction.
+- Use [docs/cs-pathway-architecture.md](docs/cs-pathway-architecture.md) as the package-specific guide for flows, routes, persistence, security, and change requirements. It is linked from the README so both developers and coding agents can discover it.
+- Keep JavaDoc in each Java type concise and readable inline as plain prose. Add method JavaDoc for public behavior or constraints that are not self-evident; avoid HTML and Markdown in source comments. Keep the architecture guide current when behavior changes.
+- DTO records are API or view transport shapes; JPA entities map persisted rows; `JpaRepository` interfaces provide persistence operations; services own business rules and integration; REST controllers handle HTTP contracts; `PathwayMvcController` supplies the Thymeleaf administrative view. Do not describe all pathway endpoints as full CRUD: they expose specific use cases.
+
 Two ports are intentional: **8585** is the main HTTP/Tomcat connector; **8589** is a second connector wired to the websocket handler at `mvc/mortevision/nativesocket/WebSocketConfig` (group chat realtime). Nginx (`nginx_spring_8585_8589.conf`) terminates TLS for both: 443→8585, 8589→8589 with websocket upgrade headers and 86400s timeouts.
 
 Hibernate runs with `ddl-auto=none` and globally quoted identifiers (because tables like `groups` are SQL reserved words). Schema changes are not auto-applied — they go through `DatabaseInitializer` / the migration scripts.

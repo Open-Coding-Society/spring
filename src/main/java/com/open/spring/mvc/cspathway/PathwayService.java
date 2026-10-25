@@ -18,9 +18,8 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 /**
  * Service for managing help requests sent by students via the game's "red flag" button.
  * 
- * <p>This service handles the creation of help requests, enforces a cooldown period 
- * between requests to prevent spam, and provides methods to retrieve recent requests 
- * for the teacher's dashboard.</p>
+ * This service handles help-request validation and persistence, enforces a cooldown
+ * between requests, and retrieves recent requests for the teacher dashboard.
  */
 @Service
 public class PathwayService {
@@ -66,8 +65,8 @@ public class PathwayService {
     /**
      * Records a new help request from a student.
      * 
-     * <p>This method validates the request content, checks for the cooldown period, 
-     * and persists the new request.</p>
+     * This method validates the request content, checks the cooldown period,
+     * and persists the new request.
      *
      * @param uid   The unique identifier of the student.
      * @param body  The {@link PathwayDtoHelp} containing the request details.

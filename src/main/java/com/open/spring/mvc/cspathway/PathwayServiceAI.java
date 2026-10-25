@@ -73,6 +73,14 @@ public class PathwayServiceAI {
         this.httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
+    /**
+     * Produces an advisory review of the student's latest submitted verifier report.
+     *
+     * @param uid the student's unique identifier
+     * @return the checked review with verifier failures and warnings included
+     * @throws NoSuchElementException if the student has no submitted report
+     * @throws IllegalStateException if AI review is not configured or cannot be completed
+     */
     public PathwayDtoEvidence review(String uid) {
         PathwayEntityReport report = reportService.findReport(uid)
                 .orElseThrow(() -> new NoSuchElementException("This student has not submitted a setup report."));

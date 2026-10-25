@@ -31,6 +31,16 @@ This Backend UI is to manage adminstrative functions like reseting passwords and
 
 The site is build on Springboot.  The project is primarly used to store and retrieve data through APIs.  The site has JWT authorization and implements security.  In optimal deployed form the data would be served through a professional database, it supports SQLite for development and deployment verification.
 
+## Architecture guides
+
+- [CS Pathway architecture and maintenance guide](docs/cs-pathway-architecture.md) — current Setup, Scoring, and Help flows, package layers, persistence, and change guidance.
+
+## Testing CS Pathway REST endpoints
+
+Use [api/cspathway.http](api/cspathway.http) with the **REST Client** VS Code extension to exercise the sample authentication, setup pairing-code, help-request, and score endpoints. Select the `local` or `deployed` REST Client environment and run the authentication request before requests that require a signed-in student.
+
+The requests use variables including `baseUrl`, `uid`, `adminUid`, and `adminPassword`. Configure their values under `rest-client.environmentVariables` in `.vscode/settings.json`. The `.vscode/` directory is Git-ignored; keep passwords and other secret values there locally, never in the `.http` file or a commit. Test only systems and accounts you are authorized to use.
+
 ## Getting started
 
 Java 21 or higher is requirement using VSCode tooling.

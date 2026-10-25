@@ -19,9 +19,8 @@ import org.springframework.stereotype.Service;
 /**
  * Service for managing the Toolchain Trail setup reports uploaded by students' terminals.
  * 
- * <p>This service facilitates the pairing process between a public web server and a 
- * local client terminal using short-lived pairing codes. It validates the format 
- * of the uploaded reports and persists the results.</p>
+ * This service pairs a signed-in browser session with a local terminal using a
+ * short-lived code. It validates the uploaded report format and persists the result.
  */
 @Service
 public class PathwayServicePairing {
