@@ -225,7 +225,7 @@ public class SecurityConfig {
                         // ========== TOOLCHAIN TRAIL DEVICE PAIRING ==========
                         // The local agent has no JWT cookie. /pair is guarded by the one-time pairing
                         // code; /next and /results by the scoped agent token. Both are checked in
-                        // ToolchainService. Starting, polling and requesting checks (POST /sessions,
+                        // ToolchainServiceAgent. Starting, polling and requesting checks (POST /sessions,
                         // GET /sessions/*, POST /sessions/*/check) stay under the default /api/** rule.
                         .requestMatchers(HttpMethod.POST, "/api/toolchain/pair").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/toolchain/sessions/*/next").permitAll()
