@@ -38,7 +38,7 @@ One-time web-to-machine pairing is a reusable pattern for evaluations where a we
 
 <!-- mermaid-checked: no \n, no em-dash/en-dash, no {} in labels, subgraphs are id["label"], arrows are -->|"label"|, all subgraphs closed by end, ids unique -->
 ```mermaid
-flowchart LR
+flowchart TD
     subgraph PairingPattern["Reusable pairing pattern"]
         Pattern["One-time code to scoped machine credential"]
     end
