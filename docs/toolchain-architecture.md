@@ -34,27 +34,33 @@ Pairing codes and agent tokens are credentials: only their hashes are stored, an
 
 ### Pairing and station-check architecture
 
-This flow is the agent-specific path through the otherwise shared Toolchain feature area. It is a reusable Web-to-Machine pairing pattern: authenticate the person in the web application, exchange a short-lived one-time code for a session-scoped machine credential, request bounded work, then evaluate submitted evidence on the server.
+One-time web-to-machine pairing is a reusable pattern for evaluations where a web application coordinates with a local machine: authenticate the user, exchange a one-time code for a session-scoped credential, request bounded work, and evaluate submitted evidence on the server. The pattern can support other evaluation workflows; the controller, service, routes, session entity, and station rules shown here are the Toolchain-specific implementation. This repository does not currently provide a shared generic pairing component.
 
 <!-- mermaid-checked: no \n, no em-dash/en-dash, no {} in labels, subgraphs are id["label"], arrows are -->|"label"|, all subgraphs closed by end, ids unique -->
 ```mermaid
-flowchart TD 
-    subgraph UserSide["User and local machine"]
+flowchart LR
+    subgraph PairingPattern["Reusable pairing pattern"]
+        Pattern["One-time code to scoped machine credential"]
+    end
+    subgraph UserSide["Toolchain user and local machine"]
         Student["Student"]
         Game["Signed-in game"]
         Agent["Local Toolchain agent"]
         Gate["User approval and agent check gate"]
     end
-    subgraph ServerSide["Spring Toolchain agent workflow"]
+    subgraph ApiLayer["Toolchain REST API"]
         Api["ToolchainAgentApiRestController"]
-        Service["ToolchainAgentService"]
-        Pair["PairResponse"]
+        Pair["PairResponse DTO"]
         View["StationView DTO"]
+    end
+    subgraph ServerSide["Toolchain-specific server workflow"]
+        Service["ToolchainAgentService"]
         Rules["ToolchainStationRules"]
         Repo["ToolchainAgentSessionJpaRepository"]
         Session[("toolchain_session")]
     end
 
+    Service -.->|"implements"| Pattern
     Student -->|"uses"| Game
     Game -->|"starts session"| Api
     Api -->|"delegates"| Service
@@ -65,8 +71,9 @@ flowchart TD
     Agent -->|"exchanges code"| Api
     Api -->|"pairs agent"| Service
     Service -->|"consumes code and stores token hash"| Repo
-    Service -->|"returns scoped token"| Pair
-    Pair -->|"agent credential"| Agent
+    Service -->|"creates pairing response"| Pair
+    Pair -->|"returned by controller as JSON"| Api
+    Api -->|"returns scoped token"| Agent
     Game -->|"requests current station"| Api
     Api -->|"requests station check"| Service
     Service -->|"stores station request"| Repo
