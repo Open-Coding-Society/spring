@@ -60,7 +60,7 @@ public class ToolchainHelpApiRestController {
         try {
             ToolchainHelpEntity saved = helpRequestService.send(user.getUsername(), body);
             return ResponseEntity.ok(Map.of("sent", true, "createdAt", saved.getCreatedAt()));
-        } catch (ToolchainExceptionHelpTooSoon error) {
+        } catch (ToolchainHelpExceptionTooSoon error) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .header(HttpHeaders.RETRY_AFTER, String.valueOf(error.getRetryAfterSeconds()))
                     .body(Map.of("error", error.getMessage(), "retryAfterSeconds", error.getRetryAfterSeconds()));

@@ -82,7 +82,7 @@ class ToolchainHelpServiceTest {
         when(repository.findFirstByUidOrderByCreatedAtDesc("toby")).thenReturn(Optional.of(previous));
         clock.advance(Duration.ofSeconds(20));
 
-        ToolchainExceptionHelpTooSoon error = assertThrows(ToolchainExceptionHelpTooSoon.class,
+        ToolchainHelpExceptionTooSoon error = assertThrows(ToolchainHelpExceptionTooSoon.class,
                 () -> service.send("toby", new HelpRequestRecord("toolchain-trail", null, MESSAGE)));
         assertEquals(40, error.getRetryAfterSeconds());
 

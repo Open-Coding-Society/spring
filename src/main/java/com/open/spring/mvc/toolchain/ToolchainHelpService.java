@@ -93,7 +93,7 @@ public class ToolchainHelpService {
      * @param body  The {@link HelpRequestRecord} containing the request details.
      * @return The saved {@link ToolchainHelpEntity}.
      * @throws IllegalArgumentException if the uid, level, or message is invalid.
-     * @throws ToolchainExceptionHelpTooSoon if the student is still within the cooldown period.
+     * @throws ToolchainHelpExceptionTooSoon if the student is still within the cooldown period.
      */
     public ToolchainHelpEntity send(String uid, HelpRequestRecord body) {
         if (uid == null || uid.isBlank()) {
@@ -113,7 +113,7 @@ public class ToolchainHelpService {
         repository.findFirstByUidOrderByCreatedAtDesc(uid).ifPresent(previous -> {
             long waitMillis = previous.getCreatedAt() + COOLDOWN.toMillis() - now;
             if (waitMillis > 0) {
-                throw new ToolchainExceptionHelpTooSoon(Math.max(1, Duration.ofMillis(waitMillis).toSeconds()));
+                throw new ToolchainHelpExceptionTooSoon(Math.max(1, Duration.ofMillis(waitMillis).toSeconds()));
             }
         });
 
