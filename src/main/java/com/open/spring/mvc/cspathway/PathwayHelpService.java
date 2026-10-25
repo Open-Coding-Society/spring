@@ -16,13 +16,21 @@ import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
 /**
- * Saves the help requests students send with the game's red flag button,
- * and lists them for the teacher page.
+ * Service for managing help requests sent by students via the game's "red flag" button.
+ * 
+ * <p>This service handles the creation of help requests, enforces a cooldown period 
+ * between requests to prevent spam, and provides methods to retrieve recent requests 
+ * for the teacher's dashboard.</p>
  */
 @Service
 public class PathwayHelpService {
+    /** The minimum time required between consecutive help requests from the same student. */
     static final Duration COOLDOWN = Duration.ofMinutes(1);
+    
+    /** The maximum allowed length for a help message. */
     static final int MAX_MESSAGE_LENGTH = 500;
+    
+    /** The maximum allowed length for a station identifier. */
     static final int MAX_STATION_LENGTH = 120;
 
     private static final Logger logger = LoggerFactory.getLogger(PathwayHelpService.class);
@@ -31,11 +39,24 @@ public class PathwayHelpService {
     private final PersonJpaRepository personRepository;
     private final Clock clock;
 
+    /**
+     * Standard constructor using the system UTC clock.
+     * 
+     * @param repository The repository for persisting help requests.
+     * @param personRepository The repository for looking up student names.
+     */
     @Autowired
     public PathwayHelpService(PathwayHelpJpaRepository repository, PersonJpaRepository personRepository) {
         this(repository, personRepository, Clock.systemUTC());
     }
 
+    /**
+     * Constructor for testing, allowing for a mocked clock.
+     * 
+     * @param repository The repository for persisting help requests.
+     * @param personRepository The repository for looking up student names.
+     * @param clock The clock to use for time-based operations.
+     */
     PathwayHelpService(PathwayHelpJpaRepository repository, PersonJpaRepository personRepository, Clock clock) {
         this.repository = repository;
         this.personRepository = personRepository;
@@ -43,12 +64,18 @@ public class PathwayHelpService {
     }
 
     /**
-     * Records a help request from the signed-in student.
+     * Records a new help request from a student.
+     * 
+     * <p>This method validates the request content, checks for the cooldown period, 
+     * and persists the new request.</p>
      *
-     * @throws IllegalArgumentException when the level is unknown or the text is empty or too long
-     * @throws PathwayHelpExceptionTooSoon when the student sent one less than a minute ago
+     * @param uid   The unique identifier of the student.
+     * @param body  The {@link PathwayHelpDtoRecordRequest} containing the request details.
+     * @return The saved {@link PathwayHelpEntity}.
+     * @throws IllegalArgumentException if the uid, level, or message is invalid.
+     * @throws PathwayHelpExceptionTooSoon if the student is still within the cooldown period.
      */
-    public PathwayHelpEntity send(String uid, PathwayHelpDtoRecord body) {
+    public PathwayHelpEntity send(String uid, PathwayHelpDtoRecordRequest body) {
         if (uid == null || uid.isBlank()) {
             throw new IllegalArgumentException("Student uid is required.");
         }
@@ -82,11 +109,15 @@ public class PathwayHelpService {
         return saved;
     }
 
-    /** Most recent requests first, for the teacher page. */
-    public List<PathwayHelpDtoRecordView> getRecentRequests() {
+    /**
+     * Retrieves the most recent help requests, ordered by creation time, for the teacher's view.
+     * 
+     * @return A list of {@link PathwayHelpDtoRecordViewModel} objects.
+     */
+    public List<PathwayHelpDtoRecordViewModel> getRecentRequests() {
         Map<String, String> namesByUid = new HashMap<>();
         return repository.findTop200ByOrderByCreatedAtDesc().stream()
-                .map(request -> new PathwayHelpDtoRecordView(
+                .map(request -> new PathwayHelpDtoRecordViewModel(
                         namesByUid.computeIfAbsent(request.getUid(), this::displayName),
                         request.getUid(),
                         CsPathwayLevel.fromKey(request.getLevelKey())
@@ -98,6 +129,7 @@ public class PathwayHelpService {
                 .toList();
     }
 
+    /** Resolves a student's display name from their UID. */
     private String displayName(String uid) {
         Person person = personRepository.findByUid(uid);
         if (person == null || person.getName() == null || person.getName().isBlank()) {
@@ -106,6 +138,7 @@ public class PathwayHelpService {
         return person.getName();
     }
 
+    /** Validates that a text field is not empty and does not exceed the maximum length. */
     private static String requireText(String value, String field, int maxLength) {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException("The " + field + " is empty.");

@@ -8,7 +8,7 @@ package com.open.spring.mvc.cspathway;
  * @param station  The specific station or area within the level where the student is located (may be null).
  * @param message  The text content of the student's help request.
  */
-public record PathwayHelpDtoRecord(
+public record PathwayHelpDtoRecordRequest(
     String levelKey, 
     String station, 
     String message) {

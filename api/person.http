@@ -3,10 +3,15 @@
 # and every endpoint answers with the same 400: {"error": "<Person.PASSWORD_RULE>"}.
 # Start the server (./mvnw spring-boot:run), then click "Send Request" above each block.
 
-@baseUrl = http://127.0.0.1:8585
-@uid = httptest
-@email = httptest@example.com
-@goodPassword = Password1!
+# @name login
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+Accept: application/json
+
+{
+  "uid": "{{adminUid}}",
+  "password": "{{adminPassword}}"
+}
 
 ### Signup with a weak password -> 400 with the rule
 POST {{baseUrl}}/api/person/create
@@ -16,7 +21,7 @@ Content-Type: application/json
   "uid": "{{uid}}",
   "email": "{{email}}",
   "name": "HTTP Test",
-  "password": "password123"
+  "password": "password"
 }
 
 ### Signup with a strong password -> 200
@@ -27,25 +32,17 @@ Content-Type: application/json
   "uid": "{{uid}}",
   "email": "{{email}}",
   "name": "HTTP Test",
-  "password": "{{goodPassword}}"
+  "password": "{{password}}"
 }
 
-### Log in as the new user (REST Client keeps the jwt_java_spring cookie)
-POST {{baseUrl}}/authenticate
-Content-Type: application/json
-
-{
-  "uid": "{{uid}}",
-  "password": "{{goodPassword}}"
-}
 
 ### Change own password to a weak one -> 400 with the rule
 POST {{baseUrl}}/api/person/update
 Content-Type: application/json
 
 {
-  "currentPassword": "{{goodPassword}}",
-  "password": "weak"
+  "currentPassword": "{{password}}",
+  "password": "password"
 }
 
 ### Edit something other than the password -> 200 (the stored hash is not re-checked)

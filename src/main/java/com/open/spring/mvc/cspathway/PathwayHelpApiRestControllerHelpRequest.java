@@ -32,7 +32,7 @@ public class PathwayHelpApiRestControllerHelpRequest {
     @PostMapping
     public ResponseEntity<?> sendHelpRequest(
             @AuthenticationPrincipal UserDetails user,
-            @RequestBody(required = false) PathwayHelpDtoRecord body) {
+            @RequestBody(required = false) PathwayHelpDtoRecordRequest body) {
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to ask your teacher for help."));
         }

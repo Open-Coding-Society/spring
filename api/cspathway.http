@@ -1,0 +1,59 @@
+### CS Pathway API Tests
+
+This file contains sample requests for testing the CS Pathway API endpoints. 
+To use this, ensure you have the **REST Client** extension installed in VS Code.
+
+**Note on Authentication:**
+The application uses cookie-based JWT authentication. For these requests to work, you must first authenticate via the `/authenticate` endpoint to receive the `jwt_java_spring` cookie.
+
+### 1. Authentication
+
+# @name login
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+Accept: application/json
+
+{
+  "uid": "{{adminUid}}",
+  "password": "{{adminPassword}}"
+}
+
+### 2. Pairing Flow
+
+# Generate a pairing code for a student
+# @name getPairingCode
+POST {{baseUrl}}/api/cs-pathway/setup-report/pairing-code
+Content-Type: application/json
+
+{
+  "uid": "{{uid}}"
+}
+
+### 3. Help Requests
+
+# Send a help request (Requires Authentication)
+# Use the cookie from the authentication request above
+POST {{baseUrl}}/api/cs-pathway/help-requests
+Content-Type: application/json
+
+{
+  "levelKey": "toolchain-trail",
+  "station": "Git Village Hall",
+  "message": "I am stuck on the git commit step!"
+}
+
+### 4. Scoring & Progress
+
+# Get my current scores (Requires Authentication)
+GET {{baseUrl}}/api/cs-pathway/scores
+
+### 5. Updating Progress
+
+# Record progress for a specific level (Requires Authentication)
+# Replace {levelKey} with a valid level key, e.g., toolchain-trail
+PUT {{baseUrl}}/api/cs-pathway/scores/toolchain-trail
+Content-Type: application/json
+
+{
+  "percentComplete": 75.0
+}
