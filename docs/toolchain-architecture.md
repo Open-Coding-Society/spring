@@ -74,11 +74,11 @@ flowchart TD
     Api -->|"requests station check"| Service
     Service -->|"stores station request"| Repo
     Service -->|"returns current state"| View
-    View -->|"shown to game"| Game
+    View -->|"returned by controller as JSON"| Api
+    Api -->|"returns StationView"| Game
     Agent -->|"polls for requested station"| Api
     Api -->|"validates scoped token"| Service
-    Service -->|"returns current state"| View
-    View -->|"station and status"| Agent
+    Api -->|"returns StationView"| Agent
     Agent -->|"requires both approvals before local commands"| Gate
     Gate -->|"runs predefined local checks"| Agent
     Agent -->|"submits evidence only"| Api
@@ -86,8 +86,6 @@ flowchart TD
     Service -->|"evaluates evidence"| Rules
     Rules -->|"returns CheckResult list"| Service
     Service -->|"stores evaluated results"| Repo
-    Service -->|"returns evaluated state"| View
-    View -->|"status and checks"| Game
 ```
 
 `StationView` is the response shape for requesting a station check, agent polling, result submission, and game status polling. It carries the session identifier, current `stationId`, lifecycle `status`, and evaluated `List<CheckResult>`; it is not the agent's raw evidence. The local agent's predefined commands are outside this Spring repository. `ToolchainStationRules` defines the server-side station/check allow-list and evaluates the agent's submitted evidence; it does not execute or authorize local commands.
@@ -180,7 +178,7 @@ The persisted record is keyed by student UID in `cs_pathway_setup_report`. It st
 ## Persistence and security
 
 - `cs_pathway_setup_report`, `cs_pathway_help_request`, and `toolchain_session` are initialized by `ToolchainReportTableInitializer`, `ToolchainHelpTableInitializer`, and `ToolchainSessionTableInitializer`. These `ApplicationRunner` components are needed because Hibernate uses `ddl-auto=none`. Keep their DDL and corresponding entity mappings aligned for both SQLite and MySQL.
-- Score data is stored in the shared `Stats` table. Pathway queries are isolated in `ToolchainJpaRepositoryStats`; do not create a second score table without a deliberate data migration.
+- Score data is stored in the shared `Stats` table. Pathway queries are isolated in `ToolchainStatsJpaRepository`; do not create a second score table without a deliberate data migration.
 - Interactive station sessions are stored in `toolchain_session`; this is separate from score rows and setup-report rows because it has its own pairing, token-expiry, station-request, and result lifecycle. `ToolchainStationRules` is the server-side allow-list and evaluator; a client must not determine its own pass/fail result.
 - The server evaluates submitted check evidence but never runs commands on a student's machine. The external local agent must map station requests to predefined checks and require both explicit student approval and its own safety confirmation before executing any local command. Pairing alone must not authorize arbitrary command execution.
 - The score and help endpoints use the authenticated student principal. The pairing-code issue route and AI review route have explicit role rules. The text report upload is public at the HTTP layer and relies on a valid, unexpired pairing code in the service. The MVC dashboard is restricted to teachers and administrators. See `SecurityConfig` and `MvcSecurityConfig` for the actual access rules.
@@ -190,6 +188,15 @@ The persisted record is keyed by student UID in `cs_pathway_setup_report`. It st
 ## Package organization and naming
 
 The Java types are consolidated under `mvc.toolchain` so students can discuss scores, help requests, setup reports, and interactive station checks in one place. The files use feature-first, role-suffix names such as `ToolchainHelpEntity`, `ToolchainHelpService`, and `ToolchainHelpTableInitializer`. API controllers, DTOs, and repositories retain their established role names. The Java type renames do not change API routes or database tables.
+
+| Topic | Java types and responsibility |
+| --- | --- |
+| Help | `ToolchainHelp*` handles help submissions, dashboard rows, and persistence. `ToolchainHelpExceptionTooSoon` represents the submission cooldown. |
+| Reports | `ToolchainReport*` handles report pairing, uploads, and persistence. |
+| Review | `ToolchainReviewService` produces the advisory AI assessment as its nested `EvidenceRecord`. |
+| Sessions | `ToolchainSession*` manages the paired session, credentials, current station, and results. The local agent is a participant, not the server-side resource. |
+| Station rules | `ToolchainStationRules` evaluates evidence and returns `CheckResult` records; it does not execute commands. |
+| Scores | `ToolchainScores*` handles progress and dashboard summaries; `ToolchainStatsJpaRepository` accesses the shared `Stats` entity. |
 
 The public routes retain both `/api/cs-pathway` and `/api/toolchain` prefixes. Those names are part of the existing game/agent contract and are deliberately not renamed along with Java packages and files. Renaming routes or database tables should be a separate, coordinated migration that updates external game/agent clients and persisted data as needed.
 
