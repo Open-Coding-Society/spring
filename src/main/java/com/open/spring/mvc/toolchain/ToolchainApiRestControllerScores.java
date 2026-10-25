@@ -22,9 +22,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/cs-pathway")
 public class ToolchainApiRestControllerScores {
-    private final ToolchainServiceScores scoreService;
+    private final ToolchainScoresService scoreService;
 
-    public ToolchainApiRestControllerScores(ToolchainServiceScores scoreService) {
+    public ToolchainApiRestControllerScores(ToolchainScoresService scoreService) {
         this.scoreService = scoreService;
     }
 

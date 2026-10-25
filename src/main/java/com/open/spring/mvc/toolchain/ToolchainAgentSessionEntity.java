@@ -13,13 +13,13 @@ import lombok.NoArgsConstructor;
  * may only report on the station the game asked about. Codes and tokens are stored only as SHA-256
  * hashes, so a copy of the database cannot be used to report progress.
  * Times are epoch milliseconds so the same column type works on SQLite and MySQL.
- * The table is created by ToolchainEntityRunnerAgentSession (ddl-auto is none).
+ * The table is initialized by ToolchainAgentSessionTableInitializer (ddl-auto is none).
  */
 @Entity
 @Table(name = "toolchain_session")
 @Data
 @NoArgsConstructor
-public class ToolchainEntityAgentSession {
+public class ToolchainAgentSessionEntity {
     public static final String WAITING_FOR_AGENT = "WAITING_FOR_AGENT";
     /** The game asked for a check and the agent has not reported on it yet. */
     public static final String CHECKING = "CHECKING";

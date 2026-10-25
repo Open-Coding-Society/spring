@@ -21,8 +21,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-class ToolchainServiceSetupReviewTest {
-    private final ToolchainServiceSetupReport reportService = mock(ToolchainServiceSetupReport.class);
+class ToolchainSetupReviewServiceTest {
+    private final ToolchainSetupReportService reportService = mock(ToolchainSetupReportService.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private HttpServer server;
     private String geminiResponse;
@@ -65,7 +65,7 @@ class ToolchainServiceSetupReviewTest {
 
     @Test
     void reviewReturnsAiAssessmentAndNeverCallsAReportWithFailedChecksComplete() {
-        ToolchainEntitySetupReport report = report("FAIL", 14, 1, 2);
+        ToolchainSetupReportEntity report = report("FAIL", 14, 1, 2);
         when(reportService.findReport("toby")).thenReturn(Optional.of(report));
         geminiResponse = """
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"COMPLETE\\",\\"summary\\":\\"Everything is ready.\\",\\"missingItems\\":[],\\"warnings\\":[]}"}]}}]}
@@ -80,7 +80,7 @@ class ToolchainServiceSetupReviewTest {
 
     @Test
     void reviewListsFailedChecksFromALinuxOrWindowsAgentReport() {
-        ToolchainEntitySetupReport report = report("FAIL", 11, 0, 1);
+        ToolchainSetupReportEntity report = report("FAIL", 11, 0, 1);
         report.setReport("""
                 === WINDOWS SETUP CHECK v1 ===
                 Started: 2026-10-15 09:30:00 PDT
@@ -104,7 +104,7 @@ class ToolchainServiceSetupReviewTest {
 
     @Test
     void reviewParsesMissingChecksFromAiResponseForAnOtherwisePassingReport() {
-        ToolchainEntitySetupReport report = report("PASS", 17, 0, 0);
+        ToolchainSetupReportEntity report = report("PASS", 17, 0, 0);
         when(reportService.findReport("toby")).thenReturn(Optional.of(report));
         geminiResponse = """
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"REVIEW_NEEDED\\",\\"summary\\":\\"The report is ambiguous.\\",\\"missingItems\\":[\\"editor check\\"],\\"warnings\\":[\\"The output is self-reported.\\"]}"}]}}]}
@@ -184,13 +184,13 @@ class ToolchainServiceSetupReviewTest {
         verify(reportService).findReport("toby");
     }
 
-    private ToolchainServiceSetupReview reviewService() {
+    private ToolchainSetupReviewService reviewService() {
         String apiUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/generate";
-        return new ToolchainServiceSetupReview(reportService, objectMapper, "test-key", apiUrl);
+        return new ToolchainSetupReviewService(reportService, objectMapper, "test-key", apiUrl);
     }
 
-    private ToolchainEntitySetupReport report(String overall, int passed, int warned, int failed) {
-        ToolchainEntitySetupReport report = new ToolchainEntitySetupReport("toby");
+    private ToolchainSetupReportEntity report(String overall, int passed, int warned, int failed) {
+        ToolchainSetupReportEntity report = new ToolchainSetupReportEntity("toby");
         report.setOverall(overall);
         report.setPassed(passed);
         report.setWarned(warned);

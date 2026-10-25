@@ -10,12 +10,12 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 
-/** Creates the Toolchain Trail session table for databases managed with ddl-auto=none. */
+/** Initializes the Toolchain Trail session table for databases managed with ddl-auto=none. */
 @Component
 @RequiredArgsConstructor
-public class ToolchainEntityRunnerAgentSession {
+public class ToolchainAgentSessionTableInitializer {
 
-    private static final Logger logger = LoggerFactory.getLogger(ToolchainEntityRunnerAgentSession.class);
+    private static final Logger logger = LoggerFactory.getLogger(ToolchainAgentSessionTableInitializer.class);
 
     private final JdbcTemplate jdbcTemplate;
 

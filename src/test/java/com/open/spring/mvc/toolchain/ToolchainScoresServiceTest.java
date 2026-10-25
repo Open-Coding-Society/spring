@@ -21,8 +21,8 @@ import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.stats.Stats;
 
-class ToolchainServiceScoresTest {
-    private static final String MODULE = ToolchainServiceScores.MODULE;
+class ToolchainScoresServiceTest {
+    private static final String MODULE = ToolchainScoresService.MODULE;
 
     @Mock
     private ToolchainJpaRepositoryStats statsRepository;
@@ -30,12 +30,12 @@ class ToolchainServiceScoresTest {
     @Mock
     private PersonJpaRepository personRepository;
 
-    private ToolchainServiceScores service;
+    private ToolchainScoresService service;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        service = new ToolchainServiceScores(statsRepository, personRepository);
+        service = new ToolchainScoresService(statsRepository, personRepository);
         when(statsRepository.save(any(Stats.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 

@@ -22,7 +22,7 @@ import com.open.spring.mvc.person.PersonJpaRepository;
  * between requests, and retrieves recent requests for the teacher dashboard.
  */
 @Service
-public class ToolchainServiceHelp {
+public class ToolchainHelpRequestService {
     /** The minimum time required between consecutive help requests from the same student. */
     static final Duration COOLDOWN = Duration.ofMinutes(1);
     
@@ -32,7 +32,7 @@ public class ToolchainServiceHelp {
     /** The maximum allowed length for a station identifier. */
     static final int MAX_STATION_LENGTH = 120;
 
-    private static final Logger logger = LoggerFactory.getLogger(ToolchainServiceHelp.class);
+    private static final Logger logger = LoggerFactory.getLogger(ToolchainHelpRequestService.class);
 
     private final ToolchainJpaRepositoryHelpRequest repository;
     private final PersonJpaRepository personRepository;
@@ -45,7 +45,7 @@ public class ToolchainServiceHelp {
      * @param personRepository The repository for looking up student names.
      */
     @Autowired
-    public ToolchainServiceHelp(ToolchainJpaRepositoryHelpRequest repository, PersonJpaRepository personRepository) {
+    public ToolchainHelpRequestService(ToolchainJpaRepositoryHelpRequest repository, PersonJpaRepository personRepository) {
         this(repository, personRepository, Clock.systemUTC());
     }
 
@@ -56,7 +56,7 @@ public class ToolchainServiceHelp {
      * @param personRepository The repository for looking up student names.
      * @param clock The clock to use for time-based operations.
      */
-    ToolchainServiceHelp(ToolchainJpaRepositoryHelpRequest repository, PersonJpaRepository personRepository, Clock clock) {
+    ToolchainHelpRequestService(ToolchainJpaRepositoryHelpRequest repository, PersonJpaRepository personRepository, Clock clock) {
         this.repository = repository;
         this.personRepository = personRepository;
         this.clock = clock;
@@ -70,11 +70,11 @@ public class ToolchainServiceHelp {
      *
      * @param uid   The unique identifier of the student.
      * @param body  The {@link ToolchainDtoHelp} containing the request details.
-     * @return The saved {@link ToolchainEntityHelpRequest}.
+     * @return The saved {@link ToolchainHelpRequestEntity}.
      * @throws IllegalArgumentException if the uid, level, or message is invalid.
      * @throws ToolchainExceptionHelpTooSoon if the student is still within the cooldown period.
      */
-    public ToolchainEntityHelpRequest send(String uid, ToolchainDtoHelp body) {
+    public ToolchainHelpRequestEntity send(String uid, ToolchainDtoHelp body) {
         if (uid == null || uid.isBlank()) {
             throw new IllegalArgumentException("Student uid is required.");
         }
@@ -96,14 +96,14 @@ public class ToolchainServiceHelp {
             }
         });
 
-        ToolchainEntityHelpRequest request = new ToolchainEntityHelpRequest();
+        ToolchainHelpRequestEntity request = new ToolchainHelpRequestEntity();
         request.setId(UUID.randomUUID().toString());
         request.setUid(uid);
         request.setLevelKey(level.getKey());
         request.setStation(station);
         request.setMessage(message);
         request.setCreatedAt(now);
-        ToolchainEntityHelpRequest saved = repository.save(request);
+        ToolchainHelpRequestEntity saved = repository.save(request);
         logger.info("CS Pathway help request from {} at {} / {}", uid, level.getKey(), station);
         return saved;
     }

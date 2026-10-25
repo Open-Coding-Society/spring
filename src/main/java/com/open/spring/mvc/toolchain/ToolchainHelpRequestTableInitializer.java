@@ -10,12 +10,12 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 
-/** Creates the help-request table for databases managed with ddl-auto=none. */
+/** Initializes the help-request table for databases managed with ddl-auto=none. */
 @Component
 @RequiredArgsConstructor
-public class ToolchainEntityRunnerHelpRequest {
+public class ToolchainHelpRequestTableInitializer {
 
-    private static final Logger logger = LoggerFactory.getLogger(ToolchainEntityRunnerHelpRequest.class);
+    private static final Logger logger = LoggerFactory.getLogger(ToolchainHelpRequestTableInitializer.class);
 
     private final JdbcTemplate jdbcTemplate;
 

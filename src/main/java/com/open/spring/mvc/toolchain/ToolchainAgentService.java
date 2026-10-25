@@ -43,7 +43,7 @@ import com.open.spring.mvc.toolchain.ToolchainStationRules.Evidence;
  * 4. The game polls the session until the station is verified or failed.
  */
 @Service
-public class ToolchainServiceAgent {
+public class ToolchainAgentService {
     static final int MAX_CHECKS = 20;
     static final int MAX_OUTPUT_LENGTH = 4000;
     private static final List<String> KNOWN_OS = List.of("macos", "windows", "linux", "wsl");
@@ -51,7 +51,7 @@ public class ToolchainServiceAgent {
     private static final String BAD_AGENT_TOKEN = "Agent token is invalid or expired. Get a new pairing code in the game.";
     private static final String AGENT_NOT_CONNECTED = "No agent is connected to this session. Get a new pairing code.";
 
-    private static final Logger logger = LoggerFactory.getLogger(ToolchainServiceAgent.class);
+    private static final Logger logger = LoggerFactory.getLogger(ToolchainAgentService.class);
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final ObjectMapper JSON = new ObjectMapper();
 
@@ -62,13 +62,13 @@ public class ToolchainServiceAgent {
     private final Duration agentTokenLifetime;
 
     @Autowired
-    public ToolchainServiceAgent(ToolchainJpaRepositoryAgentSession repository, ToolchainStationRules stationRules,
+    public ToolchainAgentService(ToolchainJpaRepositoryAgentSession repository, ToolchainStationRules stationRules,
             @Value("${toolchain.pairing-code-lifetime}") Duration pairingCodeLifetime,
             @Value("${toolchain.agent-token-lifetime}") Duration agentTokenLifetime) {
         this(repository, stationRules, Clock.systemUTC(), pairingCodeLifetime, agentTokenLifetime);
     }
 
-    ToolchainServiceAgent(ToolchainJpaRepositoryAgentSession repository, ToolchainStationRules stationRules, Clock clock,
+    ToolchainAgentService(ToolchainJpaRepositoryAgentSession repository, ToolchainStationRules stationRules, Clock clock,
             Duration pairingCodeLifetime, Duration agentTokenLifetime) {
         this.repository = repository;
         this.stationRules = stationRules;
@@ -87,14 +87,14 @@ public class ToolchainServiceAgent {
         Instant now = clock.instant();
         Instant expiresAt = now.plus(pairingCodeLifetime);
 
-        ToolchainEntityAgentSession session = new ToolchainEntityAgentSession();
+        ToolchainAgentSessionEntity session = new ToolchainAgentSessionEntity();
         session.setId(UUID.randomUUID().toString());
         session.setStudentUid(studentId);
         session.setStationId(stationId);
         session.setPairingCodeHash(sha256(code));
         session.setPairingExpiresAt(expiresAt.toEpochMilli());
         session.setRequestedAt(now.toEpochMilli());
-        session.setStatus(ToolchainEntityAgentSession.WAITING_FOR_AGENT);
+        session.setStatus(ToolchainAgentSessionEntity.WAITING_FOR_AGENT);
         session.setCreatedAt(now.toEpochMilli());
         session.setUpdatedAt(now.toEpochMilli());
         repository.save(session);
@@ -112,14 +112,14 @@ public class ToolchainServiceAgent {
         if (repository.consumePairingCode(codeHash, now.toEpochMilli()) != 1) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, BAD_PAIRING_CODE);
         }
-        ToolchainEntityAgentSession session = repository.findByPairingCodeHash(codeHash)
+        ToolchainAgentSessionEntity session = repository.findByPairingCodeHash(codeHash)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, BAD_PAIRING_CODE));
 
         String agentToken = randomToken();
         Instant expiresAt = now.plus(agentTokenLifetime);
         session.setAgentTokenHash(sha256(agentToken));
         session.setAgentTokenExpiresAt(expiresAt.toEpochMilli());
-        session.setStatus(ToolchainEntityAgentSession.CHECKING); // the station the session was started at
+        session.setStatus(ToolchainAgentSessionEntity.CHECKING); // the station the session was started at
         session.setUpdatedAt(now.toEpochMilli());
         repository.save(session);
 
@@ -131,19 +131,19 @@ public class ToolchainServiceAgent {
      * Fails with 409 when no agent is connected, so the game can show a new pairing code.
      */
     public SessionView requestCheck(String studentId, String sessionId, String stationId) {
-        ToolchainEntityAgentSession session = requireOwnSession(studentId, sessionId);
+        ToolchainAgentSessionEntity session = requireOwnSession(studentId, sessionId);
         stationRules.requireAccessible(studentId, stationId);
         if (!agentConnected(session)) {
             throw new ResponseStatusException(HttpStatus.CONFLICT, AGENT_NOT_CONNECTED);
         }
         boolean alreadyVerified = stationId.equals(session.getStationId())
-                && ToolchainEntityAgentSession.VERIFIED.equals(session.getStatus());
+                && ToolchainAgentSessionEntity.VERIFIED.equals(session.getStatus());
         if (alreadyVerified) {
             return view(session); // nothing to re-check
         }
         session.setStationId(stationId);
         session.setRequestedAt(clock.millis());
-        session.setStatus(ToolchainEntityAgentSession.CHECKING);
+        session.setStatus(ToolchainAgentSessionEntity.CHECKING);
         session.setResults(null);
         session.setUpdatedAt(clock.millis());
         repository.save(session);
@@ -157,7 +157,7 @@ public class ToolchainServiceAgent {
 
     /** Checks the agent's evidence for its own session and stores the outcome. */
     public SessionView submitResults(String sessionId, String authorization, ResultsRequest request) {
-        ToolchainEntityAgentSession session = requireAgentSession(sessionId, authorization);
+        ToolchainAgentSessionEntity session = requireAgentSession(sessionId, authorization);
         boolean namesAStation = request != null && request.stationId() != null;
         boolean forCurrentStation = namesAStation && request.stationId().equals(session.getStationId());
         if (namesAStation && !forCurrentStation) {
@@ -171,7 +171,7 @@ public class ToolchainServiceAgent {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Too many check results.");
         }
         // A verified station stays verified; running the agent again cannot undo it.
-        if (ToolchainEntityAgentSession.VERIFIED.equals(session.getStatus())) {
+        if (ToolchainAgentSessionEntity.VERIFIED.equals(session.getStatus())) {
             return view(session);
         }
         List<Evidence> evidence = request.checks().stream()
@@ -179,7 +179,7 @@ public class ToolchainServiceAgent {
                 .toList();
         List<CheckResult> results = stationRules.evaluate(session.getStationId(), evidence);
         boolean verified = !results.isEmpty() && results.stream().allMatch(CheckResult::passed);
-        session.setStatus(verified ? ToolchainEntityAgentSession.VERIFIED : ToolchainEntityAgentSession.FAILED);
+        session.setStatus(verified ? ToolchainAgentSessionEntity.VERIFIED : ToolchainAgentSessionEntity.FAILED);
         session.setAgentOs(KNOWN_OS.contains(request.os()) ? request.os() : null);
         session.setResults(writeResults(results));
         session.setUpdatedAt(clock.millis());
@@ -193,24 +193,24 @@ public class ToolchainServiceAgent {
         return view(requireOwnSession(studentId, sessionId));
     }
 
-    private ToolchainEntityAgentSession requireOwnSession(String studentId, String sessionId) {
+    private ToolchainAgentSessionEntity requireOwnSession(String studentId, String sessionId) {
         return findSession(sessionId)
                 .filter(found -> found.getStudentUid().equals(studentId))
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Session not found."));
     }
 
-    private boolean agentConnected(ToolchainEntityAgentSession session) {
+    private boolean agentConnected(ToolchainAgentSessionEntity session) {
         return session.getAgentTokenHash() != null
                 && session.getAgentTokenExpiresAt() != null
                 && session.getAgentTokenExpiresAt() > clock.millis();
     }
 
-    private ToolchainEntityAgentSession requireAgentSession(String sessionId, String authorization) {
+    private ToolchainAgentSessionEntity requireAgentSession(String sessionId, String authorization) {
         String token = bearerToken(authorization);
         if (token == null) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, BAD_AGENT_TOKEN);
         }
-        ToolchainEntityAgentSession session = findSession(sessionId)
+        ToolchainAgentSessionEntity session = findSession(sessionId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, BAD_AGENT_TOKEN));
         // The token is scoped: it only matches the hash stored on the session it was issued for.
         boolean matches = session.getAgentTokenHash() != null
@@ -224,7 +224,7 @@ public class ToolchainServiceAgent {
         return session;
     }
 
-    private Optional<ToolchainEntityAgentSession> findSession(String sessionId) {
+    private Optional<ToolchainAgentSessionEntity> findSession(String sessionId) {
         try {
             return repository.findById(UUID.fromString(sessionId).toString());
         } catch (IllegalArgumentException | NullPointerException e) {
@@ -232,16 +232,16 @@ public class ToolchainServiceAgent {
         }
     }
 
-    private SessionView view(ToolchainEntityAgentSession session) {
+    private SessionView view(ToolchainAgentSessionEntity session) {
         String status = session.getStatus();
-        boolean waitingForAgent = ToolchainEntityAgentSession.WAITING_FOR_AGENT.equals(status);
+        boolean waitingForAgent = ToolchainAgentSessionEntity.WAITING_FOR_AGENT.equals(status);
         if (waitingForAgent) {
             // Not paired yet: the code runs out after its lifetime.
             boolean codeExpired = session.getPairingExpiresAt() <= clock.millis();
-            if (codeExpired) status = ToolchainEntityAgentSession.EXPIRED;
+            if (codeExpired) status = ToolchainAgentSessionEntity.EXPIRED;
         } else if (!agentConnected(session)) {
             // Paired before, but the agent's token has run out.
-            status = ToolchainEntityAgentSession.AGENT_EXPIRED;
+            status = ToolchainAgentSessionEntity.AGENT_EXPIRED;
         }
         return new SessionView(
                 UUID.fromString(session.getId()),

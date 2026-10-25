@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-class ToolchainServiceSetupReportTest {
+class ToolchainSetupReportServiceTest {
     private static final String REPORT = """
             Environment verification for /Users/toby/blueprints_pages
             [PASS] git installed
@@ -37,14 +37,14 @@ class ToolchainServiceSetupReportTest {
     private ToolchainJpaRepositorySetupReport repository;
 
     private MutableClock clock;
-    private ToolchainServiceSetupReport service;
+    private ToolchainSetupReportService service;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         clock = new MutableClock(Instant.parse("2026-10-06T16:00:00Z"));
-        service = new ToolchainServiceSetupReport(repository, clock);
-        when(repository.save(any(ToolchainEntitySetupReport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        service = new ToolchainSetupReportService(repository, clock);
+        when(repository.save(any(ToolchainSetupReportEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
@@ -59,7 +59,7 @@ class ToolchainServiceSetupReportTest {
 
     @Test
     void issuePairingCodeKeepsAnUnexpiredCodeSoACopiedCommandStillWorks() {
-        ToolchainEntitySetupReport row = pairedRow("toby", "ABCD2345");
+        ToolchainSetupReportEntity row = pairedRow("toby", "ABCD2345");
         when(repository.findById("toby")).thenReturn(Optional.of(row));
         clock.advance(Duration.ofMinutes(10));
 
@@ -71,7 +71,7 @@ class ToolchainServiceSetupReportTest {
 
     @Test
     void issuePairingCodeReplacesAnExpiredCode() {
-        ToolchainEntitySetupReport row = pairedRow("toby", "ABCD2345");
+        ToolchainSetupReportEntity row = pairedRow("toby", "ABCD2345");
         when(repository.findById("toby")).thenReturn(Optional.of(row));
         clock.advance(Duration.ofMinutes(31));
 
@@ -80,7 +80,7 @@ class ToolchainServiceSetupReportTest {
 
     @Test
     void saveReportStoresTheReportAndItsCountsForTheStudentWhoOwnsTheCode() {
-        ToolchainEntitySetupReport row = pairedRow("toby", "ABCD2345");
+        ToolchainSetupReportEntity row = pairedRow("toby", "ABCD2345");
         when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));
 
         assertTrue(service.saveReport("ABCD2345", REPORT));
@@ -96,7 +96,7 @@ class ToolchainServiceSetupReportTest {
 
     @Test
     void saveReportStoresALinuxOrWindowsAgentReport() {
-        ToolchainEntitySetupReport row = pairedRow("toby", "ABCD2345");
+        ToolchainSetupReportEntity row = pairedRow("toby", "ABCD2345");
         when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));
         String linuxReport = """
                 === LINUX SETUP CHECK v1 ===
@@ -119,7 +119,7 @@ class ToolchainServiceSetupReportTest {
 
     @Test
     void saveReportAcceptsASecondRunWithTheSameCode() {
-        ToolchainEntitySetupReport row = pairedRow("toby", "ABCD2345");
+        ToolchainSetupReportEntity row = pairedRow("toby", "ABCD2345");
         when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));
         service.saveReport("ABCD2345", REPORT);
 
@@ -132,7 +132,7 @@ class ToolchainServiceSetupReportTest {
 
     @Test
     void saveReportRefusesUnknownExpiredAndMalformedCodes() {
-        ToolchainEntitySetupReport row = pairedRow("toby", "ABCD2345");
+        ToolchainSetupReportEntity row = pairedRow("toby", "ABCD2345");
         when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));
         when(repository.findByPairingCode("ZZZZ9999")).thenReturn(Optional.empty());
 
@@ -142,17 +142,17 @@ class ToolchainServiceSetupReportTest {
         clock.advance(Duration.ofMinutes(31));
         assertFalse(service.saveReport("ABCD2345", REPORT));
 
-        verify(repository, never()).save(any(ToolchainEntitySetupReport.class));
+        verify(repository, never()).save(any(ToolchainSetupReportEntity.class));
     }
 
     @Test
     void saveReportRejectsTextThatIsNotVerifierOutput() {
-        String tooLong = REPORT + "x".repeat(ToolchainServiceSetupReport.MAX_REPORT_LENGTH);
+        String tooLong = REPORT + "x".repeat(ToolchainSetupReportService.MAX_REPORT_LENGTH);
 
         assertThrows(IllegalArgumentException.class, () -> service.saveReport("ABCD2345", ""));
         assertThrows(IllegalArgumentException.class, () -> service.saveReport("ABCD2345", "[PASS] git installed"));
         assertThrows(IllegalArgumentException.class, () -> service.saveReport("ABCD2345", tooLong));
-        verify(repository, never()).save(any(ToolchainEntitySetupReport.class));
+        verify(repository, never()).save(any(ToolchainSetupReportEntity.class));
     }
 
     @Test
@@ -162,10 +162,10 @@ class ToolchainServiceSetupReportTest {
         assertTrue(service.findReport("toby").isEmpty());
     }
 
-    private ToolchainEntitySetupReport pairedRow(String uid, String code) {
-        ToolchainEntitySetupReport row = new ToolchainEntitySetupReport(uid);
+    private ToolchainSetupReportEntity pairedRow(String uid, String code) {
+        ToolchainSetupReportEntity row = new ToolchainSetupReportEntity(uid);
         row.setPairingCode(code);
-        row.setPairingCodeExpiresAt(clock.millis() + ToolchainServiceSetupReport.PAIRING_CODE_LIFETIME.toMillis());
+        row.setPairingCodeExpiresAt(clock.millis() + ToolchainSetupReportService.PAIRING_CODE_LIFETIME.toMillis());
         return row;
     }
 

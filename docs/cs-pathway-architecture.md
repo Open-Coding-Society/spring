@@ -20,8 +20,8 @@ There are two setup mechanisms in the code. They should not be confused just bec
 
 | Mechanism | Java package and API | Purpose and persisted state |
 | --- | --- | --- |
-| Setup report | `mvc.toolchain`; `/api/cs-pathway/setup-report/...` | A terminal submits a plain-text verifier report. `ToolchainEntitySetupReport` stores the latest report keyed by student UID in `cs_pathway_setup_report`. An optional AI review summarizes the submitted evidence. |
-| Interactive Toolchain Trail | `mvc.toolchain`; `/api/toolchain/...` | The game and a local agent exchange station-check requests and results. `ToolchainEntityAgentSession` stores a UUID session linked to a student UID and the current station in `toolchain_session`. Spring evaluates the submitted evidence against station rules. |
+| Setup report | `mvc.toolchain`; `/api/cs-pathway/setup-report/...` | A terminal submits a plain-text verifier report. `ToolchainSetupReportEntity` stores the latest report keyed by student UID in `cs_pathway_setup_report`. An optional AI review summarizes the submitted evidence. |
+| Interactive Toolchain Trail | `mvc.toolchain`; `/api/toolchain/...` | The game and a local agent exchange station-check requests and results. `ToolchainAgentSessionEntity` stores a UUID session linked to a student UID and the current station in `toolchain_session`. Spring evaluates the submitted evidence against station rules. |
 
 Neither client writes directly to the SQL table. The game and local agent call Spring REST endpoints; the services validate identity, pairing credentials, station, and evidence, and then Spring repositories persist the resulting state. The student UID associates a session with its owner, but the interactive agent protocol also uses a session UUID, current `stationId`, a one-time pairing code, and a scoped agent token. Score `levelKey` values are a separate concept from Toolchain `stationId` values.
 
@@ -33,11 +33,11 @@ The package follows the Spring MVC and persistence pattern used by the rest of t
 
 - REST controllers expose JSON or plain-text HTTP operations. They translate HTTP input and authentication into service calls and translate results or errors into HTTP responses. The routes are use-case endpoints; they do not provide full CRUD for every resource.
 - DTOs are Java records used to exchange request and response data. Jackson maps JSON properties to record components and back. Records are transport shapes, not database tables.
-- JPA entities are Java objects mapped to database rows. `ToolchainEntitySetupReport`, `ToolchainEntityHelpRequest`, and `ToolchainEntityAgentSession` are feature-owned entities. Scores reuse the shared `Stats` entity.
+- JPA entities are Java objects mapped to database rows. `ToolchainSetupReportEntity`, `ToolchainHelpRequestEntity`, and `ToolchainAgentSessionEntity` are feature-owned entities. Scores reuse the shared `Stats` entity.
 - `JpaRepository` interfaces provide persistence operations and derived queries. They are the Java persistence interface, not a separate SQL database or a hand-written SQL layer.
-- Services contain business rules and coordinate repositories or external systems. `ToolchainServiceSetupReview` calls Gemini; the other services manage pairing reports, scores, help requests, agent sessions, and station rules.
+- Services contain business rules and coordinate repositories or external systems. `ToolchainSetupReviewService` calls Gemini; the other services manage pairing reports, scores, help requests, agent sessions, and station rules.
 - `ToolchainMvcController` serves the Thymeleaf teacher/admin page at `/mvc/cs-pathway/read`. It supplies dashboard data to `templates/cs-pathway/read.html`; this is a server-rendered UI route, not a REST endpoint.
-- `ToolchainApiRestControllerAgent`, `ToolchainServiceAgent`, `ToolchainStationRules`, and `ToolchainEntityAgentSession` implement the agent session lifecycle and station evidence evaluation.
+- `ToolchainApiRestControllerAgent`, `ToolchainAgentService`, `ToolchainStationRules`, and `ToolchainAgentSessionEntity` implement the agent session lifecycle and station evidence evaluation.
 
 ## Current behavior
 
@@ -74,7 +74,7 @@ The file references variables such as `baseUrl`, `uid`, `adminUid`, and `adminPa
 1. A signed-in student calls `POST /api/cs-pathway/setup-report/pairing-code`. The response is a `ToolchainDtoSetupPairing` record with `code` and `expiresAt` (Unix epoch milliseconds). Codes are eight characters, expire after 30 minutes, and an active code for the student is reused with its expiration extended.
 2. The student's local verifier sends its plain-text output to `POST /api/cs-pathway/setup-report/{pairingCode}`. This upload route is permitted without a login because the terminal does not have the browser's JWT cookie; the short-lived pairing code identifies the student. The service checks the report length and required summary lines before saving it.
 3. The student reads their latest report from `GET /api/cs-pathway/setup-report`. When no report exists, the response contains null report fields.
-4. A teacher or administrator can request an advisory review with `POST /api/cs-pathway/setup-report/review/{uid}`. `ToolchainServiceSetupReview` sends the report to Gemini when `gemini.api.key` is configured. The model's response is checked and combined with verifier warnings and failures. This is an assessment of submitted text, not independent proof that software is installed.
+4. A teacher or administrator can request an advisory review with `POST /api/cs-pathway/setup-report/review/{uid}`. `ToolchainSetupReviewService` sends the report to Gemini when `gemini.api.key` is configured. The model's response is checked and combined with verifier warnings and failures. This is an assessment of submitted text, not independent proof that software is installed.
 
 The persisted record is keyed by student UID in `cs_pathway_setup_report`. It stores the current pairing code and expiry, the latest verifier status and counts, the raw report, and its submission time. Timestamps are epoch milliseconds.
 
@@ -94,16 +94,16 @@ The persisted record is keyed by student UID in `cs_pathway_setup_report`. It st
 
 ## Persistence and security
 
-- `cs_pathway_setup_report` and `cs_pathway_help_request` are created by `ApplicationRunner` components because Hibernate uses `ddl-auto=none`. Keep their DDL and corresponding entity mappings aligned for both SQLite and MySQL.
+- `cs_pathway_setup_report`, `cs_pathway_help_request`, and `toolchain_session` are initialized by `ToolchainSetupReportTableInitializer`, `ToolchainHelpRequestTableInitializer`, and `ToolchainAgentSessionTableInitializer`. These `ApplicationRunner` components are needed because Hibernate uses `ddl-auto=none`. Keep their DDL and corresponding entity mappings aligned for both SQLite and MySQL.
 - Score data is stored in the shared `Stats` table. Pathway queries are isolated in `ToolchainJpaRepositoryStats`; do not create a second score table without a deliberate data migration.
 - Interactive station sessions are stored in `toolchain_session`; this is separate from score rows and setup-report rows because it has its own pairing, token-expiry, station-request, and result lifecycle. `ToolchainStationRules` is the server-side allow-list and evaluator; a client must not determine its own pass/fail result.
 - The score and help endpoints use the authenticated student principal. The pairing-code issue route and AI review route have explicit role rules. The text report upload is public at the HTTP layer and relies on a valid, unexpired pairing code in the service. The MVC dashboard is restricted to teachers and administrators. See `SecurityConfig` and `MvcSecurityConfig` for the actual access rules.
-- Toolchain pair, poll, and result routes are public at the Spring Security matcher layer because the local agent has no browser JWT cookie; `ToolchainServiceAgent` requires a valid one-time pairing code or the session's scoped, unexpired bearer token. The game session routes require the signed-in owner.
+- Toolchain pair, poll, and result routes are public at the Spring Security matcher layer because the local agent has no browser JWT cookie; `ToolchainAgentService` requires a valid one-time pairing code or the session's scoped, unexpired bearer token. The game session routes require the signed-in owner.
 - Treat pairing codes and agent tokens as credentials: keep them random, short-lived, validated on every use, and out of logs. Avoid logging raw verifier reports or command output, which may contain local machine details.
 
 ## Package organization and naming
 
-The Java types are consolidated under `mvc.toolchain` so students can discuss scores, help requests, setup reports, and interactive station checks in one place. The files use consistent role-oriented names such as `ToolchainApiRestController...`, `ToolchainDto...`, `ToolchainEntity...`, `ToolchainJpaRepository...`, and `ToolchainService...`. The package move and Java type renames do not change the API routes or database tables.
+The Java types are consolidated under `mvc.toolchain` so students can discuss scores, help requests, setup reports, and interactive station checks in one place. The files use feature-first, role-suffix names such as `ToolchainHelpRequestEntity`, `ToolchainHelpRequestService`, and `ToolchainHelpRequestTableInitializer`. API controllers, DTOs, and repositories retain their established role names. The Java type renames do not change API routes or database tables.
 
 The public routes retain both `/api/cs-pathway` and `/api/toolchain` prefixes. Those names are part of the existing game/agent contract and are deliberately not renamed along with Java packages and files. Renaming routes or database tables should be a separate, coordinated migration that updates external game/agent clients and persisted data as needed.
 
@@ -117,7 +117,7 @@ When extending CS Pathway or Toolchain Trail:
 
 1. Keep responsibilities in their existing layer: HTTP handling in controllers, business rules in services, transport shapes in records, and table mappings in entities.
 2. Keep API routes, DTO component names, HTTP status behavior, and security rules consistent. Update callers and tests when a JSON contract changes.
-3. Keep the enum keys and score submodule numbers stable. Update both entity mappings and startup DDL when changing persisted columns.
+3. Keep the enum keys and score submodule numbers stable. Update both entity mappings and table initializer DDL when changing persisted columns.
 4. Add or update focused JUnit/Mockito tests for the service behavior and controller contract where applicable.
 5. Add plain-language JavaDoc to each new Java type and to public methods whose behavior or constraints are not obvious. Keep JavaDoc readable in the source editor; do not put HTML or Markdown diagrams in comments.
 6. Update this guide when the architecture or observable behavior changes. The repository `README.md` and `AGENTS.md` link here so people and coding agents can find it.

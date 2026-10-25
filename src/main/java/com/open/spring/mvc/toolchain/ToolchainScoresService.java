@@ -20,14 +20,14 @@ import com.open.spring.mvc.stats.Stats;
  * grades = percent complete (0-100), finished = reached 100%.
  */
 @Service
-public class ToolchainServiceScores {
+public class ToolchainScoresService {
     static final String MODULE = "cs-pathway";
     private static final double MAX_PERCENT = 100.0;
 
     private final ToolchainJpaRepositoryStats statsRepository;
     private final PersonJpaRepository personRepository;
 
-    public ToolchainServiceScores(ToolchainJpaRepositoryStats statsRepository, PersonJpaRepository personRepository) {
+    public ToolchainScoresService(ToolchainJpaRepositoryStats statsRepository, PersonJpaRepository personRepository) {
         this.statsRepository = statsRepository;
         this.personRepository = personRepository;
     }

@@ -20,9 +20,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/cs-pathway/help-requests")
 public class ToolchainApiRestControllerHelp {
-    private final ToolchainServiceHelp helpRequestService;
+    private final ToolchainHelpRequestService helpRequestService;
 
-    public ToolchainApiRestControllerHelp(ToolchainServiceHelp helpRequestService) {
+    public ToolchainApiRestControllerHelp(ToolchainHelpRequestService helpRequestService) {
         this.helpRequestService = helpRequestService;
     }
 
@@ -48,7 +48,7 @@ public class ToolchainApiRestControllerHelp {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to ask your teacher for help."));
         }
         try {
-            ToolchainEntityHelpRequest saved = helpRequestService.send(user.getUsername(), body);
+            ToolchainHelpRequestEntity saved = helpRequestService.send(user.getUsername(), body);
             return ResponseEntity.ok(Map.of("sent", true, "createdAt", saved.getCreatedAt()));
         } catch (ToolchainExceptionHelpTooSoon error) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)

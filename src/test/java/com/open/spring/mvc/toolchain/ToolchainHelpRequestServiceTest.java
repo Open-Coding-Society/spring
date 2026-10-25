@@ -23,7 +23,7 @@ import org.mockito.MockitoAnnotations;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
-class ToolchainServiceHelpTest {
+class ToolchainHelpRequestServiceTest {
     private static final String MESSAGE = "I need help at Git Village Hall in Toolchain Trail (Windows).";
 
     @Mock
@@ -32,20 +32,20 @@ class ToolchainServiceHelpTest {
     private PersonJpaRepository personRepository;
 
     private MutableClock clock;
-    private ToolchainServiceHelp service;
+    private ToolchainHelpRequestService service;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         clock = new MutableClock(Instant.parse("2026-10-21T16:00:00Z"));
-        service = new ToolchainServiceHelp(repository, personRepository, clock);
-        when(repository.save(any(ToolchainEntityHelpRequest.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        service = new ToolchainHelpRequestService(repository, personRepository, clock);
+        when(repository.save(any(ToolchainHelpRequestEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(repository.findFirstByUidOrderByCreatedAtDesc("toby")).thenReturn(Optional.empty());
     }
 
     @Test
     void sendSavesTheStudentsRequestWithTheTimeItWasSent() {
-        ToolchainEntityHelpRequest saved = service.send("toby",
+        ToolchainHelpRequestEntity saved = service.send("toby",
                 new ToolchainDtoHelp("toolchain-trail", "  Git Village Hall ", " " + MESSAGE + " "));
 
         assertEquals("toby", saved.getUid());
@@ -57,7 +57,7 @@ class ToolchainServiceHelpTest {
 
     @Test
     void sendAllowsALevelWithoutAStation() {
-        ToolchainEntityHelpRequest saved = service.send("toby", new ToolchainDtoHelp("toolchain-trail", " ", MESSAGE));
+        ToolchainHelpRequestEntity saved = service.send("toby", new ToolchainDtoHelp("toolchain-trail", " ", MESSAGE));
 
         assertNull(saved.getStation());
     }
@@ -75,7 +75,7 @@ class ToolchainServiceHelpTest {
 
     @Test
     void sendRefusesASecondRequestWithinAMinuteSoDoubleClicksDoNotFloodTheTeacher() {
-        ToolchainEntityHelpRequest previous = new ToolchainEntityHelpRequest();
+        ToolchainHelpRequestEntity previous = new ToolchainHelpRequestEntity();
         previous.setCreatedAt(clock.millis());
         when(repository.findFirstByUidOrderByCreatedAtDesc("toby")).thenReturn(Optional.of(previous));
         clock.advance(Duration.ofSeconds(20));
@@ -90,7 +90,7 @@ class ToolchainServiceHelpTest {
 
     @Test
     void getRecentRequestsShowsTheStudentsNameAndTheLevelsDisplayName() {
-        ToolchainEntityHelpRequest request = new ToolchainEntityHelpRequest();
+        ToolchainHelpRequestEntity request = new ToolchainHelpRequestEntity();
         request.setUid("toby");
         request.setLevelKey("toolchain-trail");
         request.setStation("Git Village Hall");

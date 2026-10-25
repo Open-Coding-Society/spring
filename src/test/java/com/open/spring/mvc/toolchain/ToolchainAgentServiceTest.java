@@ -31,7 +31,7 @@ import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.ResultsRequ
 import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.SessionView;
 import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.StartResponse;
 
-class ToolchainServiceAgentTest {
+class ToolchainAgentServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-14T18:00:00Z");
     // Deliberately different from application.properties, to prove the service uses what it is given.
     private static final Duration PAIRING_CODE_LIFETIME = Duration.ofMinutes(7);
@@ -41,18 +41,18 @@ class ToolchainServiceAgentTest {
     private ToolchainJpaRepositoryAgentSession repository;
 
     /** A tiny in-memory table behind the mocked repository. */
-    private final Map<String, ToolchainEntityAgentSession> rows = new HashMap<>();
+    private final Map<String, ToolchainAgentSessionEntity> rows = new HashMap<>();
     private MutableClock clock;
-    private ToolchainServiceAgent service;
+    private ToolchainAgentService service;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         clock = new MutableClock(NOW);
-        service = new ToolchainServiceAgent(repository, new ToolchainStationRules(), clock, PAIRING_CODE_LIFETIME, AGENT_TOKEN_LIFETIME);
+        service = new ToolchainAgentService(repository, new ToolchainStationRules(), clock, PAIRING_CODE_LIFETIME, AGENT_TOKEN_LIFETIME);
 
-        when(repository.save(any(ToolchainEntityAgentSession.class))).thenAnswer(invocation -> {
-            ToolchainEntityAgentSession row = invocation.getArgument(0);
+        when(repository.save(any(ToolchainAgentSessionEntity.class))).thenAnswer(invocation -> {
+            ToolchainAgentSessionEntity row = invocation.getArgument(0);
             rows.put(row.getId(), row);
             return row;
         });
@@ -62,7 +62,7 @@ class ToolchainServiceAgentTest {
         when(repository.consumePairingCode(anyString(), anyLong())).thenAnswer(invocation -> {
             String hash = invocation.getArgument(0);
             long now = invocation.getArgument(1);
-            for (ToolchainEntityAgentSession row : rows.values()) {
+            for (ToolchainAgentSessionEntity row : rows.values()) {
                 if (hash.equals(row.getPairingCodeHash()) && row.getPairingUsedAt() == null && row.getPairingExpiresAt() > now) {
                     row.setPairingUsedAt(now);
                     return 1;
@@ -76,11 +76,11 @@ class ToolchainServiceAgentTest {
     void startStoresOnlyTheHashOfAFiveMinuteCode() {
         StartResponse started = service.start("toby", "git-village-hall");
 
-        ToolchainEntityAgentSession row = rows.get(started.sessionId().toString());
+        ToolchainAgentSessionEntity row = rows.get(started.sessionId().toString());
         assertEquals("toby", row.getStudentUid());
         assertEquals("git-village-hall", row.getStationId());
         assertNotEquals(started.pairingCode(), row.getPairingCodeHash());
-        assertEquals(ToolchainServiceAgent.sha256(started.pairingCode()), row.getPairingCodeHash());
+        assertEquals(ToolchainAgentService.sha256(started.pairingCode()), row.getPairingCodeHash());
         assertEquals(NOW.plus(PAIRING_CODE_LIFETIME), started.expiresAt());
         assertTrue(started.pairingCode().length() >= 40);
     }
@@ -98,7 +98,7 @@ class ToolchainServiceAgentTest {
         PairResponse paired = service.pair(started.pairingCode());
         assertEquals(started.sessionId(), paired.sessionId());
         assertEquals("git-village-hall", paired.stationId());
-        assertEquals(ToolchainEntityAgentSession.CHECKING, rows.get(started.sessionId().toString()).getStatus());
+        assertEquals(ToolchainAgentSessionEntity.CHECKING, rows.get(started.sessionId().toString()).getStatus());
 
         ResponseStatusException again = assertThrows(ResponseStatusException.class, () -> service.pair(started.pairingCode()));
         assertEquals(HttpStatus.UNAUTHORIZED, again.getStatusCode());
@@ -110,7 +110,7 @@ class ToolchainServiceAgentTest {
         clock.advanceSeconds(PAIRING_CODE_LIFETIME.toSeconds() + 1);
 
         assertThrows(ResponseStatusException.class, () -> service.pair(started.pairingCode()));
-        assertEquals(ToolchainEntityAgentSession.EXPIRED, service.getSession("toby", started.sessionId().toString()).status());
+        assertEquals(ToolchainAgentSessionEntity.EXPIRED, service.getSession("toby", started.sessionId().toString()).status());
     }
 
     @Test
@@ -124,8 +124,8 @@ class ToolchainServiceAgentTest {
                         new CheckEvidence("git-name", 0, "Toby Ledger"),
                         new CheckEvidence("git-email", 0, "t***@opencodingsociety.com"))));
 
-        assertEquals(ToolchainEntityAgentSession.VERIFIED, result.status());
-        assertEquals(ToolchainEntityAgentSession.VERIFIED, service.getSession("toby", started.sessionId().toString()).status());
+        assertEquals(ToolchainAgentSessionEntity.VERIFIED, result.status());
+        assertEquals(ToolchainAgentSessionEntity.VERIFIED, service.getSession("toby", started.sessionId().toString()).status());
         assertEquals("windows", rows.get(started.sessionId().toString()).getAgentOs());
     }
 
@@ -139,7 +139,7 @@ class ToolchainServiceAgentTest {
                         new CheckEvidence("git", 0, "git version 2.43.0"),
                         new CheckEvidence("git-name", 1, ""))));
 
-        assertEquals(ToolchainEntityAgentSession.FAILED, result.status());
+        assertEquals(ToolchainAgentSessionEntity.FAILED, result.status());
         assertEquals(3, result.checks().size());
         assertTrue(result.checks().get(0).passed());
         assertTrue(result.checks().get(1).detail().contains("user.name"));
@@ -199,7 +199,7 @@ class ToolchainServiceAgentTest {
         service.submitResults(id, auth, new ResultsRequest("linux", null, List.of(new CheckEvidence("editor", 0, "1.94.2\nabc123\nx64"))));
         SessionView again = service.submitResults(id, auth, new ResultsRequest("linux", null, List.of(new CheckEvidence("editor", 127, "command not found: code"))));
 
-        assertEquals(ToolchainEntityAgentSession.VERIFIED, again.status());
+        assertEquals(ToolchainAgentSessionEntity.VERIFIED, again.status());
     }
 
     @Test
@@ -214,7 +214,7 @@ class ToolchainServiceAgentTest {
 
         clock.advanceSeconds(60);
         SessionView requested = service.requestCheck("toby", id, "editor-isle-tower");
-        assertEquals(ToolchainEntityAgentSession.CHECKING, requested.status());
+        assertEquals(ToolchainAgentSessionEntity.CHECKING, requested.status());
         assertTrue(requested.checks().isEmpty());
 
         SessionView next = service.nextRequest(id, auth);
@@ -223,7 +223,7 @@ class ToolchainServiceAgentTest {
 
         SessionView result = service.submitResults(id, auth, new ResultsRequest("linux", "editor-isle-tower",
                 List.of(new CheckEvidence("editor", 0, "1.94.2"))));
-        assertEquals(ToolchainEntityAgentSession.VERIFIED, result.status());
+        assertEquals(ToolchainAgentSessionEntity.VERIFIED, result.status());
         assertEquals("editor-isle-tower", result.stationId());
     }
 
@@ -250,7 +250,7 @@ class ToolchainServiceAgentTest {
 
         service.pair(started.pairingCode());
         clock.advanceSeconds(AGENT_TOKEN_LIFETIME.toSeconds() + 1);
-        assertEquals(ToolchainEntityAgentSession.AGENT_EXPIRED, service.getSession("toby", id).status());
+        assertEquals(ToolchainAgentSessionEntity.AGENT_EXPIRED, service.getSession("toby", id).status());
         assertThrows(ResponseStatusException.class, () -> service.requestCheck("toby", id, "editor-isle-tower"));
     }
 

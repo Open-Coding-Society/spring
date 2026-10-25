@@ -10,12 +10,12 @@ import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
 
-/** Creates the setup-report table for databases managed with ddl-auto=none. */
+/** Initializes the setup-report table for databases managed with ddl-auto=none. */
 @Component
 @RequiredArgsConstructor
-public class ToolchainEntityRunnerSetupReport {
+public class ToolchainSetupReportTableInitializer {
 
-    private static final Logger logger = LoggerFactory.getLogger(ToolchainEntityRunnerSetupReport.class);
+    private static final Logger logger = LoggerFactory.getLogger(ToolchainSetupReportTableInitializer.class);
 
     private final JdbcTemplate jdbcTemplate;
 

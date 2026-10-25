@@ -18,7 +18,7 @@ import lombok.NoArgsConstructor;
 @Table(name = "cs_pathway_setup_report")
 @Data
 @NoArgsConstructor
-public class ToolchainEntitySetupReport {
+public class ToolchainSetupReportEntity {
 
     @Id
     private String uid;
@@ -33,7 +33,7 @@ public class ToolchainEntitySetupReport {
     private String report; // raw verifyToolsTerminal.sh output
     private Long reportedAt;
 
-    public ToolchainEntitySetupReport(String uid) {
+    public ToolchainSetupReportEntity(String uid) {
         this.uid = uid;
     }
 
