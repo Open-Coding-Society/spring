@@ -22,6 +22,8 @@ import org.mockito.MockitoAnnotations;
 
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.toolchain.ToolchainHelpApiRestController.HelpRequestRecord;
+import com.open.spring.mvc.toolchain.ToolchainHelpRequestService.HelpRecord;
 
 class ToolchainHelpRequestServiceTest {
     private static final String MESSAGE = "I need help at Git Village Hall in Toolchain Trail (Windows).";
@@ -46,7 +48,7 @@ class ToolchainHelpRequestServiceTest {
     @Test
     void sendSavesTheStudentsRequestWithTheTimeItWasSent() {
         ToolchainHelpRequestEntity saved = service.send("toby",
-                new ToolchainDtoHelp("toolchain-trail", "  Git Village Hall ", " " + MESSAGE + " "));
+                new HelpRequestRecord("toolchain-trail", "  Git Village Hall ", " " + MESSAGE + " "));
 
         assertEquals("toby", saved.getUid());
         assertEquals("toolchain-trail", saved.getLevelKey());
@@ -57,7 +59,7 @@ class ToolchainHelpRequestServiceTest {
 
     @Test
     void sendAllowsALevelWithoutAStation() {
-        ToolchainHelpRequestEntity saved = service.send("toby", new ToolchainDtoHelp("toolchain-trail", " ", MESSAGE));
+        ToolchainHelpRequestEntity saved = service.send("toby", new HelpRequestRecord("toolchain-trail", " ", MESSAGE));
 
         assertNull(saved.getStation());
     }
@@ -65,11 +67,11 @@ class ToolchainHelpRequestServiceTest {
     @Test
     void sendRejectsAnUnknownLevelAnEmptyMessageAndAnOverlongMessage() {
         assertThrows(IllegalArgumentException.class,
-                () -> service.send("toby", new ToolchainDtoHelp("not-a-level", null, MESSAGE)));
+                () -> service.send("toby", new HelpRequestRecord("not-a-level", null, MESSAGE)));
         assertThrows(IllegalArgumentException.class,
-                () -> service.send("toby", new ToolchainDtoHelp("toolchain-trail", null, "   ")));
+                () -> service.send("toby", new HelpRequestRecord("toolchain-trail", null, "   ")));
         assertThrows(IllegalArgumentException.class,
-                () -> service.send("toby", new ToolchainDtoHelp("toolchain-trail", null, "x".repeat(501))));
+                () -> service.send("toby", new HelpRequestRecord("toolchain-trail", null, "x".repeat(501))));
         verify(repository, never()).save(any());
     }
 
@@ -81,11 +83,11 @@ class ToolchainHelpRequestServiceTest {
         clock.advance(Duration.ofSeconds(20));
 
         ToolchainExceptionHelpTooSoon error = assertThrows(ToolchainExceptionHelpTooSoon.class,
-                () -> service.send("toby", new ToolchainDtoHelp("toolchain-trail", null, MESSAGE)));
+                () -> service.send("toby", new HelpRequestRecord("toolchain-trail", null, MESSAGE)));
         assertEquals(40, error.getRetryAfterSeconds());
 
         clock.advance(Duration.ofSeconds(40));
-        assertEquals(MESSAGE, service.send("toby", new ToolchainDtoHelp("toolchain-trail", null, MESSAGE)).getMessage());
+        assertEquals(MESSAGE, service.send("toby", new HelpRequestRecord("toolchain-trail", null, MESSAGE)).getMessage());
     }
 
     @Test
@@ -101,7 +103,7 @@ class ToolchainHelpRequestServiceTest {
         toby.setName("Toby Leung");
         when(personRepository.findByUid("toby")).thenReturn(toby);
 
-        ToolchainDtoHelpAsk row = service.getRecentRequests().get(0);
+        HelpRecord row = service.getRecentRequests().get(0);
 
         assertEquals("Toby Leung", row.name());
         assertEquals("Toolchain Trail", row.levelName());

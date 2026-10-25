@@ -112,7 +112,7 @@ The interactive Toolchain Trail flow is the request/response approach for live s
 The package follows the Spring MVC and persistence pattern used by the rest of this application:
 
 - REST controllers expose JSON or plain-text HTTP operations. They translate HTTP input and authentication into service calls and translate results or errors into HTTP responses. The routes are use-case endpoints; they do not provide full CRUD for every resource.
-- DTOs are Java records used to exchange request and response data. Jackson maps JSON properties to record components and back. Records are transport shapes, not database tables.
+- DTOs are Java records used to exchange request and response data. Keep API-specific request/response records inside their API controller, as in the agent API, and service-owned result records inside the service that produces them. Use short contextual names and a DTO comment explaining their purpose. Other callers and tests import the nested record from its owner. Jackson maps JSON properties to record components and back. Records are transport shapes, not database tables.
 - JPA entities are Java objects mapped to database rows. `ToolchainSetupReportEntity`, `ToolchainHelpRequestEntity`, and `ToolchainAgentSessionEntity` are feature-owned entities. Scores reuse the shared `Stats` entity.
 - `JpaRepository` interfaces provide persistence operations and derived queries. They are the Java persistence interface, not a separate SQL database or a hand-written SQL layer.
 - Services contain business rules and coordinate repositories or external systems. `ToolchainSetupReviewService` calls Gemini; the other services manage pairing reports, scores, help requests, agent sessions, and station rules.
@@ -156,7 +156,7 @@ The files reference variables such as `baseUrl`, `adminUid`, and `adminPassword`
 
 ### Setup report flow
 
-1. A signed-in student calls `POST /api/cs-pathway/setup-report/pairing-code`. The response is a `ToolchainDtoSetupPairing` record with `code` and `expiresAt` (Unix epoch milliseconds). Codes are eight characters, expire after 30 minutes, and an active code for the student is reused with its expiration extended.
+1. A signed-in student calls `POST /api/cs-pathway/setup-report/pairing-code`. The response is a `ToolchainSetupReportService.PairingRecord` with `code` and `expiresAt` (Unix epoch milliseconds). Codes are eight characters, expire after 30 minutes, and an active code for the student is reused with its expiration extended.
 2. The student's local verifier sends its plain-text output to `POST /api/cs-pathway/setup-report/{pairingCode}`. This upload route is permitted without a login because the terminal does not have the browser's JWT cookie; the short-lived pairing code identifies the student. The service checks the report length and required summary lines before saving it.
 3. The student reads their latest report from `GET /api/cs-pathway/setup-report`. When no report exists, the response contains null report fields.
 4. A teacher or administrator can request an advisory review with `POST /api/cs-pathway/setup-report/review/{uid}`. `ToolchainSetupReviewService` sends the report to Gemini when `gemini.api.key` is configured. The model's response is checked and combined with verifier warnings and failures. This is an assessment of submitted text, not independent proof that software is installed.

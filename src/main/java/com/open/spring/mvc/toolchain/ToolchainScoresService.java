@@ -21,6 +21,36 @@ import com.open.spring.mvc.stats.Stats;
  */
 @Service
 public class ToolchainScoresService {
+    /**
+     * DTO for a student's score in one CS Pathway level.
+     *
+     * @param levelKey the level identifier
+     * @param levelName the display name of the level
+     * @param percentComplete the completion percentage from 0 through 100
+     * @param finished whether the student has completed the level
+     */
+    public record LevelScoreRecord(
+            String levelKey,
+            String levelName,
+            double percentComplete,
+            boolean finished) {
+    }
+
+    /**
+     * DTO summarizing a student's scores for the teacher dashboard.
+     *
+     * @param uid the student's unique identifier
+     * @param name the student's display name
+     * @param levels the scores for each level
+     * @param averagePercent the average completion percentage across all levels
+     */
+    public record StudentRecord(
+            String uid,
+            String name,
+            List<LevelScoreRecord> levels,
+            double averagePercent) {
+    }
+
     static final String MODULE = "cs-pathway";
     private static final double MAX_PERCENT = 100.0;
 
@@ -33,7 +63,7 @@ public class ToolchainScoresService {
     }
 
     /** All five levels for one student; levels never played come back as 0%. */
-    public List<ToolchainDtoLevelScore> getScores(String uid) {
+    public List<LevelScoreRecord> getScores(String uid) {
         requireUid(uid);
         return toLevelScores(statsRepository.findAllByUsernameAndModule(uid, MODULE));
     }
@@ -44,7 +74,7 @@ public class ToolchainScoresService {
      * storage, so a new device would otherwise report a lower percent and wipe
      * earlier work.
      */
-    public ToolchainDtoLevelScore recordProgress(String uid, ToolchainEnumLevels level, Double percentComplete) {
+    public LevelScoreRecord recordProgress(String uid, ToolchainEnumLevels level, Double percentComplete) {
         requireUid(uid);
         if (level == null) {
             throw new IllegalArgumentException("Level is required.");
@@ -64,18 +94,18 @@ public class ToolchainScoresService {
     }
 
     /** Every student with any CS Pathway progress, sorted by name, for the teacher view. */
-    public List<ToolchainDtoStudent> getStudentRows() {
+    public List<StudentRecord> getStudentRows() {
         Map<String, List<Stats>> byStudent = statsRepository.findAllByModule(MODULE).stream()
                 .collect(Collectors.groupingBy(Stats::getUsername));
 
-        List<ToolchainDtoStudent> rows = new ArrayList<>();
+        List<StudentRecord> rows = new ArrayList<>();
         for (Map.Entry<String, List<Stats>> student : byStudent.entrySet()) {
             String uid = student.getKey();
-            List<ToolchainDtoLevelScore> levels = toLevelScores(student.getValue());
-            double average = levels.stream().mapToDouble(ToolchainDtoLevelScore::percentComplete).average().orElse(0);
-            rows.add(new ToolchainDtoStudent(uid, displayName(uid), levels, average));
+            List<LevelScoreRecord> levels = toLevelScores(student.getValue());
+            double average = levels.stream().mapToDouble(LevelScoreRecord::percentComplete).average().orElse(0);
+            rows.add(new StudentRecord(uid, displayName(uid), levels, average));
         }
-        rows.sort(Comparator.comparing(ToolchainDtoStudent::name, String.CASE_INSENSITIVE_ORDER));
+        rows.sort(Comparator.comparing(StudentRecord::name, String.CASE_INSENSITIVE_ORDER));
         return rows;
     }
 
@@ -97,20 +127,20 @@ public class ToolchainScoresService {
     }
 
     /** One score per level in play order, filling unplayed levels with 0%. */
-    private static List<ToolchainDtoLevelScore> toLevelScores(List<Stats> studentStats) {
+    private static List<LevelScoreRecord> toLevelScores(List<Stats> studentStats) {
         Map<Integer, Stats> bySubmodule = studentStats.stream()
                 .collect(Collectors.toMap(Stats::getSubmodule, Function.identity(), (first, second) -> first));
-        List<ToolchainDtoLevelScore> scores = new ArrayList<>();
+        List<LevelScoreRecord> scores = new ArrayList<>();
         for (ToolchainEnumLevels level : ToolchainEnumLevels.values()) {
             scores.add(toScore(level, bySubmodule.get(level.getSubmodule())));
         }
         return scores;
     }
 
-    private static ToolchainDtoLevelScore toScore(ToolchainEnumLevels level, Stats stats) {
+    private static LevelScoreRecord toScore(ToolchainEnumLevels level, Stats stats) {
         double percent = stats == null || stats.getGrades() == null ? 0.0 : stats.getGrades();
         boolean finished = stats != null && Boolean.TRUE.equals(stats.getFinished());
-        return new ToolchainDtoLevelScore(level.getKey(), level.getDisplayName(), percent, finished);
+        return new LevelScoreRecord(level.getKey(), level.getDisplayName(), percent, finished);
     }
 
     private static void requireUid(String uid) {

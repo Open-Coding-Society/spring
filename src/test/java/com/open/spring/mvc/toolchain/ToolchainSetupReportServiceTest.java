@@ -21,6 +21,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import com.open.spring.mvc.toolchain.ToolchainSetupReportService.PairingRecord;
+
 class ToolchainSetupReportServiceTest {
     private static final String REPORT = """
             Environment verification for /Users/toby/blueprints_pages
@@ -51,7 +53,7 @@ class ToolchainSetupReportServiceTest {
     void issuePairingCodeGivesANewStudentAnEightCharacterCodeThatExpiresInThirtyMinutes() {
         when(repository.findById("toby")).thenReturn(Optional.empty());
 
-        ToolchainDtoSetupPairing pairingCode = service.issuePairingCode("toby");
+        PairingRecord pairingCode = service.issuePairingCode("toby");
 
         assertTrue(pairingCode.code().matches("[A-HJKMNP-Z2-9]{8}"));
         assertEquals(clock.millis() + Duration.ofMinutes(30).toMillis(), pairingCode.expiresAt());
@@ -63,7 +65,7 @@ class ToolchainSetupReportServiceTest {
         when(repository.findById("toby")).thenReturn(Optional.of(row));
         clock.advance(Duration.ofMinutes(10));
 
-        ToolchainDtoSetupPairing pairingCode = service.issuePairingCode("toby");
+        PairingRecord pairingCode = service.issuePairingCode("toby");
 
         assertEquals("ABCD2345", pairingCode.code());
         assertEquals(clock.millis() + Duration.ofMinutes(30).toMillis(), pairingCode.expiresAt());

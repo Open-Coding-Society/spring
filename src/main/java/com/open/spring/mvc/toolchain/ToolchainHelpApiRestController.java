@@ -20,6 +20,16 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/cs-pathway/help-requests")
 public class ToolchainHelpApiRestController {
+    /**
+     * DTO for a student's request for teacher assistance.
+     *
+     * @param levelKey the level where the request originated
+     * @param station the station within the level; may be null
+     * @param message the student's help message
+     */
+    public record HelpRequestRecord(String levelKey, String station, String message) {
+    }
+
     private final ToolchainHelpRequestService helpRequestService;
 
     public ToolchainHelpApiRestController(ToolchainHelpRequestService helpRequestService) {
@@ -43,7 +53,7 @@ public class ToolchainHelpApiRestController {
     @PostMapping
     public ResponseEntity<?> sendHelpRequest(
             @AuthenticationPrincipal UserDetails user,
-            @RequestBody(required = false) ToolchainDtoHelp body) {
+            @RequestBody(required = false) HelpRequestRecord body) {
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to ask your teacher for help."));
         }

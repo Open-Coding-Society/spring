@@ -2,6 +2,7 @@ package com.open.spring.mvc.toolchain;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Service;
 
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.toolchain.ToolchainHelpApiRestController.HelpRequestRecord;
 
 /**
  * Service for managing help requests sent by students via the game's "red flag" button.
@@ -23,6 +25,25 @@ import com.open.spring.mvc.person.PersonJpaRepository;
  */
 @Service
 public class ToolchainHelpRequestService {
+    /**
+     * DTO combining a help request with the student's name for the teacher dashboard.
+     *
+     * @param name the student's display name
+     * @param uid the student's unique identifier
+     * @param levelName the display name of the level
+     * @param station the station where help was requested
+     * @param message the student's help message
+     * @param createdAt when the request was created
+     */
+    public record HelpRecord(
+            String name,
+            String uid,
+            String levelName,
+            String station,
+            String message,
+            Date createdAt) {
+    }
+
     /** The minimum time required between consecutive help requests from the same student. */
     static final Duration COOLDOWN = Duration.ofMinutes(1);
     
@@ -69,12 +90,12 @@ public class ToolchainHelpRequestService {
      * and persists the new request.
      *
      * @param uid   The unique identifier of the student.
-     * @param body  The {@link ToolchainDtoHelp} containing the request details.
+     * @param body  The {@link HelpRequestRecord} containing the request details.
      * @return The saved {@link ToolchainHelpRequestEntity}.
      * @throws IllegalArgumentException if the uid, level, or message is invalid.
      * @throws ToolchainExceptionHelpTooSoon if the student is still within the cooldown period.
      */
-    public ToolchainHelpRequestEntity send(String uid, ToolchainDtoHelp body) {
+    public ToolchainHelpRequestEntity send(String uid, HelpRequestRecord body) {
         if (uid == null || uid.isBlank()) {
             throw new IllegalArgumentException("Student uid is required.");
         }
@@ -111,12 +132,12 @@ public class ToolchainHelpRequestService {
     /**
      * Retrieves the most recent help requests, ordered by creation time, for the teacher's view.
      * 
-     * @return A list of {@link ToolchainDtoHelpAsk} objects.
+     * @return A list of {@link HelpRecord} objects.
      */
-    public List<ToolchainDtoHelpAsk> getRecentRequests() {
+    public List<HelpRecord> getRecentRequests() {
         Map<String, String> namesByUid = new HashMap<>();
         return repository.findTop200ByOrderByCreatedAtDesc().stream()
-                .map(request -> new ToolchainDtoHelpAsk(
+                .map(request -> new HelpRecord(
                         namesByUid.computeIfAbsent(request.getUid(), this::displayName),
                         request.getUid(),
                         ToolchainEnumLevels.fromKey(request.getLevelKey())

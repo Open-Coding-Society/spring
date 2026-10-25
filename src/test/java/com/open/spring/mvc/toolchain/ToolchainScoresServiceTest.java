@@ -20,6 +20,8 @@ import org.mockito.MockitoAnnotations;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.stats.Stats;
+import com.open.spring.mvc.toolchain.ToolchainScoresService.LevelScoreRecord;
+import com.open.spring.mvc.toolchain.ToolchainScoresService.StudentRecord;
 
 class ToolchainScoresServiceTest {
     private static final String MODULE = ToolchainScoresService.MODULE;
@@ -44,7 +46,7 @@ class ToolchainScoresServiceTest {
         when(statsRepository.findAllByUsernameAndModule("toby", MODULE))
                 .thenReturn(List.of(stats("toby", 2, 75.0, false)));
 
-        List<ToolchainDtoLevelScore> scores = service.getScores("toby");
+        List<LevelScoreRecord> scores = service.getScores("toby");
 
         assertEquals(5, scores.size());
         assertEquals("identity-forge", scores.get(0).levelKey());
@@ -58,7 +60,7 @@ class ToolchainScoresServiceTest {
     void recordProgressCreatesRowForFirstProgressOnALevel() {
         when(statsRepository.findByUsernameAndModuleAndSubmodule("toby", MODULE, 1)).thenReturn(Optional.empty());
 
-        ToolchainDtoLevelScore score = service.recordProgress("toby", ToolchainEnumLevels.WAYFINDING_WORLD, 40.0);
+        LevelScoreRecord score = service.recordProgress("toby", ToolchainEnumLevels.WAYFINDING_WORLD, 40.0);
 
         assertEquals(40.0, score.percentComplete());
         assertFalse(score.finished());
@@ -69,7 +71,7 @@ class ToolchainScoresServiceTest {
         when(statsRepository.findByUsernameAndModuleAndSubmodule("toby", MODULE, 1))
                 .thenReturn(Optional.of(stats("toby", 1, 80.0, false)));
 
-        ToolchainDtoLevelScore score = service.recordProgress("toby", ToolchainEnumLevels.WAYFINDING_WORLD, 20.0);
+        LevelScoreRecord score = service.recordProgress("toby", ToolchainEnumLevels.WAYFINDING_WORLD, 20.0);
 
         assertEquals(80.0, score.percentComplete());
     }
@@ -78,7 +80,7 @@ class ToolchainScoresServiceTest {
     void recordProgressMarksLevelFinishedAtOneHundredPercent() {
         when(statsRepository.findByUsernameAndModuleAndSubmodule("toby", MODULE, 4)).thenReturn(Optional.empty());
 
-        ToolchainDtoLevelScore score = service.recordProgress("toby", ToolchainEnumLevels.TOOLCHAIN_TRAIL, 100.0);
+        LevelScoreRecord score = service.recordProgress("toby", ToolchainEnumLevels.TOOLCHAIN_TRAIL, 100.0);
 
         assertTrue(score.finished());
     }
@@ -103,7 +105,7 @@ class ToolchainScoresServiceTest {
         when(personRepository.findByUid("amy")).thenReturn(person("Amy Adams"));
         when(personRepository.findByUid("zed")).thenReturn(null);
 
-        List<ToolchainDtoStudent> rows = service.getStudentRows();
+        List<StudentRecord> rows = service.getStudentRows();
 
         assertEquals(2, rows.size());
         assertEquals("Amy Adams", rows.get(0).name());

@@ -24,6 +24,15 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class ToolchainSetupReportService {
+    /**
+     * DTO pairing a student's browser with a local setup-report terminal.
+     *
+     * @param code the pairing code used by the terminal to submit a report
+     * @param expiresAt the code's expiration time in Unix epoch milliseconds
+     */
+    public record PairingRecord(String code, long expiresAt) {
+    }
+
     /** The duration for which a pairing code remains valid. */
     static final Duration PAIRING_CODE_LIFETIME = Duration.ofMinutes(30);
     
@@ -80,10 +89,10 @@ public class ToolchainSetupReportService {
      * expiration is extended.
      *
      * @param uid The unique identifier of the student.
-     * @return A {@link ToolchainDtoSetupPairing} containing the code and its expiration timestamp.
+     * @return A {@link PairingRecord} containing the code and its expiration timestamp.
      * @throws IllegalArgumentException if the uid is invalid.
      */
-    public ToolchainDtoSetupPairing issuePairingCode(String uid) {
+    public PairingRecord issuePairingCode(String uid) {
         requireUid(uid);
         long now = clock.millis();
         ToolchainSetupReportEntity row = repository.findById(uid).orElseGet(() -> new ToolchainSetupReportEntity(uid));
@@ -92,7 +101,7 @@ public class ToolchainSetupReportService {
         }
         row.setPairingCodeExpiresAt(now + PAIRING_CODE_LIFETIME.toMillis());
         repository.save(row);
-        return new ToolchainDtoSetupPairing(row.getPairingCode(), row.getPairingCodeExpiresAt());
+        return new PairingRecord(row.getPairingCode(), row.getPairingCodeExpiresAt());
     }
 
     /**

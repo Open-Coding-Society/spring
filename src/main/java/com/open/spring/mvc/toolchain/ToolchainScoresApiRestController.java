@@ -3,6 +3,8 @@ package com.open.spring.mvc.toolchain;
 import java.util.List;
 import java.util.Map;
 
+import com.open.spring.mvc.toolchain.ToolchainScoresService.LevelScoreRecord;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -22,6 +24,14 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/cs-pathway")
 public class ToolchainScoresApiRestController {
+    /**
+     * DTO for a progress update sent to PUT /api/cs-pathway/scores/{levelKey}.
+     *
+     * @param percentComplete the reported completion percentage from 0 through 100
+     */
+    public record ProgressRecord(Double percentComplete) {
+    }
+
     private final ToolchainScoresService scoreService;
 
     public ToolchainScoresApiRestController(ToolchainScoresService scoreService) {
@@ -34,7 +44,7 @@ public class ToolchainScoresApiRestController {
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to load scores."));
         }
-        List<ToolchainDtoLevelScore> levels = scoreService.getScores(user.getUsername());
+        List<LevelScoreRecord> levels = scoreService.getScores(user.getUsername());
         return ResponseEntity.ok(Map.of("levels", levels));
     }
 
@@ -46,7 +56,7 @@ public class ToolchainScoresApiRestController {
     public ResponseEntity<?> recordMyProgress(
             @AuthenticationPrincipal UserDetails user,
             @PathVariable String levelKey,
-            @RequestBody(required = false) ToolchainDtoProgress request) {
+            @RequestBody(required = false) ProgressRecord request) {
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to save scores."));
         }

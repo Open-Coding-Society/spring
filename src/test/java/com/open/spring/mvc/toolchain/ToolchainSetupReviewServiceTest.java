@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.open.spring.mvc.toolchain.ToolchainSetupReviewService.EvidenceRecord;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -71,7 +72,7 @@ class ToolchainSetupReviewServiceTest {
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"COMPLETE\\",\\"summary\\":\\"Everything is ready.\\",\\"missingItems\\":[],\\"warnings\\":[]}"}]}}]}
                 """;
 
-        ToolchainDtoEvidence result = reviewService().review("toby");
+        EvidenceRecord result = reviewService().review("toby");
 
         assertEquals("INCOMPLETE", result.status());
         assertTrue(result.summary().contains("setup is not complete"));
@@ -96,7 +97,7 @@ class ToolchainSetupReviewServiceTest {
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"COMPLETE\\",\\"summary\\":\\"Everything is ready.\\",\\"missingItems\\":[],\\"warnings\\":[]}"}]}}]}
                 """;
 
-        ToolchainDtoEvidence result = reviewService().review("toby");
+        EvidenceRecord result = reviewService().review("toby");
 
         assertEquals("INCOMPLETE", result.status());
         assertEquals(List.of("VS Code code command"), result.missingItems());
@@ -110,7 +111,7 @@ class ToolchainSetupReviewServiceTest {
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"REVIEW_NEEDED\\",\\"summary\\":\\"The report is ambiguous.\\",\\"missingItems\\":[\\"editor check\\"],\\"warnings\\":[\\"The output is self-reported.\\"]}"}]}}]}
                 """;
 
-        ToolchainDtoEvidence result = reviewService().review("toby");
+        EvidenceRecord result = reviewService().review("toby");
 
         assertEquals("REVIEW_NEEDED", result.status());
         assertEquals("editor check", result.missingItems().get(0));
@@ -125,7 +126,7 @@ class ToolchainSetupReviewServiceTest {
                 {"candidates":[{"content":{"parts":[{"thought":true,"text":"thinking..."},{"text":"{\\"status\\":\\"COMPLETE\\",\\"summary\\":\\"All checks pass.\\",\\"missingItems\\":[],\\"warnings\\":[]}"}]}}]}
                 """;
 
-        ToolchainDtoEvidence result = reviewService().review("toby");
+        EvidenceRecord result = reviewService().review("toby");
 
         assertEquals("COMPLETE", result.status());
         assertEquals(2, requestCount);

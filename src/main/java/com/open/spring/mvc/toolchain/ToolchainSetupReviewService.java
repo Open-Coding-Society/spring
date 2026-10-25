@@ -32,6 +32,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
  */
 @Service
 public class ToolchainSetupReviewService {
+    /**
+     * Advisory AI assessment DTO for evidence in a submitted Toolchain setup report.
+     *
+     * @param status the assessment result: COMPLETE, INCOMPLETE, or REVIEW_NEEDED
+     * @param summary a short explanation of the assessment
+     * @param missingItems checks reported as missing or failed
+     * @param warnings checks that produced warnings
+     */
+    public record EvidenceRecord(
+            String status,
+            String summary,
+            List<String> missingItems,
+            List<String> warnings) {
+    }
+
     private static final Pattern WARN_OR_FAIL_LINE = Pattern.compile("(?m)^\\[(WARN|FAIL)]\\s+(.+?)\\s*$");
     // Linux/Windows reports (scripts/linux_setup_agent.py --check) write "FAIL <id> | <label> | <fix>".
     private static final Pattern AGENT_FAIL_LINE = Pattern.compile("(?m)^FAIL\\s+[a-z0-9-]+\\s*\\|\\s*([^|]+?)\\s*(?:\\|.*)?$");
@@ -81,7 +96,7 @@ public class ToolchainSetupReviewService {
      * @throws NoSuchElementException if the student has no submitted report
      * @throws IllegalStateException if AI review is not configured or cannot be completed
      */
-    public ToolchainDtoEvidence review(String uid) {
+    public EvidenceRecord review(String uid) {
         ToolchainSetupReportEntity report = reportService.findReport(uid)
                 .orElseThrow(() -> new NoSuchElementException("This student has not submitted a setup report."));
         if (geminiApiKey == null || geminiApiKey.isBlank()) {
@@ -95,7 +110,7 @@ public class ToolchainSetupReviewService {
             if (text.isBlank()) {
                 throw new IllegalStateException("The AI returned no review.");
             }
-            ToolchainDtoEvidence review = parseReview(text);
+            EvidenceRecord review = parseReview(text);
             return mergeVerifierEvidence(enforceVerifierFailures(review, report), report);
         } catch (InterruptedException error) {
             Thread.currentThread().interrupt();
@@ -150,7 +165,7 @@ public class ToolchainSetupReviewService {
                 report.getOverall(), report.getReport());
     }
 
-    private ToolchainDtoEvidence parseReview(String text) throws JsonProcessingException {
+    private EvidenceRecord parseReview(String text) throws JsonProcessingException {
         JsonNode node;
         try {
             node = objectMapper.readTree(extractJsonObject(text));
@@ -170,7 +185,7 @@ public class ToolchainSetupReviewService {
             logger.warn("AI review answer has the wrong fields: {}", abbreviate(text));
             throw new IllegalStateException("The AI returned an invalid review format.");
         }
-        return new ToolchainDtoEvidence(status, summary, missingItems, warnings);
+        return new EvidenceRecord(status, summary, missingItems, warnings);
     }
 
     /**
@@ -200,10 +215,10 @@ public class ToolchainSetupReviewService {
                 objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
     }
 
-    private ToolchainDtoEvidence enforceVerifierFailures(
-            ToolchainDtoEvidence review, ToolchainSetupReportEntity report) {
+    private EvidenceRecord enforceVerifierFailures(
+            EvidenceRecord review, ToolchainSetupReportEntity report) {
         if (!"PASS".equals(report.getOverall()) || report.getWarned() > 0 || report.getFailed() > 0) {
-            return new ToolchainDtoEvidence(
+            return new EvidenceRecord(
                     "INCOMPLETE",
                     "Verifier reported " + report.getOverall() + " with "
                             + report.getWarned() + " warning(s) and " + report.getFailed()
@@ -214,8 +229,8 @@ public class ToolchainSetupReviewService {
         return review;
     }
 
-    private ToolchainDtoEvidence mergeVerifierEvidence(
-            ToolchainDtoEvidence review, ToolchainSetupReportEntity report) {
+    private EvidenceRecord mergeVerifierEvidence(
+            EvidenceRecord review, ToolchainSetupReportEntity report) {
         LinkedHashSet<String> missingItems = new LinkedHashSet<>(review.missingItems());
         LinkedHashSet<String> warnings = new LinkedHashSet<>(review.warnings());
         Matcher matcher = WARN_OR_FAIL_LINE.matcher(report.getReport());
@@ -230,7 +245,7 @@ public class ToolchainSetupReviewService {
         while (agentFailures.find()) {
             missingItems.add(agentFailures.group(1));
         }
-        return new ToolchainDtoEvidence(
+        return new EvidenceRecord(
                 review.status(),
                 review.summary(),
                 List.copyOf(missingItems),
