@@ -9,7 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * Repository for managing {@link ToolchainSetupReportEntity} entities.
  * Handles pairing code lookups and retrieval of reported setup reports.
  */
-public interface ToolchainJpaRepositorySetupReport extends JpaRepository<ToolchainSetupReportEntity, String> {
+public interface ToolchainSetupReportJpaRepository extends JpaRepository<ToolchainSetupReportEntity, String> {
     /** Finds a setup report associated with a specific pairing code. */
     Optional<ToolchainSetupReportEntity> findByPairingCode(String pairingCode);
 

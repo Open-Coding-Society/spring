@@ -24,10 +24,10 @@ import org.springframework.web.server.ResponseStatusException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.PairResponse;
-import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.ResultsRequest;
-import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.SessionView;
-import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.StartResponse;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.PairResponse;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.ResultsRequest;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.SessionView;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.StartResponse;
 import com.open.spring.mvc.toolchain.ToolchainStationRules.CheckResult;
 import com.open.spring.mvc.toolchain.ToolchainStationRules.Evidence;
 
@@ -55,20 +55,20 @@ public class ToolchainAgentService {
     private static final SecureRandom RANDOM = new SecureRandom();
     private static final ObjectMapper JSON = new ObjectMapper();
 
-    private final ToolchainJpaRepositoryAgentSession repository;
+    private final ToolchainAgentSessionJpaRepository repository;
     private final ToolchainStationRules stationRules;
     private final Clock clock;
     private final Duration pairingCodeLifetime;
     private final Duration agentTokenLifetime;
 
     @Autowired
-    public ToolchainAgentService(ToolchainJpaRepositoryAgentSession repository, ToolchainStationRules stationRules,
+    public ToolchainAgentService(ToolchainAgentSessionJpaRepository repository, ToolchainStationRules stationRules,
             @Value("${toolchain.pairing-code-lifetime}") Duration pairingCodeLifetime,
             @Value("${toolchain.agent-token-lifetime}") Duration agentTokenLifetime) {
         this(repository, stationRules, Clock.systemUTC(), pairingCodeLifetime, agentTokenLifetime);
     }
 
-    ToolchainAgentService(ToolchainJpaRepositoryAgentSession repository, ToolchainStationRules stationRules, Clock clock,
+    ToolchainAgentService(ToolchainAgentSessionJpaRepository repository, ToolchainStationRules stationRules, Clock clock,
             Duration pairingCodeLifetime, Duration agentTokenLifetime) {
         this.repository = repository;
         this.stationRules = stationRules;

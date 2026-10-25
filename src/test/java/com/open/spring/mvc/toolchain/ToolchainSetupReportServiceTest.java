@@ -34,7 +34,7 @@ class ToolchainSetupReportServiceTest {
             """;
 
     @Mock
-    private ToolchainJpaRepositorySetupReport repository;
+    private ToolchainSetupReportJpaRepository repository;
 
     private MutableClock clock;
     private ToolchainSetupReportService service;

@@ -24,11 +24,11 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/cs-pathway/setup-report")
-public class ToolchainApiRestControllerSetupReport {
+public class ToolchainSetupReportApiRestController {
     private final ToolchainSetupReportService reportService;
     private final ToolchainSetupReviewService reviewService;
 
-    public ToolchainApiRestControllerSetupReport(
+    public ToolchainSetupReportApiRestController(
             ToolchainSetupReportService reportService,
             ToolchainSetupReviewService reviewService) {
         this.reportService = reportService;

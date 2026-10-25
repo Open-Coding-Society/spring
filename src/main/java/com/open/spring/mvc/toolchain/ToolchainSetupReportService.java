@@ -49,7 +49,7 @@ public class ToolchainSetupReportService {
 
     private static final Logger logger = LoggerFactory.getLogger(ToolchainSetupReportService.class);
 
-    private final ToolchainJpaRepositorySetupReport repository;
+    private final ToolchainSetupReportJpaRepository repository;
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
 
@@ -59,7 +59,7 @@ public class ToolchainSetupReportService {
      * @param repository The repository for persisting setup reports.
      */
     @Autowired
-    public ToolchainSetupReportService(ToolchainJpaRepositorySetupReport repository) {
+    public ToolchainSetupReportService(ToolchainSetupReportJpaRepository repository) {
         this(repository, Clock.systemUTC());
     }
 
@@ -69,7 +69,7 @@ public class ToolchainSetupReportService {
      * @param repository The repository for persisting setup reports.
      * @param clock      The clock to use for time-based operations.
      */
-    ToolchainSetupReportService(ToolchainJpaRepositorySetupReport repository, Clock clock) {
+    ToolchainSetupReportService(ToolchainSetupReportJpaRepository repository, Clock clock) {
         this.repository = repository;
         this.clock = clock;
     }

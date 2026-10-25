@@ -19,10 +19,10 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/cs-pathway/help-requests")
-public class ToolchainApiRestControllerHelp {
+public class ToolchainHelpApiRestController {
     private final ToolchainHelpRequestService helpRequestService;
 
-    public ToolchainApiRestControllerHelp(ToolchainHelpRequestService helpRequestService) {
+    public ToolchainHelpApiRestController(ToolchainHelpRequestService helpRequestService) {
         this.helpRequestService = helpRequestService;
     }
 

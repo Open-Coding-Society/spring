@@ -8,7 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
-public interface ToolchainJpaRepositoryAgentSession extends JpaRepository<ToolchainAgentSessionEntity, String> {
+public interface ToolchainAgentSessionJpaRepository extends JpaRepository<ToolchainAgentSessionEntity, String> {
     Optional<ToolchainAgentSessionEntity> findByPairingCodeHash(String pairingCodeHash);
 
     /**

@@ -24,10 +24,10 @@ public class ToolchainScoresService {
     static final String MODULE = "cs-pathway";
     private static final double MAX_PERCENT = 100.0;
 
-    private final ToolchainJpaRepositoryStats statsRepository;
+    private final ToolchainStatsJpaRepository statsRepository;
     private final PersonJpaRepository personRepository;
 
-    public ToolchainScoresService(ToolchainJpaRepositoryStats statsRepository, PersonJpaRepository personRepository) {
+    public ToolchainScoresService(ToolchainStatsJpaRepository statsRepository, PersonJpaRepository personRepository) {
         this.statsRepository = statsRepository;
         this.personRepository = personRepository;
     }

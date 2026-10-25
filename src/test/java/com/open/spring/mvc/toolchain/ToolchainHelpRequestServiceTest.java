@@ -27,7 +27,7 @@ class ToolchainHelpRequestServiceTest {
     private static final String MESSAGE = "I need help at Git Village Hall in Toolchain Trail (Windows).";
 
     @Mock
-    private ToolchainJpaRepositoryHelpRequest repository;
+    private ToolchainHelpRequestJpaRepository repository;
     @Mock
     private PersonJpaRepository personRepository;
 

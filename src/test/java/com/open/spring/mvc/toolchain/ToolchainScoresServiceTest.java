@@ -25,7 +25,7 @@ class ToolchainScoresServiceTest {
     private static final String MODULE = ToolchainScoresService.MODULE;
 
     @Mock
-    private ToolchainJpaRepositoryStats statsRepository;
+    private ToolchainStatsJpaRepository statsRepository;
 
     @Mock
     private PersonJpaRepository personRepository;

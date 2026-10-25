@@ -34,7 +34,7 @@ public class ToolchainHelpRequestService {
 
     private static final Logger logger = LoggerFactory.getLogger(ToolchainHelpRequestService.class);
 
-    private final ToolchainJpaRepositoryHelpRequest repository;
+    private final ToolchainHelpRequestJpaRepository repository;
     private final PersonJpaRepository personRepository;
     private final Clock clock;
 
@@ -45,7 +45,7 @@ public class ToolchainHelpRequestService {
      * @param personRepository The repository for looking up student names.
      */
     @Autowired
-    public ToolchainHelpRequestService(ToolchainJpaRepositoryHelpRequest repository, PersonJpaRepository personRepository) {
+    public ToolchainHelpRequestService(ToolchainHelpRequestJpaRepository repository, PersonJpaRepository personRepository) {
         this(repository, personRepository, Clock.systemUTC());
     }
 
@@ -56,7 +56,7 @@ public class ToolchainHelpRequestService {
      * @param personRepository The repository for looking up student names.
      * @param clock The clock to use for time-based operations.
      */
-    ToolchainHelpRequestService(ToolchainJpaRepositoryHelpRequest repository, PersonJpaRepository personRepository, Clock clock) {
+    ToolchainHelpRequestService(ToolchainHelpRequestJpaRepository repository, PersonJpaRepository personRepository, Clock clock) {
         this.repository = repository;
         this.personRepository = personRepository;
         this.clock = clock;

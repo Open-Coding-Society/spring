@@ -25,11 +25,11 @@ import org.mockito.MockitoAnnotations;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.server.ResponseStatusException;
 
-import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.CheckEvidence;
-import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.PairResponse;
-import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.ResultsRequest;
-import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.SessionView;
-import com.open.spring.mvc.toolchain.ToolchainApiRestControllerAgent.StartResponse;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.CheckEvidence;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.PairResponse;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.ResultsRequest;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.SessionView;
+import com.open.spring.mvc.toolchain.ToolchainAgentApiRestController.StartResponse;
 
 class ToolchainAgentServiceTest {
     private static final Instant NOW = Instant.parse("2026-10-14T18:00:00Z");
@@ -38,7 +38,7 @@ class ToolchainAgentServiceTest {
     private static final Duration AGENT_TOKEN_LIFETIME = Duration.ofHours(3);
 
     @Mock
-    private ToolchainJpaRepositoryAgentSession repository;
+    private ToolchainAgentSessionJpaRepository repository;
 
     /** A tiny in-memory table behind the mocked repository. */
     private final Map<String, ToolchainAgentSessionEntity> rows = new HashMap<>();

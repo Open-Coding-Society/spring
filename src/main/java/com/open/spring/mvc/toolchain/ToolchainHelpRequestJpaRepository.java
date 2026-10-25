@@ -9,7 +9,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * Repository for managing {@link ToolchainHelpRequestEntity} entities.
  * Provides methods to retrieve help requests by student ID and for the teacher dashboard.
  */
-public interface ToolchainJpaRepositoryHelpRequest extends JpaRepository<ToolchainHelpRequestEntity, String> {
+public interface ToolchainHelpRequestJpaRepository extends JpaRepository<ToolchainHelpRequestEntity, String> {
     /** Retrieves the most recent help request for a specific student. */
     Optional<ToolchainHelpRequestEntity> findFirstByUidOrderByCreatedAtDesc(String uid);
 
