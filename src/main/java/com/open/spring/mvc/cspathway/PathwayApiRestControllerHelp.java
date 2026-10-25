@@ -18,10 +18,10 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/cs-pathway/help-requests")
-public class PathwayHelpApiRestControllerHelpRequest {
-    private final PathwayHelpService helpRequestService;
+public class PathwayApiRestControllerHelp {
+    private final PathwayService helpRequestService;
 
-    public PathwayHelpApiRestControllerHelpRequest(PathwayHelpService helpRequestService) {
+    public PathwayApiRestControllerHelp(PathwayService helpRequestService) {
         this.helpRequestService = helpRequestService;
     }
 
@@ -32,14 +32,14 @@ public class PathwayHelpApiRestControllerHelpRequest {
     @PostMapping
     public ResponseEntity<?> sendHelpRequest(
             @AuthenticationPrincipal UserDetails user,
-            @RequestBody(required = false) PathwayHelpDtoRecordRequest body) {
+            @RequestBody(required = false) PathwayDtoHelp body) {
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to ask your teacher for help."));
         }
         try {
-            PathwayHelpEntity saved = helpRequestService.send(user.getUsername(), body);
+            PathwayEntityHelp saved = helpRequestService.send(user.getUsername(), body);
             return ResponseEntity.ok(Map.of("sent", true, "createdAt", saved.getCreatedAt()));
-        } catch (PathwayHelpExceptionTooSoon error) {
+        } catch (PathwayExceptionTooSoon error) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .header(HttpHeaders.RETRY_AFTER, String.valueOf(error.getRetryAfterSeconds()))
                     .body(Map.of("error", error.getMessage(), "retryAfterSeconds", error.getRetryAfterSeconds()));

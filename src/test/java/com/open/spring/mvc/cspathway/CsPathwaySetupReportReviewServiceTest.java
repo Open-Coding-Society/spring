@@ -22,7 +22,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 class CsPathwaySetupReportReviewServiceTest {
-    private final CsPathwaySetupReportService reportService = mock(CsPathwaySetupReportService.class);
+    private final PathwayServicePairing reportService = mock(PathwayServicePairing.class);
     private final ObjectMapper objectMapper = new ObjectMapper();
     private HttpServer server;
     private String geminiResponse;
@@ -65,13 +65,13 @@ class CsPathwaySetupReportReviewServiceTest {
 
     @Test
     void reviewReturnsAiAssessmentAndNeverCallsAReportWithFailedChecksComplete() {
-        CsPathwaySetupReport report = report("FAIL", 14, 1, 2);
+        PathwayEntityReport report = report("FAIL", 14, 1, 2);
         when(reportService.findReport("toby")).thenReturn(Optional.of(report));
         geminiResponse = """
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"COMPLETE\\",\\"summary\\":\\"Everything is ready.\\",\\"missingItems\\":[],\\"warnings\\":[]}"}]}}]}
                 """;
 
-        CsPathwaySetupReportReview result = reviewService().review("toby");
+        PathwayDtoEvidence result = reviewService().review("toby");
 
         assertEquals("INCOMPLETE", result.status());
         assertTrue(result.summary().contains("setup is not complete"));
@@ -80,7 +80,7 @@ class CsPathwaySetupReportReviewServiceTest {
 
     @Test
     void reviewListsFailedChecksFromALinuxOrWindowsAgentReport() {
-        CsPathwaySetupReport report = report("FAIL", 11, 0, 1);
+        PathwayEntityReport report = report("FAIL", 11, 0, 1);
         report.setReport("""
                 === WINDOWS SETUP CHECK v1 ===
                 Started: 2026-10-15 09:30:00 PDT
@@ -96,7 +96,7 @@ class CsPathwaySetupReportReviewServiceTest {
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"COMPLETE\\",\\"summary\\":\\"Everything is ready.\\",\\"missingItems\\":[],\\"warnings\\":[]}"}]}}]}
                 """;
 
-        CsPathwaySetupReportReview result = reviewService().review("toby");
+        PathwayDtoEvidence result = reviewService().review("toby");
 
         assertEquals("INCOMPLETE", result.status());
         assertEquals(List.of("VS Code code command"), result.missingItems());
@@ -104,13 +104,13 @@ class CsPathwaySetupReportReviewServiceTest {
 
     @Test
     void reviewParsesMissingChecksFromAiResponseForAnOtherwisePassingReport() {
-        CsPathwaySetupReport report = report("PASS", 17, 0, 0);
+        PathwayEntityReport report = report("PASS", 17, 0, 0);
         when(reportService.findReport("toby")).thenReturn(Optional.of(report));
         geminiResponse = """
                 {"candidates":[{"content":{"parts":[{"text":"{\\"status\\":\\"REVIEW_NEEDED\\",\\"summary\\":\\"The report is ambiguous.\\",\\"missingItems\\":[\\"editor check\\"],\\"warnings\\":[\\"The output is self-reported.\\"]}"}]}}]}
                 """;
 
-        CsPathwaySetupReportReview result = reviewService().review("toby");
+        PathwayDtoEvidence result = reviewService().review("toby");
 
         assertEquals("REVIEW_NEEDED", result.status());
         assertEquals("editor check", result.missingItems().get(0));
@@ -125,7 +125,7 @@ class CsPathwaySetupReportReviewServiceTest {
                 {"candidates":[{"content":{"parts":[{"thought":true,"text":"thinking..."},{"text":"{\\"status\\":\\"COMPLETE\\",\\"summary\\":\\"All checks pass.\\",\\"missingItems\\":[],\\"warnings\\":[]}"}]}}]}
                 """;
 
-        CsPathwaySetupReportReview result = reviewService().review("toby");
+        PathwayDtoEvidence result = reviewService().review("toby");
 
         assertEquals("COMPLETE", result.status());
         assertEquals(2, requestCount);
@@ -184,13 +184,13 @@ class CsPathwaySetupReportReviewServiceTest {
         verify(reportService).findReport("toby");
     }
 
-    private CsPathwaySetupReportReviewService reviewService() {
+    private PathwayServiceAI reviewService() {
         String apiUrl = "http://127.0.0.1:" + server.getAddress().getPort() + "/generate";
-        return new CsPathwaySetupReportReviewService(reportService, objectMapper, "test-key", apiUrl);
+        return new PathwayServiceAI(reportService, objectMapper, "test-key", apiUrl);
     }
 
-    private CsPathwaySetupReport report(String overall, int passed, int warned, int failed) {
-        CsPathwaySetupReport report = new CsPathwaySetupReport("toby");
+    private PathwayEntityReport report(String overall, int passed, int warned, int failed) {
+        PathwayEntityReport report = new PathwayEntityReport("toby");
         report.setOverall(overall);
         report.setPassed(passed);
         report.setWarned(warned);

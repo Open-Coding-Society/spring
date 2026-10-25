@@ -13,9 +13,9 @@ import lombok.RequiredArgsConstructor;
 /** Creates the setup-report table for databases managed with ddl-auto=none. */
 @Component
 @RequiredArgsConstructor
-public class CsPathwaySetupReportMigration {
+public class PathwayEntityRunnerReport {
 
-    private static final Logger logger = LoggerFactory.getLogger(CsPathwaySetupReportMigration.class);
+    private static final Logger logger = LoggerFactory.getLogger(PathwayEntityRunnerReport.class);
 
     private final JdbcTemplate jdbcTemplate;
 

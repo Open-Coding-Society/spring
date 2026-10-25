@@ -24,7 +24,7 @@ import org.springframework.stereotype.Service;
  * of the uploaded reports and persists the results.</p>
  */
 @Service
-public class CsPathwaySetupReportService {
+public class PathwayServicePairing {
     /** The duration for which a pairing code remains valid. */
     static final Duration PAIRING_CODE_LIFETIME = Duration.ofMinutes(30);
     
@@ -48,9 +48,9 @@ public class CsPathwaySetupReportService {
     private static final Pattern SUMMARY_LINE =
             Pattern.compile("(?m)^Summary:\\s*(\\d{1,4}) passed, (\\d{1,4}) warned, (\\d{1,4}) failed\\s*$");
 
-    private static final Logger logger = LoggerFactory.getLogger(CsPathwaySetupReportService.class);
+    private static final Logger logger = LoggerFactory.getLogger(PathwayServicePairing.class);
 
-    private final CsPathwaySetupReportRepository repository;
+    private final PathwayJpsRepositorySetup repository;
     private final Clock clock;
     private final SecureRandom random = new SecureRandom();
 
@@ -60,7 +60,7 @@ public class CsPathwaySetupReportService {
      * @param repository The repository for persisting setup reports.
      */
     @Autowired
-    public CsPathwaySetupReportService(CsPathwaySetupReportRepository repository) {
+    public PathwayServicePairing(PathwayJpsRepositorySetup repository) {
         this(repository, Clock.systemUTC());
     }
 
@@ -70,7 +70,7 @@ public class CsPathwaySetupReportService {
      * @param repository The repository for persisting setup reports.
      * @param clock      The clock to use for time-based operations.
      */
-    CsPathwaySetupReportService(CsPathwaySetupReportRepository repository, Clock clock) {
+    PathwayServicePairing(PathwayJpsRepositorySetup repository, Clock clock) {
         this.repository = repository;
         this.clock = clock;
     }
@@ -81,19 +81,19 @@ public class CsPathwaySetupReportService {
      * expiration is extended.
      *
      * @param uid The unique identifier of the student.
-     * @return A {@link CsPathwayPairingCode} containing the code and its expiration timestamp.
+     * @return A {@link PathwayDtoPairing} containing the code and its expiration timestamp.
      * @throws IllegalArgumentException if the uid is invalid.
      */
-    public CsPathwayPairingCode issuePairingCode(String uid) {
+    public PathwayDtoPairing issuePairingCode(String uid) {
         requireUid(uid);
         long now = clock.millis();
-        CsPathwaySetupReport row = repository.findById(uid).orElseGet(() -> new CsPathwaySetupReport(uid));
+        PathwayEntityReport row = repository.findById(uid).orElseGet(() -> new PathwayEntityReport(uid));
         if (!isPairingCodeActive(row, now)) {
             row.setPairingCode(newUnusedPairingCode());
         }
         row.setPairingCodeExpiresAt(now + PAIRING_CODE_LIFETIME.toMillis());
         repository.save(row);
-        return new CsPathwayPairingCode(row.getPairingCode(), row.getPairingCodeExpiresAt());
+        return new PathwayDtoPairing(row.getPairingCode(), row.getPairingCodeExpiresAt());
     }
 
     /**
@@ -122,7 +122,7 @@ public class CsPathwaySetupReportService {
         }
 
         long now = clock.millis();
-        CsPathwaySetupReport row = repository.findByPairingCode(pairingCode).orElse(null);
+        PathwayEntityReport row = repository.findByPairingCode(pairingCode).orElse(null);
         if (row == null || !isPairingCodeActive(row, now)) {
             return false;
         }
@@ -143,24 +143,24 @@ public class CsPathwaySetupReportService {
      * @param uid The unique identifier of the student.
      * @return An {@link Optional} containing the report if it exists and contains data.
      */
-    public Optional<CsPathwaySetupReport> findReport(String uid) {
+    public Optional<PathwayEntityReport> findReport(String uid) {
         requireUid(uid);
-        return repository.findById(uid).filter(CsPathwaySetupReport::hasReport);
+        return repository.findById(uid).filter(PathwayEntityReport::hasReport);
     }
 
     /** 
      * Retrieves all reports that have been successfully uploaded, keyed by student UID.
      * Useful for the teacher's overview page.
      * 
-     * @return A map of UIDs to their respective {@link CsPathwaySetupReport}.
+     * @return A map of UIDs to their respective {@link PathwayEntityReport}.
      */
-    public Map<String, CsPathwaySetupReport> getReportsByUid() {
-        List<CsPathwaySetupReport> reports = repository.findAllByReportedAtIsNotNull();
-        return reports.stream().collect(Collectors.toMap(CsPathwaySetupReport::getUid, Function.identity()));
+    public Map<String, PathwayEntityReport> getReportsByUid() {
+        List<PathwayEntityReport> reports = repository.findAllByReportedAtIsNotNull();
+        return reports.stream().collect(Collectors.toMap(PathwayEntityReport::getUid, Function.identity()));
     }
 
     /** Checks if the pairing code in the given row is non-null and not expired. */
-    private static boolean isPairingCodeActive(CsPathwaySetupReport row, long now) {
+    private static boolean isPairingCodeActive(PathwayEntityReport row, long now) {
         return row.getPairingCode() != null
                 && row.getPairingCodeExpiresAt() != null
                 && row.getPairingCodeExpiresAt() > now;

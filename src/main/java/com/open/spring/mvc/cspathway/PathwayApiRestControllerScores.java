@@ -21,10 +21,10 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequestMapping("/api/cs-pathway")
-public class PathwayHelpApiRestControllerScore {
-    private final CsPathwayScoreService scoreService;
+public class PathwayApiRestControllerScores {
+    private final PathwayServiceScores scoreService;
 
-    public PathwayHelpApiRestControllerScore(CsPathwayScoreService scoreService) {
+    public PathwayApiRestControllerScores(PathwayServiceScores scoreService) {
         this.scoreService = scoreService;
     }
 
@@ -34,7 +34,7 @@ public class PathwayHelpApiRestControllerScore {
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to load scores."));
         }
-        List<CsPathwayLevelScore> levels = scoreService.getScores(user.getUsername());
+        List<PathwayDtoLevelScore> levels = scoreService.getScores(user.getUsername());
         return ResponseEntity.ok(Map.of("levels", levels));
     }
 
@@ -46,11 +46,11 @@ public class PathwayHelpApiRestControllerScore {
     public ResponseEntity<?> recordMyProgress(
             @AuthenticationPrincipal UserDetails user,
             @PathVariable String levelKey,
-            @RequestBody(required = false) CsPathwayProgressRequest request) {
+            @RequestBody(required = false) PathwayDtoProgress request) {
         if (user == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Sign in to save scores."));
         }
-        CsPathwayLevel level = CsPathwayLevel.fromKey(levelKey).orElse(null);
+        PathwayEnumLevels level = PathwayEnumLevels.fromKey(levelKey).orElse(null);
         if (level == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Unknown level: " + levelKey));
         }

@@ -8,13 +8,13 @@ import java.util.List;
  *
  * @param uid             The unique identifier of the student.
  * @param name            The display name of the student.
- * @param levels          A list of {@link CsPathwayLevelScore} objects, representing 
+ * @param levels          A list of {@link PathwayDtoLevelScore} objects, representing 
  *                        the student's score for each individual level.
  * @param averagePercent  The calculated average percentage score across all levels.
  */
-public record CsPathwayStudentRow(
+public record PathwayDtoStudent(
         String uid,
         String name,
-        List<CsPathwayLevelScore> levels,
+        List<PathwayDtoLevelScore> levels,
         double averagePercent) {
 }

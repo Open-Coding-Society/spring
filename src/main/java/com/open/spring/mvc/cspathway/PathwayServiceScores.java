@@ -20,20 +20,20 @@ import com.open.spring.mvc.stats.Stats;
  * grades = percent complete (0-100), finished = reached 100%.
  */
 @Service
-public class CsPathwayScoreService {
+public class PathwayServiceScores {
     static final String MODULE = "cs-pathway";
     private static final double MAX_PERCENT = 100.0;
 
-    private final CsPathwayStatsRepository statsRepository;
+    private final PathwayJpaRepositoryStats statsRepository;
     private final PersonJpaRepository personRepository;
 
-    public CsPathwayScoreService(CsPathwayStatsRepository statsRepository, PersonJpaRepository personRepository) {
+    public PathwayServiceScores(PathwayJpaRepositoryStats statsRepository, PersonJpaRepository personRepository) {
         this.statsRepository = statsRepository;
         this.personRepository = personRepository;
     }
 
     /** All five levels for one student; levels never played come back as 0%. */
-    public List<CsPathwayLevelScore> getScores(String uid) {
+    public List<PathwayDtoLevelScore> getScores(String uid) {
         requireUid(uid);
         return toLevelScores(statsRepository.findAllByUsernameAndModule(uid, MODULE));
     }
@@ -44,7 +44,7 @@ public class CsPathwayScoreService {
      * storage, so a new device would otherwise report a lower percent and wipe
      * earlier work.
      */
-    public CsPathwayLevelScore recordProgress(String uid, CsPathwayLevel level, Double percentComplete) {
+    public PathwayDtoLevelScore recordProgress(String uid, PathwayEnumLevels level, Double percentComplete) {
         requireUid(uid);
         if (level == null) {
             throw new IllegalArgumentException("Level is required.");
@@ -64,18 +64,18 @@ public class CsPathwayScoreService {
     }
 
     /** Every student with any CS Pathway progress, sorted by name, for the teacher view. */
-    public List<CsPathwayStudentRow> getStudentRows() {
+    public List<PathwayDtoStudent> getStudentRows() {
         Map<String, List<Stats>> byStudent = statsRepository.findAllByModule(MODULE).stream()
                 .collect(Collectors.groupingBy(Stats::getUsername));
 
-        List<CsPathwayStudentRow> rows = new ArrayList<>();
+        List<PathwayDtoStudent> rows = new ArrayList<>();
         for (Map.Entry<String, List<Stats>> student : byStudent.entrySet()) {
             String uid = student.getKey();
-            List<CsPathwayLevelScore> levels = toLevelScores(student.getValue());
-            double average = levels.stream().mapToDouble(CsPathwayLevelScore::percentComplete).average().orElse(0);
-            rows.add(new CsPathwayStudentRow(uid, displayName(uid), levels, average));
+            List<PathwayDtoLevelScore> levels = toLevelScores(student.getValue());
+            double average = levels.stream().mapToDouble(PathwayDtoLevelScore::percentComplete).average().orElse(0);
+            rows.add(new PathwayDtoStudent(uid, displayName(uid), levels, average));
         }
-        rows.sort(Comparator.comparing(CsPathwayStudentRow::name, String.CASE_INSENSITIVE_ORDER));
+        rows.sort(Comparator.comparing(PathwayDtoStudent::name, String.CASE_INSENSITIVE_ORDER));
         return rows;
     }
 
@@ -87,7 +87,7 @@ public class CsPathwayScoreService {
         return person.getName();
     }
 
-    private static Stats newStats(String uid, CsPathwayLevel level) {
+    private static Stats newStats(String uid, PathwayEnumLevels level) {
         Stats stats = new Stats();
         stats.setUsername(uid);
         stats.setModule(MODULE);
@@ -97,20 +97,20 @@ public class CsPathwayScoreService {
     }
 
     /** One score per level in play order, filling unplayed levels with 0%. */
-    private static List<CsPathwayLevelScore> toLevelScores(List<Stats> studentStats) {
+    private static List<PathwayDtoLevelScore> toLevelScores(List<Stats> studentStats) {
         Map<Integer, Stats> bySubmodule = studentStats.stream()
                 .collect(Collectors.toMap(Stats::getSubmodule, Function.identity(), (first, second) -> first));
-        List<CsPathwayLevelScore> scores = new ArrayList<>();
-        for (CsPathwayLevel level : CsPathwayLevel.values()) {
+        List<PathwayDtoLevelScore> scores = new ArrayList<>();
+        for (PathwayEnumLevels level : PathwayEnumLevels.values()) {
             scores.add(toScore(level, bySubmodule.get(level.getSubmodule())));
         }
         return scores;
     }
 
-    private static CsPathwayLevelScore toScore(CsPathwayLevel level, Stats stats) {
+    private static PathwayDtoLevelScore toScore(PathwayEnumLevels level, Stats stats) {
         double percent = stats == null || stats.getGrades() == null ? 0.0 : stats.getGrades();
         boolean finished = stats != null && Boolean.TRUE.equals(stats.getFinished());
-        return new CsPathwayLevelScore(level.getKey(), level.getDisplayName(), percent, finished);
+        return new PathwayDtoLevelScore(level.getKey(), level.getDisplayName(), percent, finished);
     }
 
     private static void requireUid(String uid) {

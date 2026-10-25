@@ -11,7 +11,7 @@ import com.open.spring.mvc.stats.Stats;
  * Repository for performing CS Pathway specific queries against the shared {@link Stats} table.
  * This repository is isolated to prevent modifications to the core stats module.
  */
-public interface CsPathwayStatsRepository extends JpaRepository<Stats, Long> {
+public interface PathwayJpaRepositoryStats extends JpaRepository<Stats, Long> {
     /** Retrieves all stats entries for a specific module. */
     List<Stats> findAllByModule(String module);
 

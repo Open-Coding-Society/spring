@@ -34,24 +34,24 @@ class CsPathwaySetupReportServiceTest {
             """;
 
     @Mock
-    private CsPathwaySetupReportRepository repository;
+    private PathwayJpsRepositorySetup repository;
 
     private MutableClock clock;
-    private CsPathwaySetupReportService service;
+    private PathwayServicePairing service;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         clock = new MutableClock(Instant.parse("2026-10-06T16:00:00Z"));
-        service = new CsPathwaySetupReportService(repository, clock);
-        when(repository.save(any(CsPathwaySetupReport.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        service = new PathwayServicePairing(repository, clock);
+        when(repository.save(any(PathwayEntityReport.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
     @Test
     void issuePairingCodeGivesANewStudentAnEightCharacterCodeThatExpiresInThirtyMinutes() {
         when(repository.findById("toby")).thenReturn(Optional.empty());
 
-        CsPathwayPairingCode pairingCode = service.issuePairingCode("toby");
+        PathwayDtoPairing pairingCode = service.issuePairingCode("toby");
 
         assertTrue(pairingCode.code().matches("[A-HJKMNP-Z2-9]{8}"));
         assertEquals(clock.millis() + Duration.ofMinutes(30).toMillis(), pairingCode.expiresAt());
@@ -59,11 +59,11 @@ class CsPathwaySetupReportServiceTest {
 
     @Test
     void issuePairingCodeKeepsAnUnexpiredCodeSoACopiedCommandStillWorks() {
-        CsPathwaySetupReport row = pairedRow("toby", "ABCD2345");
+        PathwayEntityReport row = pairedRow("toby", "ABCD2345");
         when(repository.findById("toby")).thenReturn(Optional.of(row));
         clock.advance(Duration.ofMinutes(10));
 
-        CsPathwayPairingCode pairingCode = service.issuePairingCode("toby");
+        PathwayDtoPairing pairingCode = service.issuePairingCode("toby");
 
         assertEquals("ABCD2345", pairingCode.code());
         assertEquals(clock.millis() + Duration.ofMinutes(30).toMillis(), pairingCode.expiresAt());
@@ -71,7 +71,7 @@ class CsPathwaySetupReportServiceTest {
 
     @Test
     void issuePairingCodeReplacesAnExpiredCode() {
-        CsPathwaySetupReport row = pairedRow("toby", "ABCD2345");
+        PathwayEntityReport row = pairedRow("toby", "ABCD2345");
         when(repository.findById("toby")).thenReturn(Optional.of(row));
         clock.advance(Duration.ofMinutes(31));
 
@@ -80,7 +80,7 @@ class CsPathwaySetupReportServiceTest {
 
     @Test
     void saveReportStoresTheReportAndItsCountsForTheStudentWhoOwnsTheCode() {
-        CsPathwaySetupReport row = pairedRow("toby", "ABCD2345");
+        PathwayEntityReport row = pairedRow("toby", "ABCD2345");
         when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));
 
         assertTrue(service.saveReport("ABCD2345", REPORT));
@@ -96,7 +96,7 @@ class CsPathwaySetupReportServiceTest {
 
     @Test
     void saveReportStoresALinuxOrWindowsAgentReport() {
-        CsPathwaySetupReport row = pairedRow("toby", "ABCD2345");
+        PathwayEntityReport row = pairedRow("toby", "ABCD2345");
         when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));
         String linuxReport = """
                 === LINUX SETUP CHECK v1 ===
@@ -119,7 +119,7 @@ class CsPathwaySetupReportServiceTest {
 
     @Test
     void saveReportAcceptsASecondRunWithTheSameCode() {
-        CsPathwaySetupReport row = pairedRow("toby", "ABCD2345");
+        PathwayEntityReport row = pairedRow("toby", "ABCD2345");
         when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));
         service.saveReport("ABCD2345", REPORT);
 
@@ -132,7 +132,7 @@ class CsPathwaySetupReportServiceTest {
 
     @Test
     void saveReportRefusesUnknownExpiredAndMalformedCodes() {
-        CsPathwaySetupReport row = pairedRow("toby", "ABCD2345");
+        PathwayEntityReport row = pairedRow("toby", "ABCD2345");
         when(repository.findByPairingCode("ABCD2345")).thenReturn(Optional.of(row));
         when(repository.findByPairingCode("ZZZZ9999")).thenReturn(Optional.empty());
 
@@ -142,17 +142,17 @@ class CsPathwaySetupReportServiceTest {
         clock.advance(Duration.ofMinutes(31));
         assertFalse(service.saveReport("ABCD2345", REPORT));
 
-        verify(repository, never()).save(any(CsPathwaySetupReport.class));
+        verify(repository, never()).save(any(PathwayEntityReport.class));
     }
 
     @Test
     void saveReportRejectsTextThatIsNotVerifierOutput() {
-        String tooLong = REPORT + "x".repeat(CsPathwaySetupReportService.MAX_REPORT_LENGTH);
+        String tooLong = REPORT + "x".repeat(PathwayServicePairing.MAX_REPORT_LENGTH);
 
         assertThrows(IllegalArgumentException.class, () -> service.saveReport("ABCD2345", ""));
         assertThrows(IllegalArgumentException.class, () -> service.saveReport("ABCD2345", "[PASS] git installed"));
         assertThrows(IllegalArgumentException.class, () -> service.saveReport("ABCD2345", tooLong));
-        verify(repository, never()).save(any(CsPathwaySetupReport.class));
+        verify(repository, never()).save(any(PathwayEntityReport.class));
     }
 
     @Test
@@ -162,10 +162,10 @@ class CsPathwaySetupReportServiceTest {
         assertTrue(service.findReport("toby").isEmpty());
     }
 
-    private CsPathwaySetupReport pairedRow(String uid, String code) {
-        CsPathwaySetupReport row = new CsPathwaySetupReport(uid);
+    private PathwayEntityReport pairedRow(String uid, String code) {
+        PathwayEntityReport row = new PathwayEntityReport(uid);
         row.setPairingCode(code);
-        row.setPairingCodeExpiresAt(clock.millis() + CsPathwaySetupReportService.PAIRING_CODE_LIFETIME.toMillis());
+        row.setPairingCodeExpiresAt(clock.millis() + PathwayServicePairing.PAIRING_CODE_LIFETIME.toMillis());
         return row;
     }
 

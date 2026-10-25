@@ -11,13 +11,13 @@ import org.springframework.web.bind.annotation.RequestMapping;
  */
 @Controller
 @RequestMapping("/mvc/cs-pathway")
-public class CsPathwayViewController {
-    private final CsPathwayScoreService scoreService;
-    private final CsPathwaySetupReportService setupReportService;
-    private final PathwayHelpService helpRequestService;
+public class PathwayMvcController {
+    private final PathwayServiceScores scoreService;
+    private final PathwayServicePairing setupReportService;
+    private final PathwayService helpRequestService;
 
-    public CsPathwayViewController(CsPathwayScoreService scoreService, CsPathwaySetupReportService setupReportService,
-            PathwayHelpService helpRequestService) {
+    public PathwayMvcController(PathwayServiceScores scoreService, PathwayServicePairing setupReportService,
+            PathwayService helpRequestService) {
         this.scoreService = scoreService;
         this.setupReportService = setupReportService;
         this.helpRequestService = helpRequestService;
@@ -25,7 +25,7 @@ public class CsPathwayViewController {
 
     @GetMapping("/read")
     public String read(Model model) {
-        model.addAttribute("levels", CsPathwayLevel.values());
+        model.addAttribute("levels", PathwayEnumLevels.values());
         model.addAttribute("rows", scoreService.getStudentRows());
         model.addAttribute("setupReports", setupReportService.getReportsByUid());
         model.addAttribute("helpRequests", helpRequestService.getRecentRequests());

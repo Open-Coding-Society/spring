@@ -23,7 +23,7 @@ import com.open.spring.mvc.person.PersonJpaRepository;
  * for the teacher's dashboard.</p>
  */
 @Service
-public class PathwayHelpService {
+public class PathwayService {
     /** The minimum time required between consecutive help requests from the same student. */
     static final Duration COOLDOWN = Duration.ofMinutes(1);
     
@@ -33,9 +33,9 @@ public class PathwayHelpService {
     /** The maximum allowed length for a station identifier. */
     static final int MAX_STATION_LENGTH = 120;
 
-    private static final Logger logger = LoggerFactory.getLogger(PathwayHelpService.class);
+    private static final Logger logger = LoggerFactory.getLogger(PathwayService.class);
 
-    private final PathwayHelpJpaRepository repository;
+    private final PathwayJpaRepositoryHelp repository;
     private final PersonJpaRepository personRepository;
     private final Clock clock;
 
@@ -46,7 +46,7 @@ public class PathwayHelpService {
      * @param personRepository The repository for looking up student names.
      */
     @Autowired
-    public PathwayHelpService(PathwayHelpJpaRepository repository, PersonJpaRepository personRepository) {
+    public PathwayService(PathwayJpaRepositoryHelp repository, PersonJpaRepository personRepository) {
         this(repository, personRepository, Clock.systemUTC());
     }
 
@@ -57,7 +57,7 @@ public class PathwayHelpService {
      * @param personRepository The repository for looking up student names.
      * @param clock The clock to use for time-based operations.
      */
-    PathwayHelpService(PathwayHelpJpaRepository repository, PersonJpaRepository personRepository, Clock clock) {
+    PathwayService(PathwayJpaRepositoryHelp repository, PersonJpaRepository personRepository, Clock clock) {
         this.repository = repository;
         this.personRepository = personRepository;
         this.clock = clock;
@@ -70,19 +70,19 @@ public class PathwayHelpService {
      * and persists the new request.</p>
      *
      * @param uid   The unique identifier of the student.
-     * @param body  The {@link PathwayHelpDtoRecordRequest} containing the request details.
-     * @return The saved {@link PathwayHelpEntity}.
+     * @param body  The {@link PathwayDtoHelp} containing the request details.
+     * @return The saved {@link PathwayEntityHelp}.
      * @throws IllegalArgumentException if the uid, level, or message is invalid.
-     * @throws PathwayHelpExceptionTooSoon if the student is still within the cooldown period.
+     * @throws PathwayExceptionTooSoon if the student is still within the cooldown period.
      */
-    public PathwayHelpEntity send(String uid, PathwayHelpDtoRecordRequest body) {
+    public PathwayEntityHelp send(String uid, PathwayDtoHelp body) {
         if (uid == null || uid.isBlank()) {
             throw new IllegalArgumentException("Student uid is required.");
         }
         if (body == null) {
             throw new IllegalArgumentException("The help request is empty.");
         }
-        CsPathwayLevel level = CsPathwayLevel.fromKey(body.levelKey())
+        PathwayEnumLevels level = PathwayEnumLevels.fromKey(body.levelKey())
                 .orElseThrow(() -> new IllegalArgumentException("Unknown level: " + body.levelKey()));
         String message = requireText(body.message(), "message", MAX_MESSAGE_LENGTH);
         String station = body.station() == null || body.station().isBlank()
@@ -93,18 +93,18 @@ public class PathwayHelpService {
         repository.findFirstByUidOrderByCreatedAtDesc(uid).ifPresent(previous -> {
             long waitMillis = previous.getCreatedAt() + COOLDOWN.toMillis() - now;
             if (waitMillis > 0) {
-                throw new PathwayHelpExceptionTooSoon(Math.max(1, Duration.ofMillis(waitMillis).toSeconds()));
+                throw new PathwayExceptionTooSoon(Math.max(1, Duration.ofMillis(waitMillis).toSeconds()));
             }
         });
 
-        PathwayHelpEntity request = new PathwayHelpEntity();
+        PathwayEntityHelp request = new PathwayEntityHelp();
         request.setId(UUID.randomUUID().toString());
         request.setUid(uid);
         request.setLevelKey(level.getKey());
         request.setStation(station);
         request.setMessage(message);
         request.setCreatedAt(now);
-        PathwayHelpEntity saved = repository.save(request);
+        PathwayEntityHelp saved = repository.save(request);
         logger.info("CS Pathway help request from {} at {} / {}", uid, level.getKey(), station);
         return saved;
     }
@@ -112,16 +112,16 @@ public class PathwayHelpService {
     /**
      * Retrieves the most recent help requests, ordered by creation time, for the teacher's view.
      * 
-     * @return A list of {@link PathwayHelpDtoRecordViewModel} objects.
+     * @return A list of {@link PathwayDtoHelpAsk} objects.
      */
-    public List<PathwayHelpDtoRecordViewModel> getRecentRequests() {
+    public List<PathwayDtoHelpAsk> getRecentRequests() {
         Map<String, String> namesByUid = new HashMap<>();
         return repository.findTop200ByOrderByCreatedAtDesc().stream()
-                .map(request -> new PathwayHelpDtoRecordViewModel(
+                .map(request -> new PathwayDtoHelpAsk(
                         namesByUid.computeIfAbsent(request.getUid(), this::displayName),
                         request.getUid(),
-                        CsPathwayLevel.fromKey(request.getLevelKey())
-                                .map(CsPathwayLevel::getDisplayName)
+                        PathwayEnumLevels.fromKey(request.getLevelKey())
+                                .map(PathwayEnumLevels::getDisplayName)
                                 .orElse(request.getLevelKey()),
                         request.getStation(),
                         request.getMessage(),

@@ -11,7 +11,7 @@ package com.open.spring.mvc.cspathway;
  * @param expiresAt The Unix epoch timestamp (in milliseconds) indicating when 
  *                  this pairing code will no longer be valid.
  */
-public record CsPathwayPairingCode(
+public record PathwayDtoPairing(
     String code, 
     long expiresAt) {
 }

@@ -6,13 +6,13 @@ import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /**
- * Repository for managing {@link PathwayHelpEntity} entities.
+ * Repository for managing {@link PathwayEntityHelp} entities.
  * Provides methods to retrieve help requests by student ID and for the teacher dashboard.
  */
-public interface PathwayHelpJpaRepository extends JpaRepository<PathwayHelpEntity, String> {
+public interface PathwayJpaRepositoryHelp extends JpaRepository<PathwayEntityHelp, String> {
     /** Retrieves the most recent help request for a specific student. */
-    Optional<PathwayHelpEntity> findFirstByUidOrderByCreatedAtDesc(String uid);
+    Optional<PathwayEntityHelp> findFirstByUidOrderByCreatedAtDesc(String uid);
 
     /** Retrieves the 200 most recent help requests, ordered by creation time. */
-    List<PathwayHelpEntity> findTop200ByOrderByCreatedAtDesc();
+    List<PathwayEntityHelp> findTop200ByOrderByCreatedAtDesc();
 }

@@ -27,26 +27,26 @@ class PathwayHelpRequestServiceTest {
     private static final String MESSAGE = "I need help at Git Village Hall in Toolchain Trail (Windows).";
 
     @Mock
-    private PathwayHelpJpaRepository repository;
+    private PathwayJpaRepositoryHelp repository;
     @Mock
     private PersonJpaRepository personRepository;
 
     private MutableClock clock;
-    private PathwayHelpService service;
+    private PathwayService service;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         clock = new MutableClock(Instant.parse("2026-10-21T16:00:00Z"));
-        service = new PathwayHelpService(repository, personRepository, clock);
-        when(repository.save(any(PathwayHelpEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        service = new PathwayService(repository, personRepository, clock);
+        when(repository.save(any(PathwayEntityHelp.class))).thenAnswer(invocation -> invocation.getArgument(0));
         when(repository.findFirstByUidOrderByCreatedAtDesc("toby")).thenReturn(Optional.empty());
     }
 
     @Test
     void sendSavesTheStudentsRequestWithTheTimeItWasSent() {
-        PathwayHelpEntity saved = service.send("toby",
-                new PathwayHelpDtoRecordRequest("toolchain-trail", "  Git Village Hall ", " " + MESSAGE + " "));
+        PathwayEntityHelp saved = service.send("toby",
+                new PathwayDtoHelp("toolchain-trail", "  Git Village Hall ", " " + MESSAGE + " "));
 
         assertEquals("toby", saved.getUid());
         assertEquals("toolchain-trail", saved.getLevelKey());
@@ -57,7 +57,7 @@ class PathwayHelpRequestServiceTest {
 
     @Test
     void sendAllowsALevelWithoutAStation() {
-        PathwayHelpEntity saved = service.send("toby", new PathwayHelpDtoRecordRequest("toolchain-trail", " ", MESSAGE));
+        PathwayEntityHelp saved = service.send("toby", new PathwayDtoHelp("toolchain-trail", " ", MESSAGE));
 
         assertNull(saved.getStation());
     }
@@ -65,32 +65,32 @@ class PathwayHelpRequestServiceTest {
     @Test
     void sendRejectsAnUnknownLevelAnEmptyMessageAndAnOverlongMessage() {
         assertThrows(IllegalArgumentException.class,
-                () -> service.send("toby", new PathwayHelpDtoRecordRequest("not-a-level", null, MESSAGE)));
+                () -> service.send("toby", new PathwayDtoHelp("not-a-level", null, MESSAGE)));
         assertThrows(IllegalArgumentException.class,
-                () -> service.send("toby", new PathwayHelpDtoRecordRequest("toolchain-trail", null, "   ")));
+                () -> service.send("toby", new PathwayDtoHelp("toolchain-trail", null, "   ")));
         assertThrows(IllegalArgumentException.class,
-                () -> service.send("toby", new PathwayHelpDtoRecordRequest("toolchain-trail", null, "x".repeat(501))));
+                () -> service.send("toby", new PathwayDtoHelp("toolchain-trail", null, "x".repeat(501))));
         verify(repository, never()).save(any());
     }
 
     @Test
     void sendRefusesASecondRequestWithinAMinuteSoDoubleClicksDoNotFloodTheTeacher() {
-        PathwayHelpEntity previous = new PathwayHelpEntity();
+        PathwayEntityHelp previous = new PathwayEntityHelp();
         previous.setCreatedAt(clock.millis());
         when(repository.findFirstByUidOrderByCreatedAtDesc("toby")).thenReturn(Optional.of(previous));
         clock.advance(Duration.ofSeconds(20));
 
-        PathwayHelpExceptionTooSoon error = assertThrows(PathwayHelpExceptionTooSoon.class,
-                () -> service.send("toby", new PathwayHelpDtoRecordRequest("toolchain-trail", null, MESSAGE)));
+        PathwayExceptionTooSoon error = assertThrows(PathwayExceptionTooSoon.class,
+                () -> service.send("toby", new PathwayDtoHelp("toolchain-trail", null, MESSAGE)));
         assertEquals(40, error.getRetryAfterSeconds());
 
         clock.advance(Duration.ofSeconds(40));
-        assertEquals(MESSAGE, service.send("toby", new PathwayHelpDtoRecordRequest("toolchain-trail", null, MESSAGE)).getMessage());
+        assertEquals(MESSAGE, service.send("toby", new PathwayDtoHelp("toolchain-trail", null, MESSAGE)).getMessage());
     }
 
     @Test
     void getRecentRequestsShowsTheStudentsNameAndTheLevelsDisplayName() {
-        PathwayHelpEntity request = new PathwayHelpEntity();
+        PathwayEntityHelp request = new PathwayEntityHelp();
         request.setUid("toby");
         request.setLevelKey("toolchain-trail");
         request.setStation("Git Village Hall");
@@ -101,7 +101,7 @@ class PathwayHelpRequestServiceTest {
         toby.setName("Toby Leung");
         when(personRepository.findByUid("toby")).thenReturn(toby);
 
-        PathwayHelpDtoRecordViewModel row = service.getRecentRequests().get(0);
+        PathwayDtoHelpAsk row = service.getRecentRequests().get(0);
 
         assertEquals("Toby Leung", row.name());
         assertEquals("Toolchain Trail", row.levelName());

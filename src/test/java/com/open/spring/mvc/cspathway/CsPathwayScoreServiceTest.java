@@ -22,20 +22,20 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.stats.Stats;
 
 class CsPathwayScoreServiceTest {
-    private static final String MODULE = CsPathwayScoreService.MODULE;
+    private static final String MODULE = PathwayServiceScores.MODULE;
 
     @Mock
-    private CsPathwayStatsRepository statsRepository;
+    private PathwayJpaRepositoryStats statsRepository;
 
     @Mock
     private PersonJpaRepository personRepository;
 
-    private CsPathwayScoreService service;
+    private PathwayServiceScores service;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        service = new CsPathwayScoreService(statsRepository, personRepository);
+        service = new PathwayServiceScores(statsRepository, personRepository);
         when(statsRepository.save(any(Stats.class))).thenAnswer(invocation -> invocation.getArgument(0));
     }
 
@@ -44,7 +44,7 @@ class CsPathwayScoreServiceTest {
         when(statsRepository.findAllByUsernameAndModule("toby", MODULE))
                 .thenReturn(List.of(stats("toby", 2, 75.0, false)));
 
-        List<CsPathwayLevelScore> scores = service.getScores("toby");
+        List<PathwayDtoLevelScore> scores = service.getScores("toby");
 
         assertEquals(5, scores.size());
         assertEquals("identity-forge", scores.get(0).levelKey());
@@ -58,7 +58,7 @@ class CsPathwayScoreServiceTest {
     void recordProgressCreatesRowForFirstProgressOnALevel() {
         when(statsRepository.findByUsernameAndModuleAndSubmodule("toby", MODULE, 1)).thenReturn(Optional.empty());
 
-        CsPathwayLevelScore score = service.recordProgress("toby", CsPathwayLevel.WAYFINDING_WORLD, 40.0);
+        PathwayDtoLevelScore score = service.recordProgress("toby", PathwayEnumLevels.WAYFINDING_WORLD, 40.0);
 
         assertEquals(40.0, score.percentComplete());
         assertFalse(score.finished());
@@ -69,7 +69,7 @@ class CsPathwayScoreServiceTest {
         when(statsRepository.findByUsernameAndModuleAndSubmodule("toby", MODULE, 1))
                 .thenReturn(Optional.of(stats("toby", 1, 80.0, false)));
 
-        CsPathwayLevelScore score = service.recordProgress("toby", CsPathwayLevel.WAYFINDING_WORLD, 20.0);
+        PathwayDtoLevelScore score = service.recordProgress("toby", PathwayEnumLevels.WAYFINDING_WORLD, 20.0);
 
         assertEquals(80.0, score.percentComplete());
     }
@@ -78,7 +78,7 @@ class CsPathwayScoreServiceTest {
     void recordProgressMarksLevelFinishedAtOneHundredPercent() {
         when(statsRepository.findByUsernameAndModuleAndSubmodule("toby", MODULE, 4)).thenReturn(Optional.empty());
 
-        CsPathwayLevelScore score = service.recordProgress("toby", CsPathwayLevel.TOOLCHAIN_TRAIL, 100.0);
+        PathwayDtoLevelScore score = service.recordProgress("toby", PathwayEnumLevels.TOOLCHAIN_TRAIL, 100.0);
 
         assertTrue(score.finished());
     }
@@ -86,11 +86,11 @@ class CsPathwayScoreServiceTest {
     @Test
     void recordProgressRejectsPercentOutsideZeroToOneHundred() {
         assertThrows(IllegalArgumentException.class,
-                () -> service.recordProgress("toby", CsPathwayLevel.MISSION_TOOLS, 101.0));
+                () -> service.recordProgress("toby", PathwayEnumLevels.MISSION_TOOLS, 101.0));
         assertThrows(IllegalArgumentException.class,
-                () -> service.recordProgress("toby", CsPathwayLevel.MISSION_TOOLS, -1.0));
+                () -> service.recordProgress("toby", PathwayEnumLevels.MISSION_TOOLS, -1.0));
         assertThrows(IllegalArgumentException.class,
-                () -> service.recordProgress("toby", CsPathwayLevel.MISSION_TOOLS, null));
+                () -> service.recordProgress("toby", PathwayEnumLevels.MISSION_TOOLS, null));
         verify(statsRepository, never()).save(any(Stats.class));
     }
 
@@ -103,7 +103,7 @@ class CsPathwayScoreServiceTest {
         when(personRepository.findByUid("amy")).thenReturn(person("Amy Adams"));
         when(personRepository.findByUid("zed")).thenReturn(null);
 
-        List<CsPathwayStudentRow> rows = service.getStudentRows();
+        List<PathwayDtoStudent> rows = service.getStudentRows();
 
         assertEquals(2, rows.size());
         assertEquals("Amy Adams", rows.get(0).name());

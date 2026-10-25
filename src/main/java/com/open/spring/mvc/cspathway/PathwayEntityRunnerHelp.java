@@ -13,9 +13,9 @@ import lombok.RequiredArgsConstructor;
 /** Creates the help-request table for databases managed with ddl-auto=none. */
 @Component
 @RequiredArgsConstructor
-public class PathwayHelpRunner {
+public class PathwayEntityRunnerHelp {
 
-    private static final Logger logger = LoggerFactory.getLogger(PathwayHelpRunner.class);
+    private static final Logger logger = LoggerFactory.getLogger(PathwayEntityRunnerHelp.class);
 
     private final JdbcTemplate jdbcTemplate;
 

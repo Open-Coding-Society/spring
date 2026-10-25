@@ -13,7 +13,7 @@ import java.util.Date;
  * @param message    The content of the student's help message.
  * @param createdAt  The timestamp when the request was created.
  */
-public record PathwayHelpDtoRecordViewModel(
+public record PathwayDtoHelpAsk(
         String name,
         String uid,
         String levelName,

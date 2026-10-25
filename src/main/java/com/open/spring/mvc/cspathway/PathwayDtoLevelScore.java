@@ -9,7 +9,7 @@ package com.open.spring.mvc.cspathway;
  * @param percentComplete The score achieved, represented as a percentage (0.0 to 100.0).
  * @param finished       Indicates whether the student has completed this level.
  */
-public record CsPathwayLevelScore(
+public record PathwayDtoLevelScore(
         String levelKey,
         String levelName,
         double percentComplete,
