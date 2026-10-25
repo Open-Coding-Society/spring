@@ -1,10 +1,18 @@
-### CS Pathway API Tests
+### Toolchain Feature - Compatibility API Tests
 
-This file contains sample requests for testing the CS Pathway API endpoints. 
-To use this, ensure you have the **REST Client** extension installed in VS Code.
+This file tests the existing `/api/cs-pathway/...` routes used by Toolchain feature
+functions such as setup reports, help requests, and scores. The Java code for
+these functions now lives under `mvc.toolchain`, but the public route prefix is
+kept for compatibility with existing clients.
+
+The interactive station-agent API uses `/api/toolchain/...` and is tested in
+`toolchain.http`. Install the **REST Client** extension in VS Code to run requests.
 
 **Note on Authentication:**
-The application uses cookie-based JWT authentication. For these requests to work, you must first authenticate via the `/authenticate` endpoint to receive the `jwt_java_spring` cookie.
+The application uses cookie-based JWT authentication. Run the `/authenticate`
+request first to receive the `jwt_java_spring` cookie before running requests
+that require a signed-in account. Select the `local` or `deployed` REST Client
+environment before sending requests.
 
 ### 1. Authentication
 
@@ -18,16 +26,14 @@ Accept: application/json
   "password": "{{adminPassword}}"
 }
 
-### 2. Pairing Flow
+### 2. Setup Report Pairing
 
-# Generate a pairing code for a student
+# Generate a setup-report pairing code for a student
 # @name getPairingCode
 POST {{baseUrl}}/api/cs-pathway/setup-report/pairing-code
 Content-Type: application/json
 
-{
-  "uid": "{{uid}}"
-}
+{}
 
 ### 3. Help Requests
 

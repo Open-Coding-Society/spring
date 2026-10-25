@@ -33,15 +33,18 @@ The site is build on Springboot.  The project is primarly used to store and retr
 
 ## Architecture guides
 
-- [CS Pathway and Toolchain Trail architecture guide](docs/cs-pathway-architecture.md) — explains the unified Java package, report-upload versus interactive agent flows, API routes, persistence, and their naming.
+- [Toolchain architecture guide](docs/toolchain-architecture.md) — explains Setup, Scoring, Help, the interactive local agent, report-upload versus station-check flows, API routes, and persistence.
 
 The Java implementation for CS Pathway is now together in `src/main/java/com/open/spring/mvc/toolchain/`. The interactive Toolchain Trail agent/session flow is the current integrated station-check implementation. A separate text-report upload and AI-review flow is still present in the code; confirm whether students still use it before removing it. Existing `/api/cs-pathway` and `/api/toolchain` routes are preserved even though the Java package and class names are now unified.
 
-## Testing CS Pathway REST endpoints
+## Testing Toolchain REST endpoints
 
-Use [api/cspathway.http](api/cspathway.http) with the **REST Client** VS Code extension to exercise the sample authentication, setup-report pairing, help-request, and score endpoints. Select the `local` or `deployed` REST Client environment and run the authentication request before requests that require a signed-in student. The file does not currently exercise the interactive `/api/toolchain` agent-session routes; see the architecture guide for how that separate flow works.
+Use the **REST Client** VS Code extension and select the `local` or `deployed` environment:
 
-The requests use variables including `baseUrl`, `uid`, `adminUid`, and `adminPassword`. Configure their values under `rest-client.environmentVariables` in `.vscode/settings.json`. The `.vscode/` directory is Git-ignored; keep passwords and other secret values there locally, never in the `.http` file or a commit. Test only systems and accounts you are authorized to use.
+- [api/cspathway.http](api/cspathway.http) tests the existing `/api/cs-pathway/...` compatibility routes for setup reports, help requests, and scores.
+- [api/toolchain.http](api/toolchain.http) tests the interactive `/api/toolchain/...` agent/session flow.
+
+Authenticate first for requests that require the signed-in game/student. Configure `baseUrl`, `adminUid`, and `adminPassword` under `rest-client.environmentVariables` in `.vscode/settings.json`. The `.vscode/` directory is Git-ignored; keep passwords and other secrets there locally, never in an `.http` file or commit. The Toolchain agent example submits deliberately failing sample evidence unless replaced with actual local results. Treat returned pairing codes and agent tokens as credentials. Test only systems and accounts you are authorized to use.
 
 ## Getting started
 

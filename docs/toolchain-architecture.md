@@ -1,18 +1,32 @@
-# CS Pathway and Toolchain Trail Architecture Guide
+# Toolchain Architecture Guide
 
 ## Overview
 
-CS Pathway is a feature area in the Spring application. It supports three product concerns:
+Toolchain is the Java feature area for the CS Pathway learning experience. It supports three product concerns:
 
 - Setup: collect and review evidence that a student's local development tools are ready.
 - Scoring: record and display progress through the five learning levels.
 - Help: let a student send a request to a teacher. This is a teacher help-request queue, not OCS chat. OCS chat is a possible future direction and is not implemented by this package.
 
-The Java implementation is consolidated under one package:
+The Java implementation is consolidated under `src/main/java/com/open/spring/mvc/toolchain/`. The teacher dashboard template remains `src/main/resources/templates/cs-pathway/read.html`. Java package names and public URL prefixes do not need to match: the package is `mvc.toolchain`, while existing `/api/cs-pathway/...` and `/mvc/cs-pathway/...` routes remain unchanged for client compatibility.
 
-- `src/main/java/com/open/spring/mvc/toolchain/` contains score tracking, student-to-teacher help requests, setup reports, and the interactive Toolchain Trail station-checking session and local-agent API.
+## Toolchain agent
 
-The teacher dashboard template remains `src/main/resources/templates/cs-pathway/read.html`. The Java package and public URL names do not need to match: the package is now `mvc.toolchain`, while the existing `/api/cs-pathway/...` and `/mvc/cs-pathway/...` routes remain unchanged for client compatibility. The controller and service code remain authoritative if behavior changes.
+The Toolchain agent is a local program that runs on the student's computer. The browser cannot run local commands by itself, so the student starts or installs the agent separately. This Spring repository contains the REST API, session storage, and server-side evaluation rules, not the local agent implementation. The Java station rules refer to `scripts/toolchain_agent.py` in the Pages repository as the client that collects evidence.
+
+The agent's job is to perform predefined checks for the station currently selected in the game. The student pairs it with the game using a one-time code; the agent should ask the student to enter the code when prompted. It reports check identifiers, process exit codes, and output as evidence. The server—not the browser or agent—decides pass/fail using `ToolchainStationRules`. The agent should not accept arbitrary shell commands from the server.
+
+The interactive session flow is:
+
+1. The signed-in game starts a session with `POST /api/toolchain/sessions`, sending a `stationId`. Spring ties the session to the authenticated student's UID and returns a session UUID and one-time pairing code.
+2. The student enters the pairing code into the local agent when prompted.
+3. The agent exchanges the code once at `POST /api/toolchain/pair`. Spring consumes the code and returns a scoped bearer token. The token is valid only for that session.
+4. The game asks for checks as the student reaches stations using `POST /api/toolchain/sessions/{sessionId}/check`. The agent polls `GET /api/toolchain/sessions/{sessionId}/next` using its bearer token, runs its predefined checks for the requested station, and submits evidence to `POST /api/toolchain/sessions/{sessionId}/results`.
+5. Spring validates the session token and that results refer to the current station, evaluates the evidence against the server's station rules, and saves the status. The signed-in game reads the result from `GET /api/toolchain/sessions/{sessionId}`.
+
+One pairing covers the trail; the game can request another station without pairing again. Pairing-code and agent-token lifetimes are configurable in `application.properties`. Only hashes of the pairing code and agent token are stored. The raw code and token are credentials and should not be logged or shared.
+
+The agent does not write directly to the database. All communication goes through Spring REST endpoints. For request examples, see [`api/toolchain.http`](../api/toolchain.http). The earlier macOS zsh shell helper is separate: it only observes selected commands in an interactive shell and does not pair with the game or report station results.
 
 ## Two setup/report mechanisms
 
@@ -25,7 +39,7 @@ There are two setup mechanisms in the code. They should not be confused just bec
 
 Neither client writes directly to the SQL table. The game and local agent call Spring REST endpoints; the services validate identity, pairing credentials, station, and evidence, and then Spring repositories persist the resulting state. The student UID associates a session with its owner, but the interactive agent protocol also uses a session UUID, current `stationId`, a one-time pairing code, and a scoped agent token. Score `levelKey` values are a separate concept from Toolchain `stationId` values.
 
-The interactive Toolchain Trail flow is the request/response approach for live station checks and is the current integrated agent/session implementation. The setup-report flow is a separate report-submission and review implementation that remains in the code. Source code confirms both are implemented; it does not establish whether the report flow is still used by students. Confirm usage with the game owner before deprecating it. Do not silently conflate their records or routes.
+The interactive Toolchain Trail flow is the request/response approach for live station checks. The setup-report flow is a separate report-submission and review implementation that remains in the code. Source code confirms both are implemented; it does not establish whether the report flow is still used by students. Confirm usage with the game owner before deprecating it. Do not silently conflate their records or routes.
 
 ## Application layers
 
@@ -65,9 +79,14 @@ For the Toolchain Trail, one pairing covers the whole trail; the game changes th
 
 ### Testing the REST API in VS Code
 
-Use [`api/cspathway.http`](../api/cspathway.http) with the VS Code REST Client extension to send sample requests for authentication, pairing-code creation, help requests, and score read/update operations. Select the `local` or `deployed` REST Client environment before running a request. Run the authentication request first when testing endpoints that require a signed-in student; REST Client can reuse the returned authentication cookie for subsequent requests.
+Use the VS Code REST Client extension with the two HTTP request files:
 
-The file references variables such as `baseUrl`, `uid`, `adminUid`, and `adminPassword`. Define the values under `rest-client.environmentVariables` in `.vscode/settings.json`, which is excluded from Git. Keep credentials and other secret values in local settings only; do not copy them into the `.http` file, documentation, or commits. Use only an environment and account you are authorized to test.
+- [`api/cspathway.http`](../api/cspathway.http) tests the existing `/api/cs-pathway/...` compatibility routes for setup reports, help requests, and scores. Those routes remain unchanged even though the Java types now live in `mvc.toolchain`.
+- [`api/toolchain.http`](../api/toolchain.http) tests the interactive `/api/toolchain/...` agent/session API, including start, pair, poll, result submission, and session status.
+
+Select the `local` or `deployed` REST Client environment before sending requests. Authenticate first for endpoints requiring the signed-in game/student. The agent HTTP file deliberately submits failing sample evidence by default; only replace it with actual local check output and exit codes when testing a successful station check.
+
+The files reference variables such as `baseUrl`, `adminUid`, and `adminPassword`. Define their values under `rest-client.environmentVariables` in `.vscode/settings.json`, which is excluded from Git. Keep credentials and other secret values in local settings only; do not copy them into the `.http` files, documentation, or commits. Treat pairing codes and agent tokens returned in responses as credentials. Use only an environment and account you are authorized to test.
 
 ### Setup report flow
 

@@ -49,7 +49,7 @@ Single Spring Boot app, root package `com.open.spring`, three layers:
 ### CS Pathway
 
 - CS Pathway and Toolchain Trail Java types are consolidated in `src/main/java/com/open/spring/mvc/toolchain/`. This package includes scores, help, setup reports, and interactive station-agent sessions. The older report-upload flow and live station-agent flow have different lifecycles and distinct persistence, even though their code is now together. Neither local client writes directly to SQL.
-- Use [docs/cs-pathway-architecture.md](docs/cs-pathway-architecture.md) as the guide for the unified package, routes, persistence, security, and naming. It is linked from the README so developers and coding agents can discover it.
+- Use [docs/toolchain-architecture.md](docs/toolchain-architecture.md) as the guide for the unified package, local agent flow, routes, persistence, security, and naming. It is linked from the README so developers and coding agents can discover it.
 - Keep JavaDoc in each Java type concise and readable inline as plain prose. Add method JavaDoc for public behavior or constraints that are not self-evident; avoid HTML and Markdown in source comments. Keep the architecture guide current when behavior changes.
 - DTO records are API or view transport shapes; JPA entities map persisted rows; `JpaRepository` interfaces provide persistence operations; services own business rules and integration; REST controllers handle HTTP contracts; `ToolchainMvcController` supplies the Thymeleaf administrative view. Do not describe all pathway endpoints as full CRUD: they expose specific use cases. Keep existing `/api/cs-pathway` and `/api/toolchain` contracts stable unless coordinating an explicit client migration.
 
