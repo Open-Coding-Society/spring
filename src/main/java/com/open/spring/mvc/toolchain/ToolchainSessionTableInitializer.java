@@ -13,9 +13,9 @@ import lombok.RequiredArgsConstructor;
 /** Initializes the Toolchain Trail session table for databases managed with ddl-auto=none. */
 @Component
 @RequiredArgsConstructor
-public class ToolchainAgentSessionTableInitializer {
+public class ToolchainSessionTableInitializer {
 
-    private static final Logger logger = LoggerFactory.getLogger(ToolchainAgentSessionTableInitializer.class);
+    private static final Logger logger = LoggerFactory.getLogger(ToolchainSessionTableInitializer.class);
 
     private final JdbcTemplate jdbcTemplate;
 

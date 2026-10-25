@@ -46,14 +46,14 @@ flowchart TD
         Gate["User approval and agent check gate"]
     end
     subgraph ApiLayer["Toolchain REST API"]
-        Api["ToolchainAgentApiRestController"]
+        Api["ToolchainSessionApiRestController"]
         Pair["PairResponse DTO"]
         View["StationView DTO"]
     end
     subgraph ServerSide["Toolchain-specific server workflow"]
-        Service["ToolchainAgentService"]
+        Service["ToolchainSessionService"]
         Rules["ToolchainStationRules"]
-        Repo["ToolchainAgentSessionJpaRepository"]
+        Repo["ToolchainSessionJpaRepository"]
         Session[("toolchain_session")]
     end
 
@@ -101,7 +101,7 @@ There are two setup mechanisms in the code. They should not be confused just bec
 | Mechanism | Java package and API | Purpose and persisted state |
 | --- | --- | --- |
 | Setup report | `mvc.toolchain`; `/api/cs-pathway/setup-report/...` | A terminal submits a plain-text verifier report. `ToolchainReportEntity` stores the latest report keyed by student UID in `cs_pathway_setup_report`. An optional AI review summarizes the submitted evidence. |
-| Interactive Toolchain Trail | `mvc.toolchain`; `/api/toolchain/...` | The game and a local agent exchange station-check requests and results. `ToolchainAgentSessionEntity` stores a UUID session linked to a student UID and the current station in `toolchain_session`. Spring evaluates the submitted evidence against station rules. |
+| Interactive Toolchain Trail | `mvc.toolchain`; `/api/toolchain/...` | The game and a local agent exchange station-check requests and results. `ToolchainSessionEntity` stores a UUID session linked to a student UID and the current station in `toolchain_session`. Spring evaluates the submitted evidence against station rules. |
 
 Neither client writes directly to the SQL table. The game and local agent call Spring REST endpoints; the services validate identity, pairing credentials, station, and evidence, and then Spring repositories persist the resulting state. The student UID associates a session with its owner, but the interactive agent protocol also uses a session UUID, current `stationId`, a one-time pairing code, and a scoped agent token. Score `levelKey` values are a separate concept from Toolchain `stationId` values.
 
@@ -113,11 +113,11 @@ The package follows the Spring MVC and persistence pattern used by the rest of t
 
 - REST controllers expose JSON or plain-text HTTP operations. They translate HTTP input and authentication into service calls and translate results or errors into HTTP responses. The routes are use-case endpoints; they do not provide full CRUD for every resource.
 - DTOs are Java records used to exchange request and response data. Keep API-specific request/response records inside their API controller, as in the agent API, and service-owned result records inside the service that produces them. Use short contextual names and a DTO comment explaining their purpose. Other callers and tests import the nested record from its owner. Jackson maps JSON properties to record components and back. Records are transport shapes, not database tables.
-- JPA entities are Java objects mapped to database rows. `ToolchainReportEntity`, `ToolchainHelpEntity`, and `ToolchainAgentSessionEntity` are feature-owned entities. Scores reuse the shared `Stats` entity.
+- JPA entities are Java objects mapped to database rows. `ToolchainReportEntity`, `ToolchainHelpEntity`, and `ToolchainSessionEntity` are feature-owned entities. Scores reuse the shared `Stats` entity.
 - `JpaRepository` interfaces provide persistence operations and derived queries. They are the Java persistence interface, not a separate SQL database or a hand-written SQL layer.
 - Services contain business rules and coordinate repositories or external systems. `ToolchainReviewService` calls Gemini; the other services manage pairing reports, scores, help requests, agent sessions, and station rules.
 - `ToolchainMvcController` serves the Thymeleaf teacher/admin page at `/mvc/cs-pathway/read`. It supplies dashboard data to `templates/cs-pathway/read.html`; this is a server-rendered UI route, not a REST endpoint.
-- `ToolchainAgentApiRestController`, `ToolchainAgentService`, `StationView`, `ToolchainStationRules`, and `ToolchainAgentSessionEntity` implement the agent session lifecycle and station evidence evaluation.
+- `ToolchainSessionApiRestController`, `ToolchainSessionService`, `StationView`, `ToolchainStationRules`, and `ToolchainSessionEntity` implement the agent session lifecycle and station evidence evaluation.
 
 ## Current behavior
 
@@ -179,12 +179,12 @@ The persisted record is keyed by student UID in `cs_pathway_setup_report`. It st
 
 ## Persistence and security
 
-- `cs_pathway_setup_report`, `cs_pathway_help_request`, and `toolchain_session` are initialized by `ToolchainReportTableInitializer`, `ToolchainHelpTableInitializer`, and `ToolchainAgentSessionTableInitializer`. These `ApplicationRunner` components are needed because Hibernate uses `ddl-auto=none`. Keep their DDL and corresponding entity mappings aligned for both SQLite and MySQL.
+- `cs_pathway_setup_report`, `cs_pathway_help_request`, and `toolchain_session` are initialized by `ToolchainReportTableInitializer`, `ToolchainHelpTableInitializer`, and `ToolchainSessionTableInitializer`. These `ApplicationRunner` components are needed because Hibernate uses `ddl-auto=none`. Keep their DDL and corresponding entity mappings aligned for both SQLite and MySQL.
 - Score data is stored in the shared `Stats` table. Pathway queries are isolated in `ToolchainJpaRepositoryStats`; do not create a second score table without a deliberate data migration.
 - Interactive station sessions are stored in `toolchain_session`; this is separate from score rows and setup-report rows because it has its own pairing, token-expiry, station-request, and result lifecycle. `ToolchainStationRules` is the server-side allow-list and evaluator; a client must not determine its own pass/fail result.
 - The server evaluates submitted check evidence but never runs commands on a student's machine. The external local agent must map station requests to predefined checks and require both explicit student approval and its own safety confirmation before executing any local command. Pairing alone must not authorize arbitrary command execution.
 - The score and help endpoints use the authenticated student principal. The pairing-code issue route and AI review route have explicit role rules. The text report upload is public at the HTTP layer and relies on a valid, unexpired pairing code in the service. The MVC dashboard is restricted to teachers and administrators. See `SecurityConfig` and `MvcSecurityConfig` for the actual access rules.
-- Toolchain pair, poll, and result routes are public at the Spring Security matcher layer because the local agent has no browser JWT cookie; `ToolchainAgentService` requires a valid one-time pairing code or the session's scoped, unexpired bearer token. The game session routes require the signed-in owner.
+- Toolchain pair, poll, and result routes are public at the Spring Security matcher layer because the local agent has no browser JWT cookie; `ToolchainSessionService` requires a valid one-time pairing code or the session's scoped, unexpired bearer token. The game session routes require the signed-in owner.
 - Treat pairing codes and agent tokens as credentials: keep them random, short-lived, validated on every use, and out of logs. Avoid logging raw verifier reports or command output, which may contain local machine details.
 
 ## Package organization and naming

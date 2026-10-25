@@ -33,10 +33,10 @@ import jakarta.validation.constraints.NotBlank;
  */
 @RestController
 @RequestMapping("/api/toolchain")
-public class ToolchainAgentApiRestController {
-    private final ToolchainAgentService service;
+public class ToolchainSessionApiRestController {
+    private final ToolchainSessionService service;
 
-    public ToolchainAgentApiRestController(ToolchainAgentService service) {
+    public ToolchainSessionApiRestController(ToolchainSessionService service) {
         this.service = service;
     }
 

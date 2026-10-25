@@ -8,8 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
-public interface ToolchainAgentSessionJpaRepository extends JpaRepository<ToolchainAgentSessionEntity, String> {
-    Optional<ToolchainAgentSessionEntity> findByPairingCodeHash(String pairingCodeHash);
+public interface ToolchainSessionJpaRepository extends JpaRepository<ToolchainSessionEntity, String> {
+    Optional<ToolchainSessionEntity> findByPairingCodeHash(String pairingCodeHash);
 
     /**
      * Marks a pairing code used, but only if it is unused and unexpired.
@@ -20,7 +20,7 @@ public interface ToolchainAgentSessionJpaRepository extends JpaRepository<Toolch
      */
     @Transactional
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("UPDATE ToolchainAgentSessionEntity s SET s.pairingUsedAt = :now"
+    @Query("UPDATE ToolchainSessionEntity s SET s.pairingUsedAt = :now"
             + " WHERE s.pairingCodeHash = :hash AND s.pairingUsedAt IS NULL AND s.pairingExpiresAt > :now")
     int consumePairingCode(@Param("hash") String pairingCodeHash, @Param("now") long now);
 }
