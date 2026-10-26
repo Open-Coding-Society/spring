@@ -1,6 +1,5 @@
 package com.open.spring.mvc.S3uploads;
 
-import java.net.URI;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -9,7 +8,6 @@ import java.util.stream.Collectors;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import io.github.cdimascio.dotenv.Dotenv;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
@@ -58,22 +56,10 @@ public class S3FileHandler implements FileHandler {
 
         AwsBasicCredentials credentials = AwsBasicCredentials.create(accessKey.trim(), secretKey.trim());
 
-        var builder = S3Client.builder()
+        this.s3Client = S3Client.builder()
                 .region(Region.of(region.trim()))
-                .credentialsProvider(StaticCredentialsProvider.create(credentials));
-
-        String endpoint = Dotenv.configure().ignoreIfMissing().load().get("AWS_S3_ENDPOINT");
-
-        if (endpoint != null && !endpoint.isBlank()) {
-            builder.endpointOverride(URI.create(endpoint));
-            builder.serviceConfiguration(
-                    software.amazon.awssdk.services.s3.S3Configuration.builder()
-                            .pathStyleAccessEnabled(true)
-                            .build()
-            );
-        }
-
-        this.s3Client = builder.build();
+                .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .build();
     }
 
     @Override
