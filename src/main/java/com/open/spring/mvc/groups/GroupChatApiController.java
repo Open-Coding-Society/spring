@@ -260,7 +260,11 @@ public class GroupChatApiController {
         }
 
         try {
-            realtimeService.publishFile(groupId, null, request.getFilename(), request.getBase64Data());
+            // Resolved from the session, never taken from the request body: who shared a
+            // file is attribution, and a client should not be able to claim someone else
+            // did it. Null for an unauthenticated caller, which reads as "unknown".
+            realtimeService.publishFile(groupId, resolveCurrentDisplayName(),
+                    request.getFilename(), request.getBase64Data());
             Map<String, String> response = new HashMap<>();
             response.put("message", "File uploaded successfully");
             response.put("filename", request.getFilename());

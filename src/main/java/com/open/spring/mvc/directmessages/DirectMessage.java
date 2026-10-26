@@ -44,6 +44,16 @@ public class DirectMessage {
     @Column(length = 2000)
     private String body;
 
+    /**
+     * An optional image, stored as a data URL on the message itself.
+     *
+     * TEXT, not the varchar(2000) `body` uses: even a downscaled image is far larger
+     * than that, and the page caps it at a 1280px edge before sending. Null for a
+     * text-only message, which is every message sent before this column existed.
+     */
+    @Column(columnDefinition = "text")
+    private String image;
+
     private Instant sentAt;
 
     /** Soft-delete: the row (and sentAt) are kept so history still shows a tombstone in order. */
@@ -53,9 +63,14 @@ public class DirectMessage {
     private boolean edited;
 
     public DirectMessage(DirectMessageConversation conversation, Person sender, String body) {
+        this(conversation, sender, body, null);
+    }
+
+    public DirectMessage(DirectMessageConversation conversation, Person sender, String body, String image) {
         this.conversation = conversation;
         this.sender = sender;
         this.body = body;
+        this.image = image;
         this.sentAt = Instant.now();
     }
 }

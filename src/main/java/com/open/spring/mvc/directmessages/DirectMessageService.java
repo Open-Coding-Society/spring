@@ -97,8 +97,22 @@ public class DirectMessageService {
 
     @Transactional
     public DirectMessageEvent postMessage(DirectMessageConversation conversation, Person sender, String body) {
-        validateMessageBody(body);
-        DirectMessage message = messageRepository.save(new DirectMessage(conversation, sender, body.trim()));
+        return postMessage(conversation, sender, body, null);
+    }
+
+    /** {@code image} is an optional data URL; a message may be an image with no text. */
+    @Transactional
+    public DirectMessageEvent postMessage(DirectMessageConversation conversation, Person sender,
+            String body, String image) {
+        String text = body == null ? "" : body.trim();
+        // Only a text-only message has to have text in it.
+        if (image == null || image.isBlank()) {
+            validateMessageBody(body);
+        } else if (text.length() > MAX_BODY_LENGTH) {
+            throw new IllegalArgumentException("body is too long");
+        }
+        DirectMessage message = messageRepository.save(
+                new DirectMessage(conversation, sender, text, image));
 
         DirectMessageEvent event = DirectMessageEvent.builder()
                 .id(message.getId())
@@ -107,7 +121,8 @@ public class DirectMessageService {
                 .senderUid(sender.getUid())
                 .senderName(sender.getName())
                 .senderPfp(sender.getPfp())
-                .body(body)
+                .body(text)
+                .image(image)
                 .sentAt(message.getSentAt().toString())
                 .build();
 

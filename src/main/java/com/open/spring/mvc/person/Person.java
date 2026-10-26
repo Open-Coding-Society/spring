@@ -48,6 +48,7 @@ import lombok.Data;
 import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 import lombok.NonNull;
+import lombok.ToString;
 
 /**
  * Person is a POJO, Plain Old Java Object.
@@ -184,9 +185,24 @@ public class Person extends Submitter implements Comparable<Person> {
 
     //////////////////////////////////////////////////////////////////////////////////
     /// Relationships
+    ///
+    /// Every association below is excluded from equals, hashCode and toString.
+    ///
+    /// @Data generates all three from the fields, and each of these entities points
+    /// back at Person, so including them makes the generated methods mutually
+    /// recursive: Person.hashCode -> Bank.hashCode -> Person.hashCode -> ... until the
+    /// stack dies. Person's constructor assigns `banks` eagerly, so this was not an
+    /// edge case -- hashing any Person threw StackOverflowError, which took down every
+    /// HashSet<Person> operation, including adding members to a group.
+    ///
+    /// Associations do not belong in an entity's identity anyway: they are mutable,
+    /// lazily loaded, and hashing one forces the load and breaks the HashSet contract
+    /// as soon as the collection changes.
 
     @OneToMany(mappedBy = "student", cascade = CascadeType.ALL, orphanRemoval = true)
     @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private List<SynergyGrade> grades;
 
     /**
@@ -206,23 +222,33 @@ public class Person extends Submitter implements Comparable<Person> {
 
     @OneToOne(mappedBy = "person", cascade = CascadeType.ALL)
     @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private Tinkle timeEntries;
 
     @OneToOne(cascade = CascadeType.ALL, mappedBy = "person")
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private Bank banks;
 
     @OneToOne(cascade = CascadeType.ALL, mappedBy = "person")
     @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private userStocksTable user_stocks;
 
     @ManyToMany(mappedBy = "groupMembers")
     @JsonBackReference
     @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private List<Groups> groups = new ArrayList<>();
 
     @OneToOne(mappedBy = "owner", cascade = CascadeType.ALL)
     @PrimaryKeyJoinColumn
     @JsonIgnore
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
     private TrainCompany company;
 
     //////////////////////////////////////////////////////////////////////////////////
