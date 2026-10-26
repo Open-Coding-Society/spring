@@ -5,6 +5,51 @@ window.Grading = (function () {
       { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
   }
 
+  // Display text for each GradingOutcome.
+  const GRADING_OUTCOME_TEXT = {
+    MANUAL_GRADE_APPLIED: 'Grade saved. It replaces the AI grade.',
+    MANUAL_OVERRIDE_CLEARED: 'Instructor grade removed; the AI grade applies again.',
+    NO_MANUAL_OVERRIDE: 'There is no instructor grade to remove.',
+    AI_GRADE_APPLIED: 'AI graded the submission.',
+    MANUAL_OVERRIDE_KEPT: 'AI grade saved for reference; the instructor grade still applies.',
+    REVISION_CREATED: 'Saved as a new revision.',
+    CONTENT_UNCHANGED: 'Saved.',
+    STALE_REVISION: 'The student changed this submission since it was loaded. Reload and review the new version.',
+    INVALID_GRADE: "Enter a grade from 0 to the assignment's points.",
+    NOT_PERMITTED: 'You do not have permission to do this.',
+    AI_NOT_GRADEABLE: "The AI can't grade this submission.",
+    AI_FAILED: 'The AI grader is unavailable right now; try again later.',
+    SUBMISSION_NOT_FOUND: 'This submission no longer exists.',
+    ASSIGNMENT_NOT_FOUND: 'This assignment no longer exists.',
+    ASSIGNMENT_CLOSED: 'This assignment is closed, so its grades are final. Changes go through a teacher review.',
+    ASSIGNMENT_FINALIZED: 'Assignment closed. Grades are final and copied to the gradebook.',
+    REVIEW_REQUIRES_CLOSE: 'Reviews are for closed assignments. Before close, grade or re-grade directly.',
+    REVIEW_OPENED: 'Review opened.',
+    REVIEW_ALREADY_OPEN: 'This submission already has an open review.',
+    EVIDENCE_RECORDED: 'Evidence saved.',
+    REVIEW_NOT_OPEN: 'This review is already decided.',
+    REASON_REQUIRED: 'Choose a reason for the review.',
+    DECISION_REQUIRED: 'Choose a decision.',
+    RATIONALE_REQUIRED: 'Write a rationale for the decision.',
+    REVIEW_NO_CHANGE: 'Decision recorded. The grade is unchanged.',
+    GRADE_CORRECTED: 'Grade corrected and copied to the gradebook.',
+    REVIEW_NOT_FOUND: 'This review no longer exists.',
+  };
+
+  // Labels for teacher reviews (GradeReview on the server).
+  const REVIEW_REASONS = {
+    REGRADE_REQUEST: 'Re-grade request',
+    SIMILARITY_CHECK: 'Similarity / copying check',
+    PETITION: 'Petition or grade reconsideration',
+  };
+  const REVIEW_DECISIONS = { NO_CHANGE: 'No change', ADJUST: 'Grade adjusted' };
+  const SIMILARITY_BASIS = { SAME_LINK: 'same link', SAME_TEXT: 'same text', SAME_FILE: 'same file' };
+
+  function gradingOutcomeText(outcome, detail) {
+    const text = GRADING_OUTCOME_TEXT[outcome] || `Request finished: ${outcome}`;
+    return detail && (outcome === 'AI_NOT_GRADEABLE' || outcome === 'AI_FAILED') ? `${text} (${detail})` : text;
+  }
+
   /** Fetches JSON; throws an Error carrying the server's message on a non-2xx response. */
   async function api(url, options = {}) {
     const response = await fetch(url, { credentials: 'include', ...options });
@@ -12,12 +57,61 @@ window.Grading = (function () {
     let body = null;
     try { body = text ? JSON.parse(text) : null; } catch (e) { body = text; }
     if (!response.ok) {
-      const message = body && (body.error || body.message) ? (body.error || body.message)
+      const message = body && body.outcome ? gradingOutcomeText(body.outcome, body.detail)
+        : body && (body.error || body.message) ? (body.error || body.message)
         : (typeof body === 'string' && body ? body : `Request failed (${response.status})`);
-      throw new Error(message);
+      const error = new Error(message);
+      error.body = body;
+      throw error;
     }
     return body;
   }
+
+  // ---------- grading actions (each resolves to { outcome, grading, detail }) ----------
+  /** Sets a manual grade; revision is the one on screen. */
+  function saveManualGrade(submissionId, grade, revision, feedback) {
+    const params = new URLSearchParams({ grade });
+    if (feedback != null) params.set('feedback', feedback);
+    if (revision != null) params.set('revision', revision);
+    return api(`/api/submissions/grade/${submissionId}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: params,
+    });
+  }
+
+  function clearManualGrade(submissionId, revision) {
+    const query = revision != null ? `?revision=${encodeURIComponent(revision)}` : '';
+    return api(`/api/submissions/grade/${submissionId}${query}`, { method: 'DELETE' });
+  }
+
+  function requestAiGrade(submissionId) {
+    return api(`/api/submissions/ai-grade/${submissionId}`, { method: 'POST' });
+  }
+
+  /** Badges for a SubmissionGradingState: grade source, and Final once closed. */
+  function gradeSourceBadge(grading) {
+    if (!grading) return '';
+    const final = grading.closed ? ' <span class="g-badge ok" title="The assignment is closed">Final</span>' : '';
+    if (grading.source === 'NONE') return final;
+    return (grading.source === 'MANUAL'
+      ? '<span class="g-badge warn" title="An instructor overrode the AI grade">Instructor</span>'
+      : '<span class="g-badge muted" title="Graded by the AI">AI</span>') + final;
+  }
+
+  // ---------- closing and teacher reviews ----------
+  function closeAssignment(assignmentId) {
+    return api(`/api/assignments/${assignmentId}/close`, { method: 'POST' });
+  }
+
+  const reviews = {
+    list: submissionId => api(`/api/grade-reviews/submission/${submissionId}`),
+    open: (submissionId, reason, evidence) => postJson(`/api/grade-reviews/submission/${submissionId}`, { reason, evidence }),
+    saveEvidence: (reviewId, evidence) => api(`/api/grade-reviews/${reviewId}/evidence`, {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ evidence }),
+    }),
+    aiEvaluation: reviewId => api(`/api/grade-reviews/${reviewId}/ai-evaluation`, { method: 'POST' }),
+    similarity: reviewId => api(`/api/grade-reviews/${reviewId}/similarity`, { method: 'POST' }),
+    decide: (reviewId, decision) => postJson(`/api/grade-reviews/${reviewId}/decision`, decision),
+  };
 
   function postJson(url, data) {
     return api(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) });
@@ -85,10 +179,21 @@ window.Grading = (function () {
         <div class="g-stat"><b>${s.qualityScore == null ? '—' : s.qualityScore + '/5'}</b><span>AI quality</span></div>
         <div class="g-stat"><b>${s.isLate ? 'Late' : 'On time'}</b><span>status</span></div>
       </div>
+      ${gradingPanel(s.grading, points)}
       ${field('Submitted work', contentText(s.content))}
       ${field('Student comment', s.comment)}
       ${field('Feedback', s.feedback)}
       ${field('AI summary', s.aiSummary)}`;
+  }
+
+  /** AI and instructor grades side by side, and which is effective. */
+  function gradingPanel(grading, points) {
+    if (!grading) return '';
+    const effective = grading.source === 'MANUAL' ? 'instructor grade' : grading.source === 'AI' ? 'AI grade' : 'nothing yet';
+    const final = grading.closed ? ' · final (assignment closed)' : '';
+    return `<div class="g-panel"><div class="g-sub mb-1">Grading · revision ${esc(grading.revision)} · effective: ${effective}${final}</div>
+      <div>AI grade: <b>${esc(formatGrade(grading.aiGrade, points))}</b>
+        · Instructor grade: <b>${esc(grading.manualOverride ? formatGrade(grading.manualGrade, points) : '—')}</b></div></div>`;
   }
 
   let toastTimer;
@@ -108,5 +213,6 @@ window.Grading = (function () {
   }
 
   return { esc, api, postJson, formatEta, formatPct, formatGrade, statusBadge, pctClass, debounce, toast,
-    contentText, submissionDetailHtml };
+    contentText, submissionDetailHtml, gradingOutcomeText, saveManualGrade, clearManualGrade, requestAiGrade,
+    gradeSourceBadge, closeAssignment, reviews, REVIEW_REASONS, REVIEW_DECISIONS, SIMILARITY_BASIS };
 })();

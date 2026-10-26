@@ -69,7 +69,8 @@
 (function () {
     const personId = /*[[${personId}]]*/ 0;
     const isStaff = /*[[${isStaff}]]*/ false;
-    const { esc, api, formatPct, formatGrade, statusBadge, pctClass, debounce, toast, submissionDetailHtml } = window.Grading;
+    const { esc, api, formatPct, formatGrade, statusBadge, pctClass, debounce, toast, submissionDetailHtml,
+        gradingOutcomeText, saveManualGrade, clearManualGrade, requestAiGrade, gradeSourceBadge } = window.Grading;
     const rowsEl = document.getElementById('submissionRows');
     const search = document.getElementById('assignmentSearch');
     const statusFilter = document.getElementById('statusFilter');
@@ -129,7 +130,7 @@
         rowsEl.innerHTML = rows.map(s => `
             <tr data-id="${s.submissionId}">
                 <td>${esc(s.assignmentName)}${s.isLate ? ' <span class="g-badge bad">Late</span>' : ''}</td>
-                <td class="text-nowrap">${esc(formatGrade(s.grade, s.points))}</td>
+                <td class="text-nowrap">${esc(formatGrade(s.grade, s.points))} ${gradeSourceBadge(s.grading)}</td>
                 <td>${statusBadge(s.status, s.etaSeconds)}</td>
                 <td><span title="${esc(s.feedback)}">${esc(truncate(s.feedback, 80))}</span></td>
                 <td class="text-nowrap"><button class="g-btn" data-action="view" type="button">View</button>
@@ -143,10 +144,15 @@
     }
 
     function staffActions(s) {
-        return `<input type="number" step="0.01" min="0" class="g-grade-input" aria-label="New grade"
+        // Closed assignments are reviewed in the tracker.
+        if (s.grading?.closed) {
+            return `<a class="g-btn" href="/mvc/assignments/tracker" title="Open the assignment in the tracker to review this grade">Review in tracker</a>`;
+        }
+        return `<input type="number" step="0.01" min="0" max="${s.points ?? 1}" class="g-grade-input" aria-label="New grade"
                     value="${s.grade ?? ''}" placeholder="/ ${s.points ?? 1}">
                 <button class="g-btn" data-action="save" type="button">Save</button>
-                <button class="g-btn" data-action="ai" type="button">AI grade</button>`;
+                <button class="g-btn" data-action="ai" type="button">AI grade</button>
+                ${s.grading?.manualOverride ? '<button class="g-btn" data-action="clear" type="button" title="Remove the instructor grade so the AI grade applies">Use AI grade</button>' : ''}`;
     }
 
     function studentActions(s) {
@@ -164,22 +170,24 @@
             showSubmission(id);
             return;
         }
+        const entry = card.submissions.find(x => String(x.submissionId) === String(id));
+        const revision = entry?.grading?.revision;
         button.disabled = true;
         try {
+            let result;
             if (button.dataset.action === 'save') {
                 const grade = row.querySelector('.g-grade-input').value;
                 if (grade === '') throw new Error('Enter a grade first');
-                await api(`/api/submissions/grade/${id}`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: new URLSearchParams({ grade })
-                });
-                toast('Grade saved');
+                result = await saveManualGrade(id, grade, revision);
+            } else if (button.dataset.action === 'clear') {
+                result = await clearManualGrade(id, revision);
             } else {
                 button.textContent = 'Grading…';
-                const result = await api(`/api/submissions/ai-grade/${id}`, { method: 'POST' });
-                toast(`AI graded: ${result.score}`);
+                result = await requestAiGrade(id);
             }
+            const aiGrade = result.grading?.aiGrade;
+            toast(gradingOutcomeText(result.outcome)
+                + (button.dataset.action === 'ai' && aiGrade != null ? ` AI grade: ${formatGrade(aiGrade, entry?.points)}` : ''));
             await load();
         } catch (e) {
             toast(e.message, false);
