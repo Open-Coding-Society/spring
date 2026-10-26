@@ -1,4 +1,4 @@
-package com.open.spring.mvc.slack;
+package com.open.spring.mvc.calendar;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -12,10 +12,12 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
+import com.open.spring.mvc.slack.SlackService;
+
 public class CalendarEventServiceTest {
 
     @Mock
-    private CalendarEventRepository calendarEventRepository;
+    private CalendarEventJpaRepository calendarEventRepository;
 
     @Mock
     private SlackService slackService;
@@ -30,12 +32,12 @@ public class CalendarEventServiceTest {
 
     @Test
     public void testFilterEvents_byTypeAndDateRange() {
-        CalendarEvent e1 = new CalendarEvent(LocalDate.of(2026,5,1), "Title A", "desc", "meeting", "P1");
-        CalendarEvent e2 = new CalendarEvent(LocalDate.of(2026,5,2), "Title B", "desc", "event", "P2");
+        CalendarEventEntity e1 = new CalendarEventEntity(LocalDate.of(2026,5,1), "Title A", "desc", "meeting", "P1");
+        CalendarEventEntity e2 = new CalendarEventEntity(LocalDate.of(2026,5,2), "Title B", "desc", "event", "P2");
 
         when(calendarEventRepository.findAll()).thenReturn(List.of(e1, e2));
 
-        List<CalendarEvent> res = eventService.filterEvents("meeting", null, null, null, null, null);
+        List<CalendarEventEntity> res = eventService.filterEvents("meeting", null, null, null, null, null);
         assertEquals(1, res.size());
         assertEquals("Title A", res.get(0).getTitle());
     }

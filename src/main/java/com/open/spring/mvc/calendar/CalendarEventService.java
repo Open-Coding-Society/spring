@@ -1,4 +1,4 @@
-package com.open.spring.mvc.slack;
+package com.open.spring.mvc.calendar;
 
 import java.time.LocalDate;
 import java.util.ArrayList;
@@ -11,11 +11,19 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.open.spring.mvc.slack.SlackService;
+
+/**
+ * The calendar's rules: duplicate detection by title and date, who can see an
+ * event, filters, breaks (and moving a break day's events to the next school day),
+ * and turning a Slack weekly-plan message into events. Works only with
+ * CalendarEventEntity; the controller converts to and from its DTO records.
+ */
 @Service
 public class CalendarEventService {
 
     @Autowired
-    private CalendarEventRepository calendarEventRepository;
+    private CalendarEventJpaRepository calendarEventRepository;
 
     @Autowired
     private SlackService slackService;
@@ -23,23 +31,23 @@ public class CalendarEventService {
     private static final int MAX_DAYS_AHEAD = 365;
 
     // Save a new event
-    public CalendarEvent saveEvent(CalendarEvent event) {
-        CalendarEvent savedEvent = calendarEventRepository.save(event);
+    public CalendarEventEntity saveEvent(CalendarEventEntity event) {
+        CalendarEventEntity savedEvent = calendarEventRepository.save(event);
         return savedEvent;
     }
 
     // Find event by title and date (for duplicate detection)
-    public CalendarEvent findByTitleAndDate(String title, LocalDate date) {
+    public CalendarEventEntity findByTitleAndDate(String title, LocalDate date) {
         return calendarEventRepository.findByTitleAndDate(title, date).orElse(null);
     }
 
-    public CalendarEvent findByTitleAndDateAndIndividual(String title, LocalDate date, String individual) {
+    public CalendarEventEntity findByTitleAndDateAndIndividual(String title, LocalDate date, String individual) {
         return calendarEventRepository.findByTitleAndDateAndIndividual(title, date, individual).orElse(null);
     }
 
     // Create a calendar event
     public void createCalendarEvent(String title, LocalDate eventDate, String description, String type, String period) {
-        CalendarEvent event = new CalendarEvent();
+        CalendarEventEntity event = new CalendarEventEntity();
         event.setTitle(title);
         event.setDate(eventDate);
         event.setDescription(description);
@@ -49,12 +57,12 @@ public class CalendarEventService {
     }
 
     // Get events by a specific date
-    public List<CalendarEvent> getEventsByDate(LocalDate date) {
+    public List<CalendarEventEntity> getEventsByDate(LocalDate date) {
         return calendarEventRepository.findByDate(date);
     }
 
-    public List<CalendarEvent> getEventsVisibleToIndividual(String individual) {
-        List<CalendarEvent> events = calendarEventRepository.findAll();
+    public List<CalendarEventEntity> getEventsVisibleToIndividual(String individual) {
+        List<CalendarEventEntity> events = calendarEventRepository.findAll();
         if (individual == null || individual.isBlank()) {
             return events;
         }
@@ -64,13 +72,13 @@ public class CalendarEventService {
                 .toList();
     }
 
-    public List<CalendarEvent> getEventsByDateVisibleToIndividual(LocalDate date, String individual) {
+    public List<CalendarEventEntity> getEventsByDateVisibleToIndividual(LocalDate date, String individual) {
         return getEventsVisibleToIndividual(individual).stream()
                 .filter(event -> date.equals(event.getDate()))
                 .toList();
     }
 
-    public List<CalendarEvent> getEventsWithinDateRangeVisibleToIndividual(LocalDate startDate, LocalDate endDate, String individual) {
+    public List<CalendarEventEntity> getEventsWithinDateRangeVisibleToIndividual(LocalDate startDate, LocalDate endDate, String individual) {
         return getEventsVisibleToIndividual(individual).stream()
                 .filter(event -> !event.getDate().isBefore(startDate) && !event.getDate().isAfter(endDate))
                 .toList();
@@ -78,7 +86,7 @@ public class CalendarEventService {
 
     // Update event by id
     public boolean updateEventById(int id, String newTitle, String description, LocalDate date, String period) {
-        CalendarEvent event = getEventById(id);
+        CalendarEventEntity event = getEventById(id);
         if (event != null) {
             event.setTitle(newTitle);
             event.setDescription(description);
@@ -93,7 +101,7 @@ public class CalendarEventService {
     // Update event by id with appointment fields
     public boolean updateEventById(int id, String newTitle, String description, LocalDate date, String period,
                                    String type, String classPeriod, String groupName, String individual) {
-        CalendarEvent event = getEventById(id);
+        CalendarEventEntity event = getEventById(id);
         if (event != null) {
             event.setTitle(newTitle);
             event.setDescription(description);
@@ -116,7 +124,7 @@ public class CalendarEventService {
 
     // Delete event by id
     public boolean deleteEventById(int id) {
-        CalendarEvent event = getEventById(id);
+        CalendarEventEntity event = getEventById(id);
         if (event != null) {
             calendarEventRepository.delete(event);
             return true;
@@ -126,8 +134,8 @@ public class CalendarEventService {
 
     // Delete event by title
     public boolean deleteEventByTitle(String title) {
-        List<CalendarEvent> allEvents = calendarEventRepository.findAll(); 
-        List<CalendarEvent> eventsToDelete = allEvents.stream()
+        List<CalendarEventEntity> allEvents = calendarEventRepository.findAll(); 
+        List<CalendarEventEntity> eventsToDelete = allEvents.stream()
                 .filter(event -> event.getTitle().equals(title))
                 .toList();
 
@@ -139,16 +147,16 @@ public class CalendarEventService {
     }
 
     // Retrieve all events
-    public List<CalendarEvent> getAllEvents() {
+    public List<CalendarEventEntity> getAllEvents() {
         return calendarEventRepository.findAll();
     }
 
     /**
      * Filter events by optional criteria. If start/end provided, restrict to that range first.
      */
-    public List<CalendarEvent> filterEvents(String type, String groupName, String individual, String classPeriod,
+    public List<CalendarEventEntity> filterEvents(String type, String groupName, String individual, String classPeriod,
             LocalDate start, LocalDate end) {
-        List<CalendarEvent> source;
+        List<CalendarEventEntity> source;
         if (start != null && end != null) {
             source = getEventsWithinDateRange(start, end);
         } else {
@@ -163,19 +171,19 @@ public class CalendarEventService {
                 .toList();
     }
 
-    public List<CalendarEvent> getEventsWithinDateRange(LocalDate startDate, LocalDate endDate) {
+    public List<CalendarEventEntity> getEventsWithinDateRange(LocalDate startDate, LocalDate endDate) {
         return calendarEventRepository.findByDateBetween(startDate, endDate);
     }
 
     // Get event by id
-    public CalendarEvent getEventById(int id) {
+    public CalendarEventEntity getEventById(int id) {
         return calendarEventRepository.findById((long) id).orElse(null);
     }
 
     // Parse Slack message and create events
     public void parseSlackMessage(Map<String, String> jsonMap, LocalDate weekStartDate) {
-        List<CalendarEvent> events = extractEventsFromText(jsonMap, weekStartDate);
-        for (CalendarEvent event : events) {
+        List<CalendarEventEntity> events = extractEventsFromText(jsonMap, weekStartDate);
+        for (CalendarEventEntity event : events) {
             saveEvent(event);
         }
     }
@@ -184,7 +192,7 @@ public class CalendarEventService {
     private final String CSA_CHANNEL_ID = "CRRJL1F1D";
     private final String CSSE_CHANNEL_ID = "C05MNRWC2A1";
 
-    private List<CalendarEvent> extractEventsFromText(Map<String, String> jsonMap, LocalDate weekStartDate) {
+    private List<CalendarEventEntity> extractEventsFromText(Map<String, String> jsonMap, LocalDate weekStartDate) {
         String text = jsonMap.get("text");
         // Use SlackService to determine the correct week start date from the message
         LocalDate parsedWeekStartDate = null;
@@ -198,12 +206,12 @@ public class CalendarEventService {
         if (parsedWeekStartDate != null) {
             weekStartDate = parsedWeekStartDate;
         }
-        List<CalendarEvent> events = new ArrayList<>();
+        List<CalendarEventEntity> events = new ArrayList<>();
         Pattern dayPattern = Pattern.compile("\\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?: - (Mon|Tue|Wed|Thu|Fri|Sat|Sun))?\\]:\\s*(\\*\\*|\\*)?\\s*(.+)");
         Pattern descriptionPattern = Pattern.compile("(\\*\\*|\\*)?\\s*\\u2022\\s*(.+)");
         String[] lines = text.split("\\n");
-        CalendarEvent lastEvent = null;
-        List<CalendarEvent> lastEventRange = new ArrayList<>();
+        CalendarEventEntity lastEvent = null;
+        List<CalendarEventEntity> lastEventRange = new ArrayList<>();
 
         for (String line : lines) {
             Matcher dayMatcher = dayPattern.matcher(line);
@@ -242,7 +250,7 @@ public class CalendarEventService {
 
                 lastEventRange.clear(); // Clear previous range
                 for (LocalDate date : getDatesInRange(startDay, endDay, weekStartDate)) {
-                    CalendarEvent event = new CalendarEvent(date, currentTitle, description, type, period);
+                    CalendarEventEntity event = new CalendarEventEntity(date, currentTitle, description, type, period);
                     events.add(event);
                     lastEvent = event; // Update lastEvent to the current event
                     lastEventRange.add(event); // Add to current range
@@ -260,7 +268,7 @@ public class CalendarEventService {
                         type = "grade";
                     }
 
-                    for (CalendarEvent event : lastEventRange) {
+                    for (CalendarEventEntity event : lastEventRange) {
                         event.setDescription(event.getDescription() +
                                 (event.getDescription().isEmpty() ? "" : ", ") +
                                 description);
@@ -271,7 +279,7 @@ public class CalendarEventService {
         }
 
         // Log the events and their descriptions
-        for (CalendarEvent event : events) {
+        for (CalendarEventEntity event : events) {
             System.out.println("Event: " + event.getDate() + ", Title: " + event.getTitle() + ", Description: " + event.getDescription());
         }
 
@@ -302,10 +310,10 @@ public class CalendarEventService {
      * @param name The name of the break
      * @param description Description of the break
      * @param moveToNextNonBreakDay Whether to move events to next non-break day
-     * @return The created break CalendarEvent
+     * @return The created break CalendarEventEntity
      */
     @Transactional
-    public CalendarEvent createBreak(LocalDate date, String name, String description, boolean moveToNextNonBreakDay) {
+    public CalendarEventEntity createBreak(LocalDate date, String name, String description, boolean moveToNextNonBreakDay) {
         // Validate inputs
         if (name == null || name.trim().isEmpty()) {
             name = "Break";
@@ -315,7 +323,7 @@ public class CalendarEventService {
         }
 
         // Check if a break already exists for this date
-        List<CalendarEvent> existingBreaks = calendarEventRepository.findByIsBreakAndDate(true, date);
+        List<CalendarEventEntity> existingBreaks = calendarEventRepository.findByIsBreakAndDate(true, date);
         if (!existingBreaks.isEmpty()) {
             // Break already exists, just return it
             return existingBreaks.get(0);
@@ -323,10 +331,10 @@ public class CalendarEventService {
 
         // Move all regular events from this date if requested
         if (moveToNextNonBreakDay) {
-            List<CalendarEvent> eventsOnDate = calendarEventRepository.findByDate(date);
+            List<CalendarEventEntity> eventsOnDate = calendarEventRepository.findByDate(date);
             LocalDate nextNonBreakDay = findNextNonBreakDay(date);
 
-            for (CalendarEvent event : eventsOnDate) {
+            for (CalendarEventEntity event : eventsOnDate) {
                 if (!event.isBreak()) { // Only move regular events, not breaks
                     event.setDate(nextNonBreakDay);
                     calendarEventRepository.save(event);
@@ -334,8 +342,8 @@ public class CalendarEventService {
             }
         }
 
-        // Create and save the break as a CalendarEvent
-        CalendarEvent breakEvent = new CalendarEvent(date, name, description, true);
+        // Create and save the break as a CalendarEventEntity
+        CalendarEventEntity breakEvent = new CalendarEventEntity(date, name, description, true);
         return calendarEventRepository.save(breakEvent);
     }
 
@@ -345,9 +353,9 @@ public class CalendarEventService {
      * @param date The date of the break
      * @param name The name of the break
      * @param description Description of the break
-     * @return The created break CalendarEvent
+     * @return The created break CalendarEventEntity
      */
-    public CalendarEvent createBreak(LocalDate date, String name, String description) {
+    public CalendarEventEntity createBreak(LocalDate date, String name, String description) {
         return createBreak(date, name, description, false);
     }
 
@@ -356,9 +364,9 @@ public class CalendarEventService {
      * 
      * @param date The date of the break
      * @param name The name of the break
-     * @return The created break CalendarEvent
+     * @return The created break CalendarEventEntity
      */
-    public CalendarEvent createBreak(LocalDate date, String name) {
+    public CalendarEventEntity createBreak(LocalDate date, String name) {
         return createBreak(date, name, "", false);
     }
 
@@ -366,9 +374,9 @@ public class CalendarEventService {
      * Create a break with default name.
      * 
      * @param date The date of the break
-     * @return The created break CalendarEvent
+     * @return The created break CalendarEventEntity
      */
-    public CalendarEvent createBreak(LocalDate date) {
+    public CalendarEventEntity createBreak(LocalDate date) {
         return createBreak(date, "Break", "", false);
     }
 
@@ -404,8 +412,8 @@ public class CalendarEventService {
      * @return The updated break or null if not found
      */
     @Transactional
-    public CalendarEvent updateBreak(Long id, String name, String description) {
-        CalendarEvent breakEvent = getEventById(Math.toIntExact(id));
+    public CalendarEventEntity updateBreak(Long id, String name, String description) {
+        CalendarEventEntity breakEvent = getEventById(Math.toIntExact(id));
         if (breakEvent != null && breakEvent.isBreak()) {
             if (name != null && !name.trim().isEmpty()) {
                 breakEvent.setName(name);
@@ -428,7 +436,7 @@ public class CalendarEventService {
      */
     @Transactional
     public boolean deleteBreakById(Long id) {
-        CalendarEvent breakEvent = getEventById(Math.toIntExact(id));
+        CalendarEventEntity breakEvent = getEventById(Math.toIntExact(id));
         if (breakEvent != null && breakEvent.isBreak()) {
             calendarEventRepository.deleteById(id);
             return true;
@@ -444,9 +452,9 @@ public class CalendarEventService {
      */
     @Transactional
     public boolean deleteBreakByDate(LocalDate date) {
-        List<CalendarEvent> breaks = calendarEventRepository.findByIsBreakAndDate(true, date);
+        List<CalendarEventEntity> breaks = calendarEventRepository.findByIsBreakAndDate(true, date);
         if (!breaks.isEmpty()) {
-            for (CalendarEvent breakEvent : breaks) {
+            for (CalendarEventEntity breakEvent : breaks) {
                 calendarEventRepository.delete(breakEvent);
             }
             return true;
@@ -460,7 +468,7 @@ public class CalendarEventService {
      * @param date The date to check
      * @return List of breaks for that date
      */
-    public List<CalendarEvent> getBreaksByDate(LocalDate date) {
+    public List<CalendarEventEntity> getBreaksByDate(LocalDate date) {
         return calendarEventRepository.findByIsBreakAndDate(true, date);
     }
 
@@ -469,7 +477,7 @@ public class CalendarEventService {
      * 
      * @return List of all breaks
      */
-    public List<CalendarEvent> getAllBreaks() {
+    public List<CalendarEventEntity> getAllBreaks() {
         return calendarEventRepository.findByIsBreak(true);
     }
 
@@ -480,7 +488,7 @@ public class CalendarEventService {
      * @return true if there is a break on this date, false otherwise
      */
     public boolean isBreakDay(LocalDate date) {
-        List<CalendarEvent> breaks = calendarEventRepository.findByIsBreakAndDate(true, date);
+        List<CalendarEventEntity> breaks = calendarEventRepository.findByIsBreakAndDate(true, date);
         return !breaks.isEmpty();
     }
 
@@ -490,8 +498,8 @@ public class CalendarEventService {
      * @param id The ID of the break
      * @return The break if found, null otherwise
      */
-    public CalendarEvent getBreakById(Long id) {
-        CalendarEvent event = getEventById(Math.toIntExact(id));
+    public CalendarEventEntity getBreakById(Long id) {
+        CalendarEventEntity event = getEventById(Math.toIntExact(id));
         if (event != null && event.isBreak()) {
             return event;
         }

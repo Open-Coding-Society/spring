@@ -1,4 +1,4 @@
-package com.open.spring.mvc.slack;
+package com.open.spring.mvc.calendar;
 
 import java.time.LocalDate;
 
@@ -8,10 +8,18 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
+/**
+ * One row of the calendar_events table: a class event, an appointment a student
+ * booked, or a break day. It is a POJO (fields, constructors, getters and setters)
+ * that @Entity maps to the table, so JPA can save and load it.
+ *
+ * The API never sends this class as JSON. CalendarEventApiRestController copies it
+ * into its EventView record, so the table can gain columns without changing the API.
+ * The table is initialized by CalendarEventTableInitializer (ddl-auto is none).
+ */
 @Entity
 @Table(name = "calendar_events")
-public class CalendarEvent {
-    // POJO
+public class CalendarEventEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -30,11 +38,11 @@ public class CalendarEvent {
     private String name; // Break name (e.g., "Winter Break") - used when isBreak is true
 
     // Default constructor
-    public CalendarEvent() {
+    public CalendarEventEntity() {
     }
 
     // Constructor with fields
-    public CalendarEvent(LocalDate date, String title, String description, String type, String period) {
+    public CalendarEventEntity(LocalDate date, String title, String description, String type, String period) {
         this.date = date;
         this.title = title;
         this.description = description;
@@ -44,7 +52,7 @@ public class CalendarEvent {
     }
     
     // Constructor for break events
-    public CalendarEvent(LocalDate date, String name, String description, boolean isBreak) {
+    public CalendarEventEntity(LocalDate date, String name, String description, boolean isBreak) {
         this.date = date;
         this.name = name;
         this.description = description;
@@ -56,7 +64,7 @@ public class CalendarEvent {
     }
 
     // Constructor with all appointment fields
-    public CalendarEvent(LocalDate date, String title, String description, String type, String period,
+    public CalendarEventEntity(LocalDate date, String title, String description, String type, String period,
                          String classPeriod, String groupName, String individual) {
         this.date = date;
         this.title = title;
