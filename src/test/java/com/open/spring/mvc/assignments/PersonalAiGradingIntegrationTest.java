@@ -106,7 +106,7 @@ class PersonalAiGradingIntegrationTest {
         ReflectionTestUtils.setField(controller, "personRepo", people);
         ReflectionTestUtils.setField(controller, "assignmentRepo", assignments);
         ReflectionTestUtils.setField(controller, "submissionRepo", submissions);
-        wireGrading(controller, submissions, ai);
+        wireGrading(controller, submissions, ai, assignments);
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
         Person alice = student(1L, "alice"); Person bob = student(2L, "bob");
         when(people.findByUid("alice")).thenReturn(alice); when(people.findById(2L)).thenReturn(Optional.of(bob));
@@ -118,12 +118,13 @@ class PersonalAiGradingIntegrationTest {
     }
     @Test void submissionIsSavedAndFlaggedForReviewWhenAiFails() throws Exception {
         var submissions = mock(AssignmentSubmissionJPA.class); var ai = mock(AssignmentAiGradingService.class);
-        var gradingService = new SubmissionGradingService(submissions, mock(SubmissionGradeEventJPA.class),
+        var gradingService = new SubmissionGradingService(submissions, mock(AssignmentJpaRepository.class), mock(SubmissionGradeEventJPA.class),
             new AssignmentAuthorizationService());
         var submission = submission(1L, assignment(1L, "test"));
         when(ai.grade(submission)).thenReturn(AssignmentAiGradingService.GradeResult.failed("No provider available"));
+        openAndLockable(submissions, 1L);
         when(submissions.flagForAiRegrade(1L, 1)).thenReturn(1);
-        var result = new SubmissionAiGrader(ai, gradingService).autoGrade(submission);
+        var result = new SubmissionAiGrader(ai, gradingService, mock(GradeReviewService.class)).autoGrade(submission);
         assertEquals(GradingOutcome.AI_FAILED, result.outcome());
         assertNull(submission.getGrade()); verify(submissions).flagForAiRegrade(1L, 1);
         verify(submissions, never()).save(any());
@@ -135,7 +136,7 @@ class PersonalAiGradingIntegrationTest {
         ReflectionTestUtils.setField(controller, "personRepo", people);
         ReflectionTestUtils.setField(controller, "assignmentRepo", assignments);
         ReflectionTestUtils.setField(controller, "submissionRepo", submissions);
-        wireGrading(controller, submissions, ai);
+        wireGrading(controller, submissions, ai, assignments);
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
         Person alice = student(1L, "alice"); var assignment = assignment(1L, "test"); assignment.setAssignmentType("code");
         when(people.findByUid("alice")).thenReturn(alice); when(people.findById(1L)).thenReturn(Optional.of(alice));
@@ -144,6 +145,8 @@ class PersonalAiGradingIntegrationTest {
             AssignmentSubmission saved = invocation.getArgument(0); saved.setId(99L); return saved;
         });
         when(ai.grade(any())).thenReturn(AssignmentAiGradingService.GradeResult.failed("No provider available"));
+        openAndLockable(submissions, 99L);
+        when(submissions.flagForAiRegrade(99L, 1)).thenReturn(1);
         var request = new AssignmentSubmissionAPIController.SubmissionRequestDto(); request.submitterId = 1L;
         request.content = Map.of("type", "code", "url", "https://gist.github.com/alice/123abcdef");
         var response = controller.submitAssignment(1L, request, login("alice"));
@@ -158,7 +161,7 @@ class PersonalAiGradingIntegrationTest {
         ReflectionTestUtils.setField(controller, "personRepo", people);
         ReflectionTestUtils.setField(controller, "submissionRepo", submissions);
         ReflectionTestUtils.setField(controller, "assignmentRepo", assignments);
-        wireGrading(controller, submissions, ai);
+        wireGrading(controller, submissions, ai, assignments);
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
         when(people.findByUid("teacher")).thenReturn(teacher(2L, "teacher"));
         when(people.findByUid("alice")).thenReturn(student(1L, "alice"));
@@ -166,16 +169,24 @@ class PersonalAiGradingIntegrationTest {
         when(submissions.findById(1L)).thenReturn(Optional.of(submission));
         when(assignments.findById(1L)).thenReturn(Optional.of(submission.getAssignment()));
         when(ai.grade(submission)).thenReturn(AssignmentAiGradingService.GradeResult.failed("Unavailable"));
+        openAndLockable(submissions, 1L);
         assertEquals(403, controller.aiGradeSubmission(1L, login("alice")).getStatusCode().value());
         assertEquals(502, controller.aiGradeSubmission(1L, login("teacher")).getStatusCode().value());
         verify(ai, times(1)).grade(same(submission));
     }
+    /** Stubs the submission as existing and open. */
+    private static void openAndLockable(AssignmentSubmissionJPA submissions, Long id) {
+        when(submissions.lockForGrading(id)).thenReturn(1);
+        when(submissions.findGradingState(id)).thenReturn(Optional.of(new SubmissionGradingState(
+            id, 1, null, null, null, null, null, null, false, null, null, false, null)));
+    }
     private static void wireGrading(AssignmentSubmissionAPIController controller, AssignmentSubmissionJPA submissions,
-            AssignmentAiGradingService ai) {
-        var gradingService = new SubmissionGradingService(submissions, mock(SubmissionGradeEventJPA.class),
+            AssignmentAiGradingService ai, AssignmentJpaRepository assignments) {
+        when(assignments.lockIfOpen(any())).thenReturn(1); // every assignment here is open
+        var gradingService = new SubmissionGradingService(submissions, assignments, mock(SubmissionGradeEventJPA.class),
             new AssignmentAuthorizationService());
         ReflectionTestUtils.setField(controller, "gradingService", gradingService);
-        ReflectionTestUtils.setField(controller, "aiGrader", new SubmissionAiGrader(ai, gradingService));
+        ReflectionTestUtils.setField(controller, "aiGrader", new SubmissionAiGrader(ai, gradingService, mock(GradeReviewService.class)));
     }
     private UserDetails login(String uid) { return User.withUsername(uid).password("unused").authorities("ROLE_USER").build(); }
 }

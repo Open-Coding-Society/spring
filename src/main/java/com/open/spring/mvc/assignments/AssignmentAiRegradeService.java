@@ -175,7 +175,7 @@ public class AssignmentAiRegradeService {
                     pending.size(), byAssignment.size());
             for (Map.Entry<Long, List<Long>> entry : byAssignment.entrySet()) {
                 Assignment assignment = assignmentRepo.findById(entry.getKey()).orElse(null);
-                if (assignment != null && ensureAiRubric(assignment)) {
+                if (assignment != null && !assignment.isClosed() && ensureAiRubric(assignment)) {
                     entry.getValue().stream().filter(submissionId -> !gradingNow.contains(submissionId))
                             .forEach(submissionId -> regrade(submissionId, assignment, true));
                 }
@@ -314,9 +314,9 @@ public class AssignmentAiRegradeService {
 
     /**
      * Re-grades every AI-graded submission whose grade is above its assignment's points (e.g. 4/1
-     * from the old 2-4 scale) against the assignment's rubric; manual overrides are left alone.
-     * Each submission is attempted exactly once per run; a failure is counted and left alone (no
-     * flag, no retry), so it can't loop.
+     * from the old 2-4 scale) against the assignment's rubric, skipping manual overrides and
+     * closed assignments. Each submission is attempted exactly once per run; a failure is counted
+     * and left alone (no flag, no retry), so it can't loop.
      */
     public synchronized FixGradesStatus startFixOutOfRangeGrades() {
         if (fixStatus.running()) {
@@ -325,6 +325,7 @@ public class AssignmentAiRegradeService {
         List<Map<String, Object>> rows = jdbcTemplate.queryForList(
                 "SELECT s.id, s.assignment_id FROM assignment_submission s JOIN assignment a ON a.id = s.assignment_id "
                         + "WHERE s.grade IS NOT NULL AND (s.manual_override IS NULL OR s.manual_override = 0) "
+                        + "AND a.closed_at IS NULL "
                         + "AND s.grade > (CASE WHEN a.points IS NULL OR a.points <= 0 THEN 1 ELSE a.points END) + 0.000001 "
                         + "ORDER BY s.assignment_id, s.id");
         Map<Long, List<Long>> byAssignment = groupByAssignment(rows);
@@ -389,10 +390,7 @@ public class AssignmentAiRegradeService {
     /**
      * Grades one submission once. {@code flaggedOnly} is the background-job mode: skip it unless it
      * is still flagged, and clear the flag when it turns out not gradeable. Returns true if graded.
-     *
-     * The result is saved against the revision that was graded, so a student's edit made while the
-     * AI was working discards it, and a teacher's manual grade stays effective (the AI grade is
-     * still kept for reference).
+
      */
     private boolean regrade(Long submissionId, Assignment assignment, boolean flaggedOnly) {
         try {

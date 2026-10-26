@@ -75,6 +75,10 @@ public class AssignmentSubmissionUploadService {
 
         validateUsernameMatchesTarget(username, targetUser);
         validateSubmitPermission(authenticatedUser, userId);
+        // Checked again when saving; checking now avoids uploading a file that would be refused.
+        if (assignment.isClosed()) {
+            throw new UploadException(GradingOutcome.ASSIGNMENT_CLOSED);
+        }
 
         String originalFilename = sanitizeFilename(file);
         String s3Filename = buildS3Filename(assignment.getName(), originalFilename);
@@ -249,7 +253,11 @@ public class AssignmentSubmissionUploadService {
         submission.setAiOrchestration(aiOrchestration);
         submission.setSelfAssessmentReflection(selfAssessmentReflection);
 
-        return gradingService.submit(submission, authenticatedUser);
+        GradingResult submitted = gradingService.submit(submission, authenticatedUser);
+        if (submitted.outcome() != GradingOutcome.REVISION_CREATED) {
+            throw new UploadException(submitted.outcome());
+        }
+        return submission;
     }
 
     private Map<String, Object> buildResponse(
@@ -313,14 +321,27 @@ public class AssignmentSubmissionUploadService {
 
     public static class UploadException extends RuntimeException {
         private final HttpStatus status;
+        private final GradingOutcome outcome;
 
         public UploadException(HttpStatus status, String message) {
             super(message);
             this.status = status;
+            this.outcome = null;
+        }
+
+        /** An expected grading outcome, answered as a GradingResponse. */
+        public UploadException(GradingOutcome outcome) {
+            super(outcome.name());
+            this.status = GradingResponse.statusOf(outcome);
+            this.outcome = outcome;
         }
 
         public HttpStatus getStatus() {
             return status;
+        }
+
+        public GradingOutcome getOutcome() {
+            return outcome;
         }
     }
 }

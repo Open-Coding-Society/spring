@@ -70,11 +70,7 @@ final class AssignmentCreatorFixtures {
         return submission;
     }
 
-    /**
-     * A real grading service (so authorization and grade validation run) over a mocked
-     * repository that knows only {@code submissions}. Every conditional write matches; the SQL
-     * itself is covered by SubmissionGradingPersistenceTest.
-     */
+    /** A real grading service over a mocked repository that knows only {@code submissions}. */
     static SubmissionGradingService gradingService(AssignmentSubmissionJPA submissionRepo,
             AssignmentSubmission... submissions) {
         when(submissionRepo.lockForGrading(anyLong())).thenReturn(0);
@@ -85,7 +81,7 @@ final class AssignmentCreatorFixtures {
                 .thenAnswer(invocation -> Optional.of(SubmissionGradingState.of(submission)));
         }
         when(submissionRepo.applyManualOverride(anyLong(), anyInt(), any(), any(), any())).thenReturn(1);
-        return new SubmissionGradingService(submissionRepo, mock(SubmissionGradeEventJPA.class),
+        return new SubmissionGradingService(submissionRepo, mock(AssignmentJpaRepository.class), mock(SubmissionGradeEventJPA.class),
             new AssignmentAuthorizationService());
     }
 }

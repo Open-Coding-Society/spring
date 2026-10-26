@@ -66,9 +66,10 @@ class SelfAssessmentPausedTest {
         ReflectionTestUtils.setField(controller, "submissionRepo", submissionRepo);
         ReflectionTestUtils.setField(controller, "assignmentRepo", assignmentRepo);
         ReflectionTestUtils.setField(controller, "personRepo", personRepo);
-        SubmissionGradingService gradingService = new SubmissionGradingService(submissionRepo, eventRepo,
+        SubmissionGradingService gradingService = new SubmissionGradingService(submissionRepo, assignmentRepo, eventRepo,
                 new AssignmentAuthorizationService());
-        SubmissionAiGrader aiGrader = new SubmissionAiGrader(aiGradingService, gradingService);
+        SubmissionAiGrader aiGrader = new SubmissionAiGrader(aiGradingService, gradingService, Mockito.mock(GradeReviewService.class));
+        when(assignmentRepo.lockIfOpen(any())).thenReturn(1); // every assignment here is open
         ReflectionTestUtils.setField(controller, "gradingService", gradingService);
         ReflectionTestUtils.setField(controller, "aiGrader", aiGrader);
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());

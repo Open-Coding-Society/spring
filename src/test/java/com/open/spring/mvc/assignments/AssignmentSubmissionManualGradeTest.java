@@ -10,6 +10,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -31,10 +32,7 @@ import com.open.spring.mvc.groups.GroupsJpaRepository;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
-/**
- * The grading endpoints on /api/submissions: each one delegates to the grading service or the AI
- * grader and turns the typed outcome into a {@link GradingResponse} with the matching status.
- */
+/** Delegation and status mapping of the grading endpoints on /api/submissions. */
 class AssignmentSubmissionManualGradeTest {
 
     @Mock
@@ -86,6 +84,11 @@ class AssignmentSubmissionManualGradeTest {
 
         when(submissionRepo.findById(100L)).thenReturn(Optional.of(ownedSubmission));
         when(assignmentRepo.findById(10L)).thenReturn(Optional.of(ownedAssignment));
+        // Teachers and the creator may grade the submission; its author and classmates may not.
+        when(gradingService.canManage(eq(100L), any())).thenAnswer(call -> {
+            Person person = call.getArgument(1);
+            return person == mort || person == creator;
+        });
     }
 
     private UserDetails register(Person person, String... authorities) {
@@ -95,7 +98,7 @@ class AssignmentSubmissionManualGradeTest {
 
     private static SubmissionGradingState state(int revision, Double effective, Double ai, Double manual) {
         return new SubmissionGradingState(100L, revision, effective, null, null, ai, null, null,
-                manual != null, manual, null, false);
+                manual != null, manual, null, false, null);
     }
 
     private static GradingResponse body(ResponseEntity<?> response) {
@@ -223,10 +226,37 @@ class AssignmentSubmissionManualGradeTest {
     }
 
     @Test
-    void aiGradingStaysTeacherOrAdminOnly() {
-        // The creator may grade by hand, but the metered AI call stays with teachers and admins.
-        assertEquals(403, controller.aiGradeSubmission(100L, register(creator, "ROLE_STUDENT")).getStatusCode().value());
-        verify(aiGrader, never()).grade(any());
+    void aStudentTeacherMayRequestAnAiRegradeButTheAuthorMayNot() {
+        when(aiGrader.grade(any())).thenReturn(GradingResult.of(GradingOutcome.AI_GRADE_APPLIED, state(1, 0.6, 0.6, null)));
+
+        assertEquals(200, controller.aiGradeSubmission(100L, register(creator, "ROLE_STUDENT")).getStatusCode().value());
+        ResponseEntity<?> denied = controller.aiGradeSubmission(100L, register(author, "ROLE_STUDENT"));
+
+        assertEquals(403, denied.getStatusCode().value());
+        assertEquals(GradingOutcome.NOT_PERMITTED, body(denied).outcome());
+        verify(aiGrader, times(1)).grade(any());
+    }
+
+    @Test
+    void anAiRegradeAfterCloseIsRefusedAsFinal() {
+        when(aiGrader.grade(any())).thenReturn(GradingResult.of(GradingOutcome.ASSIGNMENT_CLOSED, state(1, 0.6, 0.6, null)));
+
+        ResponseEntity<?> response = controller.aiGradeSubmission(100L, register(mort, "ROLE_TEACHER"));
+
+        assertEquals(409, response.getStatusCode().value());
+        assertEquals(GradingOutcome.ASSIGNMENT_CLOSED, body(response).outcome());
+    }
+
+    @Test
+    void editingAfterCloseIsRefusedAsFinal() {
+        when(gradingService.revise(any(), any(), any()))
+                .thenReturn(GradingResult.of(GradingOutcome.ASSIGNMENT_CLOSED, state(1, 0.6, 0.6, null)));
+
+        ResponseEntity<?> response = controller.updateSubmission(100L, "link", "https://example.com/v2", "", "",
+                false, null, register(author, "ROLE_STUDENT"));
+
+        assertEquals(409, response.getStatusCode().value());
+        verify(aiGrader, never()).autoGrade(any());
     }
 
     // ---- revisions ----

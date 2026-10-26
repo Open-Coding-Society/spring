@@ -61,28 +61,18 @@ public class AssignmentSubmission {
     private List<Person> assignedGraders;
 
     // ========== CONTENT AND GRADING STATE ==========
-    // Every column in this block is updatable = false: saving the entity never writes them, so a
-    // stale copy saved by any code path can't revert a grade or the content. They change only
-    // through the conditional UPDATEs in AssignmentSubmissionJPA, which SubmissionGradingService
-    // runs (one place for the grading policy, and one history entry per change).
+    // Not updatable through save(); only SubmissionGradingService changes these, via the
+    // conditional UPDATEs in AssignmentSubmissionJPA.
     //
-    // Three grades are kept apart:
-    //   aiGrade      - the AI's latest grade for the current revision, kept even when overridden
-    //   manualGrade  - a person's grade, present only while manualOverride is true
-    //   grade        - the effective grade everyone sees: manualGrade if overridden, else aiGrade
-    //
-    // manualOverride is set when a teacher, student teacher or assignment creator grades by hand
-    // (POST /api/submissions/grade/{id}). It is cleared when that person removes the override, and
-    // when the student submits new content: an override applies to the revision the person
-    // reviewed, so a revision is a new grading decision. AI grading never sets or clears it; an AI
-    // grade made while it is set is stored in aiGrade/aiSummary without changing grade.
+    // grade is the effective grade: manualGrade while manualOverride is true, otherwise aiGrade.
+    // manualOverride is set by a manual grade or an authorized correction after close, and cleared
+    // when the grader removes it or the student submits new content. AI grading never changes it.
 
     @Convert(converter = SubmissionContentConverter.class)
     @Column(columnDefinition = "text", updatable = false)
     private Map<String, Object> content;
 
-    // Starts at 1 and goes up each time the content changes. Every grading write names the
-    // revision it applies to, so a grade computed for older content is never saved on newer.
+    // Increments when the content changes; grading writes for an older revision are refused.
     @Column(updatable = false)
     private Integer revision = FIRST_REVISION;
 
@@ -95,7 +85,7 @@ public class AssignmentSubmission {
     @Column(updatable = false)
     private Double aiGrade;
 
-    // The AI's full feedback for the current revision.
+    // The AI's feedback for the current revision.
     @Column(columnDefinition = "text", updatable = false)
     private String aiSummary;
 
@@ -111,8 +101,7 @@ public class AssignmentSubmission {
     @Column(columnDefinition = "text", updatable = false)
     private String manualFeedback;
 
-    // True when the AI should (re-)grade this revision: it failed, or used the default rubric
-    // because the assignment's AI rubric wasn't ready. Never true while manualOverride is.
+    // Queued for an AI (re-)grade: the last attempt failed or used the default rubric.
     @Column(updatable = false)
     private Boolean needsAiRegrade;
 
@@ -120,6 +109,7 @@ public class AssignmentSubmission {
     @Column(updatable = false)
     private LocalDateTime gradedAt;
 
+    @Column(columnDefinition = "text")
     private String comment;
 
     private Long assignmentid;

@@ -5,14 +5,11 @@ import java.time.LocalDateTime;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 /**
- * A read-only snapshot of a submission's grading columns, read straight from the database
- * (see {@link AssignmentSubmissionJPA#findGradingState}) so it is never a stale in-memory copy.
+ * A submission's grading columns as stored (see {@link AssignmentSubmissionJPA#findGradingState}).
  *
- * @param effectiveGrade    the grade students and the gradebook see: the manual grade while an
- *                          override is active, otherwise the AI grade
- * @param aiFeedback        the AI's full feedback (stored in the ai_summary column)
- * @param manualOverride    true while a person's grade is effective; see {@link AssignmentSubmission}
- *                          for when it is set and cleared
+ * @param effectiveGrade the manual grade while overridden, otherwise the AI grade
+ * @param aiFeedback     stored in the ai_summary column
+ * @param closedAt       when the assignment closed; null while open
  */
 public record SubmissionGradingState(
         Long submissionId,
@@ -26,10 +23,10 @@ public record SubmissionGradingState(
         Boolean manualOverride,
         Double manualGrade,
         String manualFeedback,
-        Boolean needsAiRegrade) {
+        Boolean needsAiRegrade,
+        LocalDateTime closedAt) {
 
     public SubmissionGradingState {
-        // Rows from before revisions and overrides existed are backfilled, but stay defensive.
         revision = revision == null ? AssignmentSubmission.FIRST_REVISION : revision;
         manualOverride = Boolean.TRUE.equals(manualOverride);
         needsAiRegrade = Boolean.TRUE.equals(needsAiRegrade);
@@ -39,7 +36,14 @@ public record SubmissionGradingState(
         return new SubmissionGradingState(submission.getId(), submission.getRevision(), submission.getGrade(),
                 submission.getFeedback(), submission.getGradedAt(), submission.getAiGrade(),
                 submission.getAiSummary(), submission.getQualityScore(), submission.getManualOverride(),
-                submission.getManualGrade(), submission.getManualFeedback(), submission.getNeedsAiRegrade());
+                submission.getManualGrade(), submission.getManualFeedback(), submission.getNeedsAiRegrade(),
+                submission.getAssignment() == null ? null : submission.getAssignment().getClosedAt());
+    }
+
+    /** True once the assignment is closed and the grade is final. */
+    @JsonProperty("closed")
+    public boolean closed() {
+        return closedAt != null;
     }
 
     @JsonProperty("source")
@@ -50,10 +54,7 @@ public record SubmissionGradingState(
         return effectiveGrade == null ? GradeSource.NONE : GradeSource.AI;
     }
 
-    /**
-     * Mirrors this state onto an in-memory entity so callers building a response see current
-     * values. The grading columns are not updatable through the entity, so this never persists.
-     */
+    /** Copies this state onto an entity for responses; these columns are never saved from it. */
     void copyTo(AssignmentSubmission submission) {
         submission.setRevision(revision);
         submission.setGrade(effectiveGrade);

@@ -1,11 +1,8 @@
 package com.open.spring.mvc.assignments;
 
 /**
- * What a grading action did, plus the submission's grading state afterwards.
- *
- * @param state  the state read back after the action; null only when the submission is gone
- * @param detail the AI grader's own explanation for {@link GradingOutcome#AI_NOT_GRADEABLE} and
- *               {@link GradingOutcome#AI_FAILED}; null otherwise
+ * @param state  grading state after the action; null if the submission is gone or the caller is refused
+ * @param detail the AI grader's message for AI failures; null otherwise
  */
 public record GradingResult(GradingOutcome outcome, SubmissionGradingState state, String detail) {
 

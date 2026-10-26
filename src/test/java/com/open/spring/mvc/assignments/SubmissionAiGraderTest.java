@@ -20,7 +20,8 @@ class SubmissionAiGraderTest {
 
     private final AssignmentAiGradingService aiGradingService = mock(AssignmentAiGradingService.class);
     private final SubmissionGradingService gradingService = mock(SubmissionGradingService.class);
-    private final SubmissionAiGrader grader = new SubmissionAiGrader(aiGradingService, gradingService);
+    private final GradeReviewService reviewService = mock(GradeReviewService.class);
+    private final SubmissionAiGrader grader = new SubmissionAiGrader(aiGradingService, gradingService, reviewService);
 
     private AssignmentSubmission submission;
 
@@ -28,10 +29,11 @@ class SubmissionAiGraderTest {
     void setUp() {
         submission = submission(100L, assignment(10L, "pilot"));
         submission.setRevision(3);
+        when(gradingService.currentState(100L)).thenReturn(Optional.of(state(null, null, null)));
     }
 
     private static SubmissionGradingState state(Double effective, Double ai, Double manual) {
-        return new SubmissionGradingState(100L, 3, effective, null, null, ai, null, null, manual != null, manual, null, false);
+        return new SubmissionGradingState(100L, 3, effective, null, null, ai, null, null, manual != null, manual, null, false, null);
     }
 
     @Test
@@ -102,5 +104,42 @@ class SubmissionAiGraderTest {
         grader.autoGrade(submission);
 
         verify(gradingService, never()).flagForAiRegrade(any(), eq(3));
+    }
+
+    @Test
+    void aClosedAssignmentIsNeverSentToTheAi() throws Exception {
+        when(gradingService.currentState(100L)).thenReturn(Optional.of(new SubmissionGradingState(100L, 3, 0.8, null,
+                null, 0.8, null, null, false, null, null, false, java.time.LocalDateTime.of(2026, 10, 25, 15, 0))));
+
+        GradingResult result = grader.grade(submission);
+
+        assertEquals(GradingOutcome.ASSIGNMENT_CLOSED, result.outcome());
+        verify(aiGradingService, never()).grade(any());
+        verify(gradingService, never()).recordAiGrade(any(), anyInt(), any());
+    }
+
+    // ---- AI re-evaluation as review evidence ----
+
+    @Test
+    void aReviewEvaluationIsRecordedOnTheReviewOnly() throws Exception {
+        GradeReview review = new GradeReview();
+        when(reviewService.aiEvaluationTarget(eq(55L), any()))
+                .thenReturn(new GradeReviewService.AiEvaluationTarget(review, submission, null));
+        var graded = AssignmentAiGradingService.GradeResult.graded(0.75, 3, "Re-evaluated.", false);
+        when(aiGradingService.grade(submission)).thenReturn(graded);
+        when(reviewService.recordAiEvaluation(eq(55L), any(), eq(graded)))
+                .thenReturn(GradeReviewService.ReviewResult.of(GradingOutcome.EVIDENCE_RECORDED, review, null));
+
+        assertEquals(GradingOutcome.EVIDENCE_RECORDED, grader.evaluateForReview(55L, null).outcome());
+        verify(gradingService, never()).recordAiGrade(any(), anyInt(), any());
+    }
+
+    @Test
+    void aRefusedReviewEvaluationNeverCallsTheAi() throws Exception {
+        when(reviewService.aiEvaluationTarget(eq(55L), any()))
+                .thenReturn(GradeReviewService.AiEvaluationTarget.refused(GradingOutcome.NOT_PERMITTED));
+
+        assertEquals(GradingOutcome.NOT_PERMITTED, grader.evaluateForReview(55L, null).outcome());
+        verify(aiGradingService, never()).grade(any());
     }
 }

@@ -21,6 +21,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -32,17 +33,16 @@ import org.mockito.InOrder;
 
 import com.open.spring.mvc.person.Person;
 
-/**
- * The grading policy in {@link SubmissionGradingService}: which outcome each action has and which
- * history entry it records. The SQL behind each conditional write is exercised against SQLite in
- * {@link SubmissionGradingPersistenceTest}; here the repository just reports how many rows matched.
- */
+/** Outcomes and history entries of {@link SubmissionGradingService}; the SQL is covered by the SQLite test. */
 class SubmissionGradingServiceTest {
 
     private final AssignmentSubmissionJPA submissionRepo = mock(AssignmentSubmissionJPA.class);
+    private final AssignmentJpaRepository assignmentRepo = mock(AssignmentJpaRepository.class);
     private final SubmissionGradeEventJPA eventRepo = mock(SubmissionGradeEventJPA.class);
     private final SubmissionGradingService service =
-            new SubmissionGradingService(submissionRepo, eventRepo, new AssignmentAuthorizationService());
+            new SubmissionGradingService(submissionRepo, assignmentRepo, eventRepo, new AssignmentAuthorizationService());
+
+    private static final LocalDateTime CLOSED_AT = LocalDateTime.of(2026, 10, 25, 15, 0);
 
     private final Person mort = teacher(3L, "mort");
     private AssignmentSubmission submission;
@@ -53,11 +53,19 @@ class SubmissionGradingServiceTest {
         submission.setContent(Map.of("type", "link", "url", "https://example.com/v1"));
         when(submissionRepo.lockForGrading(100L)).thenReturn(1);
         when(submissionRepo.findById(100L)).thenReturn(Optional.of(submission));
+        when(assignmentRepo.lockIfOpen(10L)).thenReturn(1);
     }
 
     private static SubmissionGradingState state(int revision, Double effective, Double ai, Double manual) {
         return new SubmissionGradingState(100L, revision, effective, null, null, ai, "AI says", 3,
-                manual != null, manual, manual == null ? null : "Teacher says", false);
+                manual != null, manual, manual == null ? null : "Teacher says", false, null);
+    }
+
+    /** The same state after the assignment closed. */
+    private static SubmissionGradingState closed(SubmissionGradingState state) {
+        return new SubmissionGradingState(state.submissionId(), state.revision(), state.effectiveGrade(),
+                state.effectiveFeedback(), state.gradedAt(), state.aiGrade(), state.aiFeedback(), state.qualityScore(),
+                state.manualOverride(), state.manualGrade(), state.manualFeedback(), state.needsAiRegrade(), CLOSED_AT);
     }
 
     private void stateIs(SubmissionGradingState... states) {
@@ -170,7 +178,6 @@ class SubmissionGradingServiceTest {
         verify(submissionRepo, never()).applyManualOverride(anyLong(), anyInt(), any(), any(), any());
         assertTrue(SubmissionGradingService.isValidGrade(0.0, submission.getAssignment()));
         assertTrue(SubmissionGradingService.isValidGrade(5.0, submission.getAssignment()));
-        // Without points the scale is out of 1, as the AI grades it.
         assertTrue(SubmissionGradingService.isValidGrade(1.0, null));
         assertFalse(SubmissionGradingService.isValidGrade(1.5, null));
     }
@@ -338,8 +345,8 @@ class SubmissionGradingServiceTest {
 
         InOrder order = inOrder(submissionRepo);
         order.verify(submissionRepo).lockForGrading(100L);
-        order.verify(submissionRepo).save(submission);
         order.verify(submissionRepo).findGradingState(100L);
+        order.verify(submissionRepo).save(submission);
         order.verify(submissionRepo).startRevision(100L, 1, newContent);
     }
 
@@ -358,7 +365,6 @@ class SubmissionGradingServiceTest {
 
     @Test
     void aRevisionFromAnOutdatedCopyIsStale() {
-        // The copy was loaded at revision 1, but someone else revised it first.
         stateIs(state(2, null, null, null));
         when(submissionRepo.startRevision(anyLong(), anyInt(), any())).thenReturn(0);
 
@@ -372,9 +378,103 @@ class SubmissionGradingServiceTest {
 
     @Test
     void theAiQueueFlagIsSetOnlyThroughTheGuardedUpdate() {
+        stateIs(state(1, null, null, null));
         when(submissionRepo.flagForAiRegrade(100L, 1)).thenReturn(1, 0);
 
         assertTrue(service.flagForAiRegrade(100L, 1));
         assertFalse(service.flagForAiRegrade(100L, 1));
+    }
+
+    // ---- closure: after close the grade is final ----
+
+    @Test
+    void aSubmissionToAClosedAssignmentIsRefusedAndNothingIsRecorded() {
+        when(assignmentRepo.lockIfOpen(10L)).thenReturn(0);
+
+        GradingResult result = service.submit(submission, student(5L, "hop"));
+
+        assertEquals(GradingOutcome.ASSIGNMENT_CLOSED, result.outcome());
+        verify(eventRepo, never()).save(any());
+    }
+
+    @Test
+    void aSubmissionIsSavedBeforeTheAssignmentLockIsTaken() {
+        when(submissionRepo.save(submission)).thenReturn(submission);
+
+        assertEquals(GradingOutcome.REVISION_CREATED, service.submit(submission, student(5L, "hop")).outcome());
+
+        InOrder order = inOrder(assignmentRepo, submissionRepo);
+        order.verify(submissionRepo).save(submission);
+        order.verify(assignmentRepo).lockIfOpen(10L);
+    }
+
+    @Test
+    void noOrdinaryGradingWriteHappensAfterClose() {
+        stateIs(closed(state(1, 0.6, 0.6, null)));
+        Person studentTeacher = student(7L, "lex");
+        submission.getAssignment().getCreators().add(studentTeacher);
+
+        assertEquals(GradingOutcome.ASSIGNMENT_CLOSED, service.applyManualGrade(100L, mort, null, 0.5, null).outcome());
+        assertEquals(GradingOutcome.ASSIGNMENT_CLOSED, service.applyManualGrade(100L, studentTeacher, null, 0.5, null).outcome());
+        assertEquals(GradingOutcome.ASSIGNMENT_CLOSED, service.clearManualOverride(100L, mort, null).outcome());
+        assertEquals(GradingOutcome.ASSIGNMENT_CLOSED,
+                service.revise(submission, Map.of("type", "link", "url", "https://example.com/v2"), null).outcome());
+        assertEquals(GradingOutcome.ASSIGNMENT_CLOSED, service.recordAiGrade(100L, 1,
+                AssignmentAiGradingService.GradeResult.graded(0.9, 3, "Late AI", false)).outcome());
+        assertFalse(service.flagForAiRegrade(100L, 1));
+
+        verify(submissionRepo, never()).applyManualOverride(anyLong(), anyInt(), any(), any(), any());
+        verify(submissionRepo, never()).clearManualOverride(anyLong(), anyInt(), any());
+        verify(submissionRepo, never()).startRevision(anyLong(), anyInt(), any());
+        verify(submissionRepo, never()).save(any());
+        verify(submissionRepo, never()).recordAiGrade(anyLong(), anyInt(), any(), any(), any());
+        verify(submissionRepo, never()).flagForAiRegrade(anyLong(), anyInt());
+        verify(eventRepo, never()).save(any());
+    }
+
+    @Test
+    void anAuthorizedCorrectionIsAManualOverrideLinkedToItsReview() {
+        stateIs(closed(state(1, 0.6, 0.6, null)), closed(state(1, 0.8, 0.6, 0.8)));
+        when(submissionRepo.applyManualOverride(eq(100L), eq(1), eq(0.8), eq("Corrected"), any())).thenReturn(1);
+        GradeReview review = new GradeReview();
+        review.setId(55L);
+
+        GradingResult result = service.applyAuthorizedCorrection(submission, review, 0.8, "Corrected", mort);
+
+        assertEquals(GradingOutcome.GRADE_CORRECTED, result.outcome());
+        SubmissionGradeEvent event = savedEvents(1).get(0);
+        assertEquals(SubmissionGradeEvent.Type.AUTHORIZED_CORRECTION, event.getType());
+        assertEquals(55L, event.getReviewId());
+        assertEquals(0.8, event.getGrade());
+        assertEquals(3L, event.getActorId());
+    }
+
+    @Test
+    void anAuthorizedCorrectionStillValidatesTheGrade() {
+        stateIs(closed(state(1, 0.6, 0.6, null)));
+
+        GradingResult result = service.applyAuthorizedCorrection(submission, new GradeReview(), 5.0, null, mort);
+
+        assertEquals(GradingOutcome.INVALID_GRADE, result.outcome());
+        verify(submissionRepo, never()).applyManualOverride(anyLong(), anyInt(), any(), any(), any());
+        verify(eventRepo, never()).save(any());
+    }
+
+    @Test
+    void closingAndReviewDecisionsAreRecordedInTheHistory() {
+        SubmissionGradingState finalState = closed(state(1, 0.6, 0.6, null));
+        GradeReview review = new GradeReview();
+        review.setId(56L);
+        review.setRationale("Rubric applied correctly");
+
+        service.recordFinalized(finalState, mort);
+        service.recordReviewNoChange(finalState, review, mort);
+
+        List<SubmissionGradeEvent> events = savedEvents(2);
+        assertEquals(SubmissionGradeEvent.Type.FINALIZED, events.get(0).getType());
+        assertEquals(0.6, events.get(0).getGrade());
+        assertEquals(SubmissionGradeEvent.Type.REVIEW_NO_CHANGE, events.get(1).getType());
+        assertEquals("Rubric applied correctly", events.get(1).getFeedback());
+        assertEquals(56L, events.get(1).getReviewId());
     }
 }

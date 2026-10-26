@@ -117,8 +117,7 @@ public class GeminiFeedbackService {
 
         Feedback saved = feedbackRepository.save(fb);
 
-        // Record the normalized grade as the submission's AI grade. It becomes effective only if
-        // no person has overridden the grade, and only for the revision Gemini actually read.
+        // Recorded as the AI grade for the revision Gemini read; a manual override stays effective.
         String shortFeedback = parsed.getOverallFeedback() != null && !parsed.getOverallFeedback().isEmpty()
                 ? String.join("; ", parsed.getOverallFeedback().subList(0, Math.min(3, parsed.getOverallFeedback().size())))
                 : null;

@@ -4,14 +4,11 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import com.open.spring.mvc.person.Person;
+
 /**
- * Runs the AI grader on a submission and records the result through
- * {@link SubmissionGradingService}. The AI call takes seconds, so it runs outside any transaction;
- * the result is saved against the revision that was graded, which is what keeps a teacher's grade
- * or a student's newer content from being overwritten when the AI finishes.
- *
- * Callers must pass a submission whose assignment is loaded (not a lazy proxy outside a session),
- * because the grader reads the assignment's rubric.
+ * Calls the AI grader outside any transaction and records the result for the revision it graded.
+ * Callers pass a submission whose assignment is loaded, since the grader reads its rubric.
  */
 @Service
 public class SubmissionAiGrader {
@@ -20,43 +17,39 @@ public class SubmissionAiGrader {
 
     private final AssignmentAiGradingService aiGradingService;
     private final SubmissionGradingService gradingService;
+    private final GradeReviewService reviewService;
 
-    public SubmissionAiGrader(AssignmentAiGradingService aiGradingService, SubmissionGradingService gradingService) {
+    public SubmissionAiGrader(AssignmentAiGradingService aiGradingService, SubmissionGradingService gradingService,
+            GradeReviewService reviewService) {
         this.aiGradingService = aiGradingService;
         this.gradingService = gradingService;
+        this.reviewService = reviewService;
     }
 
-    /**
-     * Grades the submission's current revision and records the result. The entity is updated in
-     * memory with the saved grading state.
-     */
+    /** Grades the current revision and copies the saved state onto the entity. */
     public GradingResult grade(AssignmentSubmission submission) {
         int revision = submission.currentRevision();
-        AssignmentAiGradingService.GradeResult result;
-        try {
-            result = aiGradingService.grade(submission);
-        } catch (Exception e) {
-            logger.warn("AI grading failed submission={} failureType={}", submission.getId(), e.getClass().getSimpleName());
-            return failure(GradingOutcome.AI_FAILED, submission,
-                    e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+        SubmissionGradingState before = gradingService.currentState(submission.getId()).orElse(null);
+        if (before == null) {
+            return GradingResult.notFound();
         }
-        if (result.isGraded()) {
-            GradingResult recorded = gradingService.recordAiGrade(submission.getId(), revision, result);
-            if (recorded.state() != null) {
-                recorded.state().copyTo(submission);
-            }
-            logger.info("AI grade for submission={} revision={}: {}", submission.getId(), revision, recorded.outcome());
-            return recorded;
+        if (before.closed()) {
+            return GradingResult.of(GradingOutcome.ASSIGNMENT_CLOSED, before);
         }
-        GradingOutcome outcome = "not_gradeable".equals(result.status())
-                ? GradingOutcome.AI_NOT_GRADEABLE : GradingOutcome.AI_FAILED;
-        return failure(outcome, submission, result.message());
+        AssignmentAiGradingService.GradeResult result = callAi(submission);
+        if (!result.isGraded()) {
+            return new GradingResult(failureOutcome(result),
+                    gradingService.currentState(submission.getId()).orElse(null), result.message());
+        }
+        GradingResult recorded = gradingService.recordAiGrade(submission.getId(), revision, result);
+        if (recorded.state() != null) {
+            recorded.state().copyTo(submission);
+        }
+        logger.info("AI grade for submission={} revision={}: {}", submission.getId(), revision, recorded.outcome());
+        return recorded;
     }
 
-    /**
-     * Best-effort grading right after a submit or a revision. A failed grade never fails the
-     * request: the work is saved either way and the revision is queued for an AI retry.
-     */
+    /** Grades right after a submit or revision; a failure queues the revision for a retry. */
     public GradingResult autoGrade(AssignmentSubmission submission) {
         GradingResult result = grade(submission);
         if (result.outcome() == GradingOutcome.AI_FAILED
@@ -66,7 +59,30 @@ public class SubmissionAiGrader {
         return result;
     }
 
-    private GradingResult failure(GradingOutcome outcome, AssignmentSubmission submission, String detail) {
-        return new GradingResult(outcome, gradingService.currentState(submission.getId()).orElse(null), detail);
+    /** Re-evaluates a closed submission as review evidence; the grade itself is not changed. */
+    public GradeReviewService.ReviewResult evaluateForReview(Long reviewId, Person teacher) {
+        GradeReviewService.AiEvaluationTarget target = reviewService.aiEvaluationTarget(reviewId, teacher);
+        if (target.refusal() != null) {
+            return GradeReviewService.ReviewResult.of(target.refusal());
+        }
+        AssignmentAiGradingService.GradeResult result = callAi(target.submission());
+        if (!result.isGraded()) {
+            return new GradeReviewService.ReviewResult(failureOutcome(result), target.review(), null, result.message());
+        }
+        return reviewService.recordAiEvaluation(reviewId, teacher, result);
+    }
+
+    private AssignmentAiGradingService.GradeResult callAi(AssignmentSubmission submission) {
+        try {
+            return aiGradingService.grade(submission);
+        } catch (Exception e) {
+            logger.warn("AI grading failed submission={} failureType={}", submission.getId(), e.getClass().getSimpleName());
+            return AssignmentAiGradingService.GradeResult.failed(
+                    e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
+        }
+    }
+
+    private static GradingOutcome failureOutcome(AssignmentAiGradingService.GradeResult result) {
+        return "not_gradeable".equals(result.status()) ? GradingOutcome.AI_NOT_GRADEABLE : GradingOutcome.AI_FAILED;
     }
 }

@@ -474,6 +474,9 @@ class AssignmentsApiControllerCreatorTest {
             // SubmissionGradingPersistenceTest; here a graded result is simply applied.
             when(gradingService.recordAiGrade(any(), anyInt(), any())).thenAnswer(call -> GradingResult.of(
                     GradingOutcome.AI_GRADE_APPLIED, aiGradedState(call.getArgument(0), call.getArgument(2))));
+            // Every assignment here is open.
+            when(gradingService.currentState(any())).thenAnswer(call -> java.util.Optional.of(new SubmissionGradingState(
+                    call.getArgument(0), 1, null, null, null, null, null, null, false, null, null, true, null)));
         }
 
         @Mock AssignmentSubmissionJPA submissionRepo;
@@ -563,7 +566,7 @@ class AssignmentsApiControllerCreatorTest {
             when(aiGradingService.grade(any()))
                     .thenReturn(AssignmentAiGradingService.GradeResult.graded(0.85, 3, "Good.", false));
             org.mockito.Mockito.doReturn(GradingResult.of(GradingOutcome.MANUAL_OVERRIDE_KEPT,
-                    new SubmissionGradingState(10L, 1, 0.95, "Teacher", null, 0.85, "Good.", 3, true, 0.95, "Teacher", false)))
+                    new SubmissionGradingState(10L, 1, 0.95, "Teacher", null, 0.85, "Good.", 3, true, 0.95, "Teacher", false, null)))
                     .when(gradingService).recordAiGrade(any(), anyInt(), any());
 
             service().runOnce();
@@ -638,12 +641,12 @@ class AssignmentsApiControllerCreatorTest {
 
         private AssignmentAiRegradeService service() {
             return new AssignmentAiRegradeService(submissionRepo, assignmentRepo,
-                    new SubmissionAiGrader(aiGradingService, gradingService), gradingService, rubricService, jdbcTemplate);
+                    new SubmissionAiGrader(aiGradingService, gradingService, org.mockito.Mockito.mock(GradeReviewService.class)), gradingService, rubricService, jdbcTemplate);
         }
 
         private static SubmissionGradingState aiGradedState(Long id, AssignmentAiGradingService.GradeResult result) {
             return new SubmissionGradingState(id, AssignmentSubmission.FIRST_REVISION, result.grade(), result.feedback(),
-                    null, result.grade(), result.feedback(), result.qualityScore(), false, null, null, false);
+                    null, result.grade(), result.feedback(), result.qualityScore(), false, null, null, false, null);
         }
 
         private static Assignment assignment(String rubric) {

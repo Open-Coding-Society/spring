@@ -216,9 +216,12 @@ public class AssignmentSubmissionAPIController {
             submission.setWorkHabits(submissionInfo.workHabits);
             submission.setAiOrchestration(submissionInfo.aiOrchestration);
             submission.setSelfAssessmentReflection(submissionInfo.selfAssessmentReflection);
-            AssignmentSubmission savedSubmission = gradingService.submit(submission, getAuthenticatedPerson(userDetails));
-            aiGrader.autoGrade(savedSubmission);
-            return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
+            GradingResult submitted = gradingService.submit(submission, getAuthenticatedPerson(userDetails));
+            if (submitted.outcome() != GradingOutcome.REVISION_CREATED) {
+                return GradingResponse.from(submitted); // the assignment is closed
+            }
+            aiGrader.autoGrade(submission);
+            return new ResponseEntity<>(new AssignmentSubmissionReturnDto(submission), HttpStatus.CREATED);
         }
         Map<String, String> error = new HashMap<>();
         error.put("error", "Assignment not found");
@@ -298,9 +301,12 @@ public class AssignmentSubmissionAPIController {
             submission.setWorkHabits(requestData.workHabits);
             submission.setAiOrchestration(requestData.aiOrchestration);
             submission.setSelfAssessmentReflection(requestData.selfAssessmentReflection);
-            AssignmentSubmission savedSubmission = gradingService.submit(submission, getAuthenticatedPerson(userDetails));
-            aiGrader.autoGrade(savedSubmission);
-            return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
+            GradingResult submitted = gradingService.submit(submission, getAuthenticatedPerson(userDetails));
+            if (submitted.outcome() != GradingOutcome.REVISION_CREATED) {
+                return GradingResponse.from(submitted); // the assignment is closed
+            }
+            aiGrader.autoGrade(submission);
+            return new ResponseEntity<>(new AssignmentSubmissionReturnDto(submission), HttpStatus.CREATED);
         }
         Map<String, String> error = new HashMap<>();
         error.put("error", "Assignment not found");
@@ -308,9 +314,8 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Edits a submission. New content becomes a new revision, which is re-graded by the AI and
-     * releases any manual override (see {@link SubmissionGradingService}). Deliberately not
-     * transactional: the AI grading below must not run while a database transaction is open.
+     * Edits a submission; new content becomes a new revision and is re-graded. Not transactional,
+     * so no transaction is open during the AI call.
      */
     @PutMapping(value = "/{submissionId}", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<?> updateSubmission(
@@ -399,16 +404,10 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Manually grade a submission (manual override). The grade becomes the effective grade and
-     * stays effective through any AI grading, until it is cleared or the student revises.
+     * Sets a manual grade (manual override).
      *
      * @param grade    0 to the assignment's points
-     * @param feedback optional feedback for the student
-     * @param revision the revision the grader reviewed; if the student has revised since, nothing
-     *                 is saved and the response is STALE_REVISION. Optional for older clients.
-     *
-     * Not transactional: the service finds, authorizes and grades the submission in one
-     * transaction of its own that takes the submission's lock first.
+     * @param revision the revision the grader saw; a newer one gets STALE_REVISION. Optional.
      */
     @PostMapping("/grade/{submissionId}")
     public ResponseEntity<?> gradeSubmission(
@@ -426,10 +425,7 @@ public class AssignmentSubmissionAPIController {
         return GradingResponse.from(gradingService.applyManualGrade(submissionId, currentUser, revision, grade, feedback));
     }
 
-    /**
-     * Remove a manual override so the AI grade is effective again (the AI grades the revision
-     * first if it hasn't yet). Not transactional, for the same reason as gradeSubmission.
-     */
+    /** Removes a manual override so the AI grade is effective again. */
     @DeleteMapping("/grade/{submissionId}")
     public ResponseEntity<?> clearManualGrade(
             @PathVariable Long submissionId,
@@ -444,10 +440,7 @@ public class AssignmentSubmissionAPIController {
         return GradingResponse.from(gradingService.clearManualOverride(submissionId, currentUser, revision));
     }
 
-    /**
-     * A submission's grading history, oldest first, with its current grading state. Visible to
-     * whoever may grade the submission and to its submitter.
-     */
+    /** Grading history, oldest first, for the submission's graders and its submitter. */
     @GetMapping("/{submissionId}/grading-history")
     @Transactional
     public ResponseEntity<?> getGradingHistory(
@@ -481,7 +474,7 @@ public class AssignmentSubmissionAPIController {
     public record GradingHistoryResponse(SubmissionGradingState current, List<GradeEventDto> events) {
     }
 
-    /** One history entry; actorName is null for the AI or a deleted account. */
+    /** actorName is null for the AI or a deleted account. */
     public record GradeEventDto(Long id, Integer revision, SubmissionGradeEvent.Type type, Double grade,
             String feedback, Boolean effective, Long actorId, String actorName, Map<String, Object> content,
             LocalDateTime createdAt) {
@@ -578,9 +571,8 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * AI-grade a submission now. The AI grade and feedback are always saved; if a manual override
-     * is active it stays effective (outcome MANUAL_OVERRIDE_KEPT). Deliberately not transactional,
-     * so no database transaction is held open during the AI call.
+     * AI re-grade on request, for anyone who may grade the submission, until the assignment
+     * closes. Not transactional, so no transaction is open during the AI call.
      */
     @PostMapping("/ai-grade/{submissionId}")
     public ResponseEntity<?> aiGradeSubmission(
@@ -590,15 +582,12 @@ public class AssignmentSubmissionAPIController {
         if (currentUser == null) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required"));
         }
-        // AI grading calls an external, metered API - deliberately kept to teacher/admin only,
-        // narrower than canManageSubmission's teacher-or-creator reach for grading/deletion.
-        if (!assignmentAuthorizationService.isTeacherOrAdmin(currentUser)) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Admin or teacher access required"));
-        }
-
         AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
         if (submission == null) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Submission not found"));
+            return GradingResponse.from(GradingResult.notFound());
+        }
+        if (!gradingService.canManage(submissionId, currentUser)) {
+            return GradingResponse.from(GradingResult.notPermitted());
         }
         loadAssignment(submission);
         return GradingResponse.from(aiGrader.grade(submission));
@@ -872,8 +861,7 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Replaces the submission's lazy assignment proxy with the loaded assignment, for methods that
-     * run outside a transaction (the AI grader and the response DTO both read it).
+     * Replaces the lazy assignment proxy with the loaded assignment, for use outside a transaction.
      */
     private void loadAssignment(AssignmentSubmission submission) {
         if (submission.getAssignment() != null) {

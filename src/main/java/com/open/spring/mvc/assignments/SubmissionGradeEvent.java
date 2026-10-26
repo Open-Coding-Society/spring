@@ -18,12 +18,8 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * One append-only entry in a submission's grading history: what the student submitted and when,
- * what the AI graded, and when a person overrode or released a grade. Rows are only ever inserted,
- * by {@link SubmissionGradingService}, in the same transaction as the change they describe.
- *
- * submissionId is a plain column rather than a foreign key so the audit trail outlives a deleted
- * submission. The table is created by {@link AssignmentSubmissionGradingMigration}.
+ * An append-only entry in a submission's grading history, written in the same transaction as the
+ * change it records. submissionId is not a foreign key, so history outlives a deleted submission.
  */
 @Data
 @NoArgsConstructor
@@ -34,18 +30,15 @@ import lombok.NoArgsConstructor;
 public class SubmissionGradeEvent {
 
     public enum Type {
-        /** The first version of the submission; content holds what was submitted. */
         SUBMITTED,
-        /** The student changed the content; content holds the new revision. */
         REVISED,
-        /** The AI graded the revision; effective says whether its grade became the effective grade. */
         AI_GRADED,
-        /** A person set the grade by hand; it is effective until cleared or the work is revised. */
         MANUAL_OVERRIDE_SET,
-        /** A person removed their override, so the AI grade is effective again. */
         MANUAL_OVERRIDE_CLEARED,
-        /** A new revision released the override, which applied to the revision the person reviewed. */
-        MANUAL_OVERRIDE_RELEASED_BY_REVISION
+        MANUAL_OVERRIDE_RELEASED_BY_REVISION,
+        FINALIZED,
+        REVIEW_NO_CHANGE,
+        AUTHORIZED_CORRECTION
     }
 
     @Id
@@ -67,11 +60,14 @@ public class SubmissionGradeEvent {
     @Column(columnDefinition = "text")
     private String feedback;
 
-    // Whether this event's grade became the effective grade; null for events without a grade.
+    // Whether this grade became the effective grade.
     private Boolean effective;
 
     // The person who acted; null for the AI.
     private Long actorId;
+
+    // Set for review decisions and authorized corrections.
+    private Long reviewId;
 
     @Convert(converter = SubmissionContentConverter.class)
     @Column(columnDefinition = "text")
