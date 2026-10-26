@@ -148,6 +148,14 @@ public class ModelInit {
                         // column may already exist; ignore
                     }
 
+                    // Image messages: ddl-auto=none, so prod gets the column here (TEXT works on SQLite and MySQL).
+                    try {
+                        st.execute("ALTER TABLE direct_message ADD COLUMN image TEXT;");
+                        System.out.println("Added 'image' column to 'direct_message' table");
+                    } catch (SQLException ignore) {
+                        // column may already exist; ignore
+                    }
+
                     try {
                         Iterable<Adventure> all = adventureJpaRepository.findAll();
                         for (Adventure adv : all) {
