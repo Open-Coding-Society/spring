@@ -58,6 +58,8 @@ public class DirectMessageApiController {
     @AllArgsConstructor
     public static class SendMessageRequest {
         private String body;
+        /** Optional data URL; a message may be an image with no text. */
+        private String image;
     }
 
     @GetMapping("/conversations")
@@ -177,16 +179,23 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         }
 
-        if (request == null || request.getBody() == null || request.getBody().isBlank()) {
+        if (request == null) {
             return new ResponseEntity<>(Map.of("error", "body is required"), HttpStatus.BAD_REQUEST);
         }
 
-        String body = request.getBody().trim();
+        String image = request.getImage();
+        boolean hasImage = image != null && !image.isBlank();
+        String body = request.getBody() == null ? "" : request.getBody().trim();
+        // An image on its own is a message; text is only required without one.
+        if (body.isBlank() && !hasImage) {
+            return new ResponseEntity<>(Map.of("error", "body is required"), HttpStatus.BAD_REQUEST);
+        }
         if (body.length() > DirectMessageService.MAX_BODY_LENGTH) {
             return new ResponseEntity<>(Map.of("error", "body is too long"), HttpStatus.BAD_REQUEST);
         }
 
-        DirectMessageEvent event = directMessageService.postMessage(conversation, person, body);
+        DirectMessageEvent event = directMessageService.postMessage(
+                conversation, person, body, hasImage ? image : null);
         return new ResponseEntity<>(event, HttpStatus.OK);
     }
 
@@ -309,12 +318,15 @@ public class DirectMessageApiController {
 
     private Map<String, Object> messageSummary(DirectMessage message) {
         Person sender = message.getSender();
+        // A deleted message's image goes with its text: the tombstone shows neither.
+        String image = message.isDeleted() || message.getImage() == null ? "" : message.getImage();
         return Map.of(
                 "id", message.getId(),
                 "senderUid", sender.getUid(),
                 "senderName", sender.getName(),
                 "senderPfp", sender.getPfp() == null ? "" : sender.getPfp(),
                 "body", message.getBody() == null ? "" : message.getBody(),
+                "image", image,
                 "sentAt", message.getSentAt().toString(),
                 "deleted", message.isDeleted(),
                 "edited", message.isEdited());

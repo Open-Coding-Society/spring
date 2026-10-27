@@ -97,7 +97,7 @@ public class GroupChatRealtimeService {
     public GroupChatEvent publishFile(Long groupId, String sender, String filename, String base64Data) {
         Groups group = getGroupOrThrow(groupId);
 
-        String uploadResult = groupChatService.uploadSharedFile(group.getName(), filename, base64Data);
+        String uploadResult = groupChatService.uploadSharedFile(group.getName(), filename, base64Data, sender);
         if (uploadResult == null) {
             throw new IllegalStateException("Upload failed");
         }
