@@ -372,7 +372,7 @@ first migration; this section is the summary.
 
 1. Start the local instance of RustFS:
 ```
-docker compose --f rustfs.yml up -d
+docker-compose -f rustfs.yml up -d
 ```
 2. Uncomment this line in `.env`:
 ```
