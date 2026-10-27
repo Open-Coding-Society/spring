@@ -49,6 +49,9 @@ class SelfAssessmentPausedTest {
     @Mock
     private FileHandler fileHandler;
 
+    @Mock
+    private SubmissionGradeEventJPA eventRepo;
+
     private AssignmentSubmissionAPIController controller;
     private AssignmentSubmissionFileApiController fileController;
 
@@ -63,14 +66,18 @@ class SelfAssessmentPausedTest {
         ReflectionTestUtils.setField(controller, "submissionRepo", submissionRepo);
         ReflectionTestUtils.setField(controller, "assignmentRepo", assignmentRepo);
         ReflectionTestUtils.setField(controller, "personRepo", personRepo);
-        ReflectionTestUtils.setField(controller, "aiGradingService", aiGradingService);
+        SubmissionGradingService gradingService = new SubmissionGradingService(submissionRepo, assignmentRepo, eventRepo,
+                new AssignmentAuthorizationService());
+        SubmissionAiGrader aiGrader = new SubmissionAiGrader(aiGradingService, gradingService, Mockito.mock(GradeReviewService.class));
+        when(assignmentRepo.lockIfOpen(any())).thenReturn(1); // every assignment here is open
+        ReflectionTestUtils.setField(controller, "gradingService", gradingService);
+        ReflectionTestUtils.setField(controller, "aiGrader", aiGrader);
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
 
-        AssignmentSubmissionHistoryService historyService = AssignmentSubmissionHistoryTest.historyService(
-                submissionRepo, Mockito.mock(AssignmentSubmissionHistoryJPA.class), aiGradingService);
+        AssignmentSubmissionHistoryService historyService = new AssignmentSubmissionHistoryService(submissionRepo, gradingService);
         ReflectionTestUtils.setField(controller, "historyService", historyService);
         AssignmentSubmissionUploadService uploadService = new AssignmentSubmissionUploadService(
-                fileHandler, personRepo, assignmentRepo, historyService);
+                fileHandler, personRepo, assignmentRepo, historyService, aiGrader);
         fileController = new AssignmentSubmissionFileApiController(uploadService);
 
         student = student(1L, "toby");

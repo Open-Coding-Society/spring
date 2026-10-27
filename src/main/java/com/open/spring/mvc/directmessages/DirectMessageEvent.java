@@ -21,6 +21,8 @@ public class DirectMessageEvent {
     private String senderName;
     private String senderPfp;
     private String body;
+    /** Data URL for a message that carries an image; null otherwise. */
+    private String image;
     private String sentAt;
     private boolean deleted;
     private boolean edited;

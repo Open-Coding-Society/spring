@@ -1,4 +1,18 @@
-# Runtime links
+# Introduction
+
+Founded and maintained by John Mortensen, Open Coding Society's Spring project supports students as they progress from learning object-oriented programming in Java to building integrated, data-driven applications.
+
+In the OCS computer science pathway, students move beyond individual classes and methods to explore how software components work together. Spring provides a foundation for building APIs, organizing application logic, mapping objects to persistent data, and connecting Java applications to databases and other services.
+
+The project connects classroom concepts—including classes, objects, encapsulation, and data structures—to the architecture of working applications. Students can examine how controllers, services, persistence layers, and application models fit together, then use those patterns in their own projects.
+
+As students progress into Computer Science A and Honors Capstone, this foundation supports more substantial work: integrating frontend applications with backend services, managing shared data, implementing application workflows, and collaborating on systems that serve real users.
+
+This repository is both a starter for student projects and a codebase to learn from. Students can use it as a template, adapt its components to new problems, and contribute improvements back to Open Coding Society.
+
+The goal is not simply to learn a framework. It is to develop the engineering judgment needed to understand, build, test, and maintain software systems.
+
+## Runtime links
 
 Backend UI
 
@@ -167,6 +181,8 @@ AWS_BUCKET_NAME=your-bucket-name
 AWS_ACCESS_KEY_ID=your-access-key
 AWS_SECRET_ACCESS_KEY=your-secret-key
 AWS_REGION=us-east-2
+# if developing locally, set the endoint heree
+# AWS_S3_ENDPOINT=http://localhost:9000
 ```
 
 
@@ -350,6 +366,18 @@ The step-by-step production procedure -- with the gates, the rollback paths, and
 of what was wrong with the old scripts -- lives at
 <https://pages.opencodingsociety.com/documentation/migration-runbook>. Read it before your
 first migration; this section is the summary.
+
+## Local S3 Development
+
+1. Start the local instance of RustFS:
+```
+docker compose --f rustfs.yml up -d
+```
+2. Uncomment this line in `.env`:
+```
+AWS_S3_ENDPOINT=http://localhost:9000
+```
+
 
 # Testing Grade FRQs API with Postman
 

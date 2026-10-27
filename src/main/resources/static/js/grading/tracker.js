@@ -1,7 +1,9 @@
 // Assignment tracker: searchable/filterable assignment list, an assignment window with tabs,
 // and test tools. Data comes from /api/assignments/tracker; helpers from grading/common.js.
 (function () {
-  const { esc, api, postJson, formatEta, formatGrade, debounce, toast, contentText, submissionDetailHtml } = window.Grading;
+  const { esc, api, postJson, formatEta, formatGrade, debounce, toast, contentText, submissionDetailHtml,
+    gradingOutcomeText, saveManualGrade, clearManualGrade, requestAiGrade, gradeSourceBadge, closeAssignment,
+    reviews, REVIEW_REASONS, REVIEW_DECISIONS, SIMILARITY_BASIS } = window.Grading;
   const SUBMISSION_TYPES = ['text', 'link', 'github_issue', 'code', 'file'];
   const $ = id => document.getElementById(id);
 
@@ -93,7 +95,12 @@
   function renderHeader() {
     const a = current;
     $('amTitle').textContent = a.name;
-    $('amSubtitle').textContent = `#${a.id}${a.contentUrl ? ' · ' + a.contentUrl : ''}`;
+    $('amSubtitle').textContent = `#${a.id}${a.contentUrl ? ' · ' + a.contentUrl : ''}`
+      + (a.closedAt ? ` · Closed ${new Date(a.closedAt).toLocaleString()}: grades are final` : ' · Open');
+    $('closeAssignment').disabled = !!a.closedAt;
+    $('closeStatus').textContent = a.closedAt
+      ? 'Closed. Grade changes now go through a teacher review on each submission.'
+      : 'Closing makes every grade final and copies it to the gradebook. It cannot be undone.';
     $('amStats').innerHTML = [
       [a.submissionCount, 'submissions'],
       [a.ungradedCount, 'ungraded'],
@@ -162,15 +169,21 @@
       const eta = queueEta[s.id];
       const status = eta != null ? `<span class="g-badge warn">AI queue · ${esc(formatEta(eta))}</span>`
         : s.grade != null ? '<span class="g-badge ok">Graded</span>' : '<span class="g-badge muted">Ungraded</span>';
+      const overridden = s.grading?.manualOverride;
+      // Closed assignments only offer a teacher review.
+      const actions = current.closedAt
+        ? '<button class="g-btn" type="button" data-sub="review">Review</button>'
+        : `<input type="number" class="g-grade-input" step="0.01" min="0" max="${current.points ?? 1}" value="${s.grade ?? ''}" placeholder="/ ${current.points ?? 1}" aria-label="Grade">
+          <button class="g-btn" type="button" data-sub="grade">Save</button>
+          <button class="g-btn" type="button" data-sub="ai">AI grade</button>
+          ${overridden ? '<button class="g-btn" type="button" data-sub="clear" title="Remove the instructor grade so the AI grade applies">Use AI grade</button>' : ''}`;
       return `<tr data-id="${s.id}">
         <td>${esc(submitterName(s))}${s.isLate ? ' <span class="g-badge bad">Late</span>' : ''}</td>
-        <td class="text-nowrap">${esc(formatGrade(s.grade, current.points))}</td>
+        <td class="text-nowrap">${esc(formatGrade(s.grade, current.points))} ${gradeSourceBadge(s.grading)}</td>
         <td>${status}</td>
         <td class="text-nowrap">
           <button class="g-btn" type="button" data-sub="view">View</button>
-          <input type="number" class="g-grade-input" step="0.01" min="0" value="${s.grade ?? ''}" placeholder="/ ${current.points ?? 1}" aria-label="Grade">
-          <button class="g-btn" type="button" data-sub="grade">Save</button>
-          <button class="g-btn" type="button" data-sub="ai">AI grade</button>
+          ${actions}
         </td></tr>`;
     }).join('');
   }
@@ -185,22 +198,23 @@
 
   async function gradeRow(row, action, button) {
     const id = Number(row.dataset.id);
+    const revision = submissions.find(s => s.id === id)?.grading?.revision;
     button.disabled = true;
     try {
+      let result;
       if (action === 'grade') {
         const grade = row.querySelector('.g-grade-input').value;
         if (grade === '') throw new Error('Enter a grade first');
-        await api(`/api/submissions/grade/${id}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-          body: new URLSearchParams({ grade }),
-        });
-        toast('Grade saved');
+        result = await saveManualGrade(id, grade, revision);
+      } else if (action === 'clear') {
+        result = await clearManualGrade(id, revision);
       } else {
         button.textContent = 'Grading…';
-        const result = await api(`/api/submissions/ai-grade/${id}`, { method: 'POST' });
-        toast(`AI graded: ${result.score}`);
+        result = await requestAiGrade(id);
       }
+      const aiGrade = result.grading?.aiGrade;
+      toast(gradingOutcomeText(result.outcome)
+        + (action === 'ai' && aiGrade != null ? ` AI grade: ${formatGrade(aiGrade, current.points)}` : ''));
       await loadSubmissions();
       refreshCurrent();
     } catch (e) {
@@ -217,6 +231,115 @@
     if (id != null) {
       current = assignments.find(a => a.id === id) || null;
       if (current) renderHeader();
+    }
+  }
+
+  // ---------- closing ----------
+  async function closeCurrent() {
+    const a = current;
+    const pending = a.pendingAiCount ? ` ${a.pendingAiCount} submission(s) are still waiting for AI grading and will be finalized as they are.` : '';
+    if (!confirm(`Close "${a.name}"? Every grade becomes final and is copied to the gradebook.${pending} This cannot be undone.`)) return;
+    $('closeAssignment').disabled = true;
+    try {
+      const result = await closeAssignment(a.id);
+      const s = result.summary;
+      toast(`${gradingOutcomeText(result.outcome)} ${s.graded} graded, ${s.ungraded} ungraded, ${s.transferred} gradebook grade(s) written.`);
+      await refreshCurrent();
+      await loadSubmissions();
+    } catch (e) {
+      toast(e.message, false);
+      $('closeAssignment').disabled = false;
+    }
+  }
+
+  // ---------- teacher review (after close) ----------
+  let reviewSubmission = null;
+  let openReviewId = null;
+
+  async function openReview(submissionId) {
+    reviewSubmission = submissions.find(s => s.id === submissionId);
+    if (!reviewSubmission) return;
+    $('reviewSubtitle').textContent = `${submitterName(reviewSubmission)} · final grade `
+      + formatGrade(reviewSubmission.grade, current.points);
+    $('reviewReason').innerHTML = Object.entries(REVIEW_REASONS)
+      .map(([value, label]) => `<option value="${value}">${esc(label)}</option>`).join('');
+    $('reviewGrade').max = current.points ?? 1;
+    openModal('reviewModal');
+    await renderReviews();
+  }
+
+  async function renderReviews() {
+    let list;
+    try {
+      list = await reviews.list(reviewSubmission.id);
+    } catch (e) {
+      $('reviewHistory').innerHTML = `<span class="g-sub">${esc(e.message)}</span>`;
+      return;
+    }
+    const open = list.find(r => r.status === 'OPEN');
+    openReviewId = open ? open.id : null;
+    $('reviewOpenForm').style.display = open ? 'none' : '';
+    $('reviewOpen').style.display = open ? '' : 'none';
+    if (open) {
+      $('reviewOpenedBy').textContent = `${REVIEW_REASONS[open.reason]} · opened by ${open.openedBy || 'a teacher'} · grade then ${formatGrade(open.gradeAtOpen, current.points)}`;
+      $('reviewEvidence').value = open.evidence || '';
+      $('reviewEvidenceDetail').innerHTML = evidenceHtml(open);
+    }
+    const decided = list.filter(r => r.status === 'DECIDED').reverse();
+    $('reviewHistory').innerHTML = decided.length ? decided.map(r => `<div class="g-panel">
+        <b>${esc(REVIEW_REASONS[r.reason])}</b> · ${esc(REVIEW_DECISIONS[r.decision])}
+        ${r.decision === 'ADJUST' ? ` to ${esc(formatGrade(r.adjustedGrade, current.points))}` : ''}
+        <div class="g-sub">${esc(r.decidedBy || 'A teacher')} · ${esc(new Date(r.decidedAt).toLocaleString())}</div>
+        <div style="white-space:pre-wrap">${esc(r.rationale)}</div></div>`).join('')
+      : '<span class="g-sub">None.</span>';
+  }
+
+  function evidenceHtml(review) {
+    const parts = [];
+    if (review.aiGrade != null) {
+      parts.push(`<div><b>AI re-evaluation:</b> ${esc(formatGrade(review.aiGrade, current.points))}
+        <div class="g-sub" style="white-space:pre-wrap">${esc(review.aiFeedback)}</div></div>`);
+    }
+    if (review.similarSubmissions) {
+      parts.push(review.similarSubmissions.length
+        ? `<div><b>Identical submissions:</b><ul class="mb-0">${review.similarSubmissions.map(m =>
+            `<li>#${esc(m.submissionId)} ${esc(m.submitterName || '')}: ${esc(m.basis.map(b => SIMILARITY_BASIS[b] || b).join(', '))}</li>`).join('')}</ul>
+            <div class="g-sub">Exact matches only: a reason to look, not proof of copying.</div></div>`
+        : '<div><b>Identical submissions:</b> none found.</div>');
+    }
+    return parts.join('');
+  }
+
+  async function reviewAction(button, action) {
+    button.disabled = true;
+    try {
+      const result = await action();
+      toast(gradingOutcomeText(result.outcome, result.detail));
+      await renderReviews();
+      return result;
+    } catch (e) {
+      toast(e.message, false);
+    } finally {
+      button.disabled = false;
+    }
+  }
+
+  async function decideReview(event) {
+    event.preventDefault();
+    const decision = document.querySelector('input[name="reviewDecision"]:checked').value;
+    const body = { decision, rationale: $('reviewRationale').value };
+    if (decision === 'ADJUST') {
+      if ($('reviewGrade').value === '') { toast('Enter the corrected grade', false); return; }
+      body.grade = Number($('reviewGrade').value);
+      body.feedback = $('reviewFeedback').value;
+    }
+    const result = await reviewAction(event.submitter || $('reviewDecisionForm').querySelector('button'),
+      () => reviews.decide(openReviewId, body));
+    if (result) {
+      $('reviewDecisionForm').reset();
+      $('reviewAdjustFields').style.display = 'none';
+      await loadSubmissions();
+      refreshCurrent();
     }
   }
 
@@ -500,6 +623,7 @@
     if (!button) return;
     const row = button.closest('tr');
     if (button.dataset.sub === 'view') showSubmission(Number(row.dataset.id));
+    else if (button.dataset.sub === 'review') openReview(Number(row.dataset.id));
     else gradeRow(row, button.dataset.sub, button);
   });
   $('subBack').addEventListener('click', () => { $('subDetail').style.display = 'none'; $('subList').style.display = ''; });
@@ -531,6 +655,26 @@
   });
   $('exportAssignment').addEventListener('click', () => downloadCsv(`assignment_${current.id}.csv`, assignmentCsvRows([current])));
   $('deleteAssignment').addEventListener('click', deleteCurrent);
+  $('closeAssignment').addEventListener('click', closeCurrent);
+
+  $('reviewOpenForm').addEventListener('submit', e => {
+    e.preventDefault();
+    reviewAction(e.submitter || $('reviewOpenForm').querySelector('button'),
+      () => reviews.open(reviewSubmission.id, $('reviewReason').value, $('reviewOpenEvidence').value))
+      .then(() => { $('reviewOpenEvidence').value = ''; });
+  });
+  $('reviewSaveEvidence').addEventListener('click', e =>
+    reviewAction(e.currentTarget, () => reviews.saveEvidence(openReviewId, $('reviewEvidence').value)));
+  $('reviewAiEvaluate').addEventListener('click', e => {
+    e.currentTarget.textContent = 'Evaluating…';
+    const button = e.currentTarget;
+    reviewAction(button, () => reviews.aiEvaluation(openReviewId)).finally(() => { button.textContent = 'AI re-evaluation'; });
+  });
+  $('reviewSimilarity').addEventListener('click', e => reviewAction(e.currentTarget, () => reviews.similarity(openReviewId)));
+  document.querySelectorAll('input[name="reviewDecision"]').forEach(radio => radio.addEventListener('change', () => {
+    $('reviewAdjustFields').style.display = radio.value === 'ADJUST' && radio.checked ? '' : 'none';
+  }));
+  $('reviewDecisionForm').addEventListener('submit', decideReview);
 
   $('exportAll').addEventListener('click', () => downloadCsv('assignments.csv', assignmentCsvRows(assignments)));
   $('openTestTools').addEventListener('click', () => openModal('testModal'));

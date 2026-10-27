@@ -26,16 +26,19 @@ public class AssignmentSubmissionUploadService {
     private final PersonJpaRepository personRepo;
     private final AssignmentJpaRepository assignmentRepo;
     private final AssignmentSubmissionHistoryService historyService;
+    private final SubmissionAiGrader aiGrader;
 
     public AssignmentSubmissionUploadService(
             FileHandler fileHandler,
             PersonJpaRepository personRepo,
             AssignmentJpaRepository assignmentRepo,
-            AssignmentSubmissionHistoryService historyService) {
+            AssignmentSubmissionHistoryService historyService,
+            SubmissionAiGrader aiGrader) {
         this.fileHandler = fileHandler;
         this.personRepo = personRepo;
         this.assignmentRepo = assignmentRepo;
         this.historyService = historyService;
+        this.aiGrader = aiGrader;
     }
 
     public Map<String, Object> upload(
@@ -72,6 +75,10 @@ public class AssignmentSubmissionUploadService {
 
         validateUsernameMatchesTarget(username, targetUser);
         validateSubmitPermission(authenticatedUser, userId);
+        // Checked again when saving; checking now avoids uploading a file that would be refused.
+        if (assignment.isClosed()) {
+            throw new UploadException(GradingOutcome.ASSIGNMENT_CLOSED);
+        }
 
         String originalFilename = sanitizeFilename(file);
         String s3Filename = buildS3Filename(assignment.getName(), originalFilename);
@@ -94,8 +101,8 @@ public class AssignmentSubmissionUploadService {
             aiOrchestration,
             selfAssessmentReflection);
 
-        // Best-effort, e.g. a .ipynb notebook; grading failures never fail the upload itself.
-        savedSubmission = historyService.autoGrade(savedSubmission);
+        // Best-effort: a grading failure never fails the upload; the revision is queued for a retry.
+        aiGrader.autoGrade(savedSubmission);
 
         return buildResponse(
             assignment,
@@ -246,8 +253,12 @@ public class AssignmentSubmissionUploadService {
         submission.setAiOrchestration(aiOrchestration);
         submission.setSelfAssessmentReflection(selfAssessmentReflection);
 
-        // Replaces the student's earlier submission for this assignment, keeping it in history.
-        return historyService.submit(submission).submission();
+        // A student's earlier submission for this assignment gets this upload as its next revision.
+        AssignmentSubmissionHistoryService.SubmitResult submitted = historyService.submit(submission, authenticatedUser);
+        if (submitted.result().outcome() != GradingOutcome.REVISION_CREATED) {
+            throw new UploadException(submitted.result().outcome());
+        }
+        return submitted.submission();
     }
 
     private Map<String, Object> buildResponse(
@@ -311,14 +322,27 @@ public class AssignmentSubmissionUploadService {
 
     public static class UploadException extends RuntimeException {
         private final HttpStatus status;
+        private final GradingOutcome outcome;
 
         public UploadException(HttpStatus status, String message) {
             super(message);
             this.status = status;
+            this.outcome = null;
+        }
+
+        /** An expected grading outcome, answered as a GradingResponse. */
+        public UploadException(GradingOutcome outcome) {
+            super(outcome.name());
+            this.status = GradingResponse.statusOf(outcome);
+            this.outcome = outcome;
         }
 
         public HttpStatus getStatus() {
             return status;
+        }
+
+        public GradingOutcome getOutcome() {
+            return outcome;
         }
     }
 }

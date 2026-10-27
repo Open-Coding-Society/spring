@@ -167,6 +167,14 @@ Indicators:
     @NotNull
     private Double points;
 
+    // Set by AssignmentClosureService when a teacher closes the assignment; grades are final from
+    // then on. Not updatable through save(), so a stale copy can't reopen it.
+    @Column(updatable = false)
+    private LocalDateTime closedAt;
+
+    @Column(updatable = false)
+    private Long closedById;
+
     // Optional assignment resource metadata linked to this assignment ID.
     private String resourceType;
     private String resourceUrl;
@@ -206,6 +214,10 @@ Indicators:
     public void doneQueue(String person) {
         assignmentQueue.getWaiting().remove(person);
         assignmentQueue.getCompleted().add(person);
+    }
+
+    public boolean isClosed() {
+        return closedAt != null;
     }
 
     // Constructor.

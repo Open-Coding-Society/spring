@@ -39,6 +39,8 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 /**
  * Covers the ownership half of POST /api/assignments/auto-create and GET /api/assignments/managed.
@@ -468,11 +470,19 @@ class AssignmentsApiControllerCreatorTest {
         @BeforeEach
         void openRegradeMocks() {
             MockitoAnnotations.openMocks(this);
+            // The conditional writes themselves are covered against SQLite in
+            // SubmissionGradingPersistenceTest; here a graded result is simply applied.
+            when(gradingService.recordAiGrade(any(), anyInt(), any())).thenAnswer(call -> GradingResult.of(
+                    GradingOutcome.AI_GRADE_APPLIED, aiGradedState(call.getArgument(0), call.getArgument(2))));
+            // Every assignment here is open.
+            when(gradingService.currentState(any())).thenAnswer(call -> java.util.Optional.of(new SubmissionGradingState(
+                    call.getArgument(0), 1, null, null, null, null, null, null, false, null, null, true, null)));
         }
 
         @Mock AssignmentSubmissionJPA submissionRepo;
         @Mock AssignmentJpaRepository assignmentRepo;
         @Mock AssignmentAiGradingService aiGradingService;
+        @Mock SubmissionGradingService gradingService;
         @Mock AssignmentRubricService rubricService;
         @Mock JdbcTemplate jdbcTemplate;
 
@@ -512,17 +522,15 @@ class AssignmentsApiControllerCreatorTest {
             flagged(10L);
             when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment));
             when(rubricService.generateRubric(eq("Inheritance"), anyString(), isNull(), eq(1.0))).thenReturn(READY_RUBRIC);
-            when(submissionRepo.findById(10L)).thenReturn(Optional.of(submission(10L, true)), Optional.of(submission(10L, true)));
-            when(aiGradingService.grade(any()))
-                    .thenReturn(AssignmentAiGradingService.GradeResult.graded(0.85, 3, "Good.", false));
+            when(submissionRepo.findById(10L)).thenReturn(Optional.of(submission(10L, true)));
+            AssignmentAiGradingService.GradeResult graded = AssignmentAiGradingService.GradeResult.graded(0.85, 3, "Good.", false);
+            when(aiGradingService.grade(any())).thenReturn(graded);
 
             service().runOnce();
 
             verify(jdbcTemplate).update("UPDATE assignment SET ai_rubric = ? WHERE id = ?", READY_RUBRIC, 1L);
-            ArgumentCaptor<AssignmentSubmission> saved = ArgumentCaptor.forClass(AssignmentSubmission.class);
-            verify(submissionRepo).save(saved.capture());
-            assertEquals(0.85, saved.getValue().getGrade());
-            assertFalse(saved.getValue().getNeedsAiRegrade());
+            verify(gradingService).recordAiGrade(10L, AssignmentSubmission.FIRST_REVISION, graded);
+            verify(submissionRepo, never()).save(any());
         }
 
         @Test
@@ -534,20 +542,67 @@ class AssignmentsApiControllerCreatorTest {
             service().runOnce();
 
             verify(aiGradingService, never()).grade(any());
+            verifyNoInteractions(gradingService);
+        }
+
+        @Test
+        void skipsASubmissionThatLeftTheQueueBeforeItsTurn() throws Exception {
+            // e.g. a teacher graded it by hand, which cancels the pending re-grade.
+            flagged(10L);
+            when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment(READY_RUBRIC)));
+            when(submissionRepo.findById(10L)).thenReturn(Optional.of(submission(10L, false)));
+
+            service().runOnce();
+
+            verify(aiGradingService, never()).grade(any());
+            verifyNoInteractions(gradingService);
+        }
+
+        @Test
+        void aTeacherGradeMadeDuringRegradeStaysEffective() throws Exception {
+            flagged(10L);
+            when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment(READY_RUBRIC)));
+            when(submissionRepo.findById(10L)).thenReturn(Optional.of(submission(10L, true)));
+            when(aiGradingService.grade(any()))
+                    .thenReturn(AssignmentAiGradingService.GradeResult.graded(0.85, 3, "Good.", false));
+            org.mockito.Mockito.doReturn(GradingResult.of(GradingOutcome.MANUAL_OVERRIDE_KEPT,
+                    new SubmissionGradingState(10L, 1, 0.95, "Teacher", null, 0.85, "Good.", 3, true, 0.95, "Teacher", false, null)))
+                    .when(gradingService).recordAiGrade(any(), anyInt(), any());
+
+            service().runOnce();
+
+            // Recording is the only write; it is the conditional one that keeps the manual grade.
+            verify(gradingService).recordAiGrade(eq(10L), eq(AssignmentSubmission.FIRST_REVISION), any());
             verify(submissionRepo, never()).save(any());
         }
 
         @Test
-        void doesNotOverwriteATeacherGradeMadeDuringRegrade() throws Exception {
+        void aNotGradeableSubmissionLeavesTheQueue() throws Exception {
             flagged(10L);
             when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment(READY_RUBRIC)));
-            when(submissionRepo.findById(10L)).thenReturn(Optional.of(submission(10L, true)), Optional.of(submission(10L, false)));
+            when(submissionRepo.findById(10L)).thenReturn(Optional.of(submission(10L, true)));
             when(aiGradingService.grade(any()))
-                    .thenReturn(AssignmentAiGradingService.GradeResult.graded(0.85, 3, "Good.", false));
+                    .thenReturn(AssignmentAiGradingService.GradeResult.notGradeable("No readable content"));
 
             service().runOnce();
 
-            verify(submissionRepo, never()).save(any());
+            verify(gradingService).clearAiRegradeFlag(10L, AssignmentSubmission.FIRST_REVISION);
+            verify(gradingService, never()).recordAiGrade(any(), anyInt(), any());
+        }
+
+        @Test
+        void aFailedRegradeStaysQueuedForTheNextRun() throws Exception {
+            flagged(10L);
+            when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment(READY_RUBRIC)));
+            when(submissionRepo.findById(10L)).thenReturn(Optional.of(submission(10L, true)));
+            when(aiGradingService.grade(any()))
+                    .thenReturn(AssignmentAiGradingService.GradeResult.failed("Gemini returned HTTP 503"));
+
+            service().runOnce();
+
+            verify(gradingService, never()).clearAiRegradeFlag(any(), anyInt());
+            verify(gradingService, never()).flagForAiRegrade(any(), anyInt());
+            verify(gradingService, never()).recordAiGrade(any(), anyInt(), any());
         }
 
         // ---- fix out-of-range grades ----
@@ -558,9 +613,7 @@ class AssignmentsApiControllerCreatorTest {
                     Map.of("id", 10L, "assignment_id", 1L), Map.of("id", 11L, "assignment_id", 1L)));
             when(assignmentRepo.findById(1L)).thenReturn(Optional.of(assignment(READY_RUBRIC)));
             AssignmentSubmission good = submission(10L, false);
-            good.setGrade(4.0);
             AssignmentSubmission bad = submission(11L, false);
-            bad.setGrade(2.0);
             when(submissionRepo.findById(10L)).thenReturn(Optional.of(good));
             when(submissionRepo.findById(11L)).thenReturn(Optional.of(bad));
             when(aiGradingService.grade(any())).thenAnswer(call -> ((AssignmentSubmission) call.getArgument(0)).getId() == 10L
@@ -576,11 +629,9 @@ class AssignmentsApiControllerCreatorTest {
 
             assertEquals(new AssignmentAiRegradeService.FixGradesStatus(false, 2, 2, 1, 1), service.getFixStatus());
             verify(aiGradingService, org.mockito.Mockito.times(2)).grade(any());
-            ArgumentCaptor<AssignmentSubmission> saved = ArgumentCaptor.forClass(AssignmentSubmission.class);
-            verify(submissionRepo).save(saved.capture());
-            assertEquals(10L, saved.getValue().getId());
-            assertEquals(0.8, saved.getValue().getGrade());
-            assertFalse(Boolean.TRUE.equals(bad.getNeedsAiRegrade()));
+            verify(gradingService).recordAiGrade(eq(10L), eq(AssignmentSubmission.FIRST_REVISION), any());
+            verify(gradingService, never()).recordAiGrade(eq(11L), anyInt(), any());
+            verify(gradingService, never()).flagForAiRegrade(any(), anyInt());
         }
 
         private void flagged(Long submissionId) {
@@ -589,7 +640,13 @@ class AssignmentsApiControllerCreatorTest {
         }
 
         private AssignmentAiRegradeService service() {
-            return new AssignmentAiRegradeService(submissionRepo, assignmentRepo, aiGradingService, rubricService, jdbcTemplate);
+            return new AssignmentAiRegradeService(submissionRepo, assignmentRepo,
+                    new SubmissionAiGrader(aiGradingService, gradingService, org.mockito.Mockito.mock(GradeReviewService.class)), gradingService, rubricService, jdbcTemplate);
+        }
+
+        private static SubmissionGradingState aiGradedState(Long id, AssignmentAiGradingService.GradeResult result) {
+            return new SubmissionGradingState(id, AssignmentSubmission.FIRST_REVISION, result.grade(), result.feedback(),
+                    null, result.grade(), result.feedback(), result.qualityScore(), false, null, null, false, null);
         }
 
         private static Assignment assignment(String rubric) {

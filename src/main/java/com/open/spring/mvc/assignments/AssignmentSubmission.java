@@ -9,13 +9,11 @@ import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.person.Person;
 
-import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -26,13 +24,10 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
-import jakarta.persistence.OneToMany;
 import jakarta.persistence.PreRemove;
 import lombok.AllArgsConstructor;
 import lombok.Data;
-import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
-import lombok.ToString;
 
 @Data
 @NoArgsConstructor
@@ -40,6 +35,8 @@ import lombok.ToString;
 @Entity
 @JsonIgnoreProperties({"assignedGraders"})
 public class AssignmentSubmission {
+    public static final int FIRST_REVISION = 1;
+
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
@@ -63,35 +60,56 @@ public class AssignmentSubmission {
     )
     private List<Person> assignedGraders;
 
-    // Earlier versions, removed with the submission (including when its assignment is deleted).
-    @OneToMany(mappedBy = "submission", cascade = CascadeType.REMOVE)
-    @JsonIgnore
-    @ToString.Exclude
-    @EqualsAndHashCode.Exclude
-    private List<AssignmentSubmissionHistory> history;
+    // ========== CONTENT AND GRADING STATE ==========
+    // Not updatable through save(); only SubmissionGradingService changes these, via the
+    // conditional UPDATEs in AssignmentSubmissionJPA.
+    //
+    // grade is the effective grade: manualGrade while manualOverride is true, otherwise aiGrade.
+    // manualOverride is set by a manual grade or an authorized correction after close, and cleared
+    // when the grader removes it or the student submits new content. AI grading never changes it.
 
     @Convert(converter = SubmissionContentConverter.class)
-    @Column(columnDefinition = "text")
+    @Column(columnDefinition = "text", updatable = false)
     private Map<String, Object> content;
+
+    // Increments when the content changes; grading writes for an older revision are refused.
+    @Column(updatable = false)
+    private Integer revision = FIRST_REVISION;
+
+    @Column(updatable = false)
     private Double grade;
+
+    @Column(columnDefinition = "text", updatable = false)
     private String feedback;
 
-    @Column(columnDefinition = "text")
+    @Column(updatable = false)
+    private Double aiGrade;
+
+    // The AI's feedback for the current revision.
+    @Column(columnDefinition = "text", updatable = false)
     private String aiSummary;
 
+    @Column(updatable = false)
     private Integer qualityScore;
 
-    // True when the AI grade came from the default rubric because the assignment's AI rubric
-    // wasn't ready yet; AssignmentAiRegradeService re-grades these once it is.
+    @Column(updatable = false)
+    private Boolean manualOverride = false;
+
+    @Column(updatable = false)
+    private Double manualGrade;
+
+    @Column(columnDefinition = "text", updatable = false)
+    private String manualFeedback;
+
+    // Queued for an AI (re-)grade: the last attempt failed or used the default rubric.
+    @Column(updatable = false)
     private Boolean needsAiRegrade;
 
-    // When the grade was last set (AI or teacher); drives "recent grade changes" in the gradebook.
+    // When the effective grade last changed; drives "recent grade changes" in the gradebook.
+    @Column(updatable = false)
     private LocalDateTime gradedAt;
 
-    // When this version was submitted; a resubmit overwrites the row and moves the earlier
-    // version to AssignmentSubmissionHistory. Null on rows from before this was recorded.
-    private LocalDateTime submittedAt;
-
+    @Column(columnDefinition = "text")
     private String comment;
 
     private Long assignmentid;
@@ -119,6 +137,14 @@ public class AssignmentSubmission {
         this.comment = comment;
         this.assignmentid = assignment.getId();
         this.isLate = isLate;
+    }
+
+    public boolean hasManualOverride() {
+        return Boolean.TRUE.equals(manualOverride);
+    }
+
+    public int currentRevision() {
+        return revision == null ? FIRST_REVISION : revision;
     }
 
     // Getter for assignment_id (foreign key column)

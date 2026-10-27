@@ -9,9 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.hibernate.Hibernate;
@@ -25,6 +23,7 @@ import com.open.spring.mvc.assignments.AssignmentRubricService;
 import com.open.spring.mvc.assignments.AssignmentSubmission;
 import com.open.spring.mvc.assignments.AssignmentSubmissionHistoryService;
 import com.open.spring.mvc.assignments.AssignmentSubmissionJPA;
+import com.open.spring.mvc.assignments.SubmissionGradingState;
 import com.open.spring.mvc.groups.CourseGroupProperties;
 import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
@@ -82,7 +81,7 @@ public class GradebookService {
     public record SubmissionEntry(Long submissionId, Long assignmentId, String assignmentName, Double points,
             Double grade, String feedback, Integer qualityScore, Boolean isLate, String status,
             LocalDateTime gradedAt, Long etaSeconds, String submitterName, Map<String, Object> content,
-            String comment, String aiSummary, LocalDateTime submittedAt, int earlierVersions) {
+            String comment, String aiSummary, SubmissionGradingState grading, int earlierVersions) {
     }
 
     public record StudentCard(Long id, String uid, String name, Double overallPct, List<SubmissionEntry> recentChanges,
@@ -192,16 +191,14 @@ public class GradebookService {
                         .map(Groups::getId)
                         .flatMap(groupId -> submissionRepository.findBySubmitterId(groupId).stream()))
                 .toList();
-        List<AssignmentSubmission> current = AssignmentSubmissionHistoryService.latestOnly(all);
-        Map<Long, Integer> earlierVersions = earlierVersionCounts(all, current);
         Totals totals = new Totals();
         List<SubmissionEntry> entries = new ArrayList<>();
-        current.forEach(submission -> {
+        AssignmentSubmissionHistoryService.latestOnly(all).forEach(submission -> {
             Assignment assignment = submission.getAssignment();
             Double points = assignment == null ? null : assignment.getPoints();
             totals.add(submission.getGrade(), points, submission.getNeedsAiRegrade());
             entries.add(toEntry(submission, assignment, points, etaBySubmission.get(submission.getId()),
-                    earlierVersions.getOrDefault(submission.getId(), 0)));
+                    AssignmentSubmissionHistoryService.earlierVersionCount(submission, all)));
         });
         entries.sort(Comparator.comparing(SubmissionEntry::submissionId).reversed());
         List<SubmissionEntry> recent = entries.stream()
@@ -212,27 +209,6 @@ public class GradebookService {
         return new StudentCard(person.getId(), person.getUid(), person.getName(), totals.percent(), recent, entries);
     }
 
-    /** Per current submission: its saved history rows plus older rows for the same assignment and submitter. */
-    private Map<Long, Integer> earlierVersionCounts(List<AssignmentSubmission> all, List<AssignmentSubmission> current) {
-        Map<List<Long>, Long> rowsPerKey = all.stream()
-                .map(AssignmentSubmissionHistoryService::key)
-                .filter(Objects::nonNull)
-                .collect(Collectors.groupingBy(key -> key, Collectors.counting()));
-        Map<Long, Integer> counts = new HashMap<>();
-        for (AssignmentSubmission submission : current) {
-            List<Long> key = AssignmentSubmissionHistoryService.key(submission);
-            counts.put(submission.getId(), key == null ? 0 : rowsPerKey.get(key).intValue() - 1);
-        }
-        if (!current.isEmpty()) {
-            String ids = current.stream().map(submission -> String.valueOf(submission.getId()))
-                    .collect(Collectors.joining(","));
-            jdbcTemplate.queryForList("SELECT submission_id, COUNT(*) AS n FROM assignment_submission_history "
-                    + "WHERE submission_id IN (" + ids + ") GROUP BY submission_id").forEach(row -> counts.merge(
-                            ((Number) row.get("submission_id")).longValue(), ((Number) row.get("n")).intValue(), Integer::sum));
-        }
-        return counts;
-    }
-
     private static SubmissionEntry toEntry(AssignmentSubmission submission, Assignment assignment, Double points, Long eta,
             int earlierVersions) {
         String status = Boolean.TRUE.equals(submission.getNeedsAiRegrade()) ? "pending_ai"
@@ -241,7 +217,7 @@ public class GradebookService {
                 assignment == null ? "(deleted assignment)" : assignment.getName(), points, submission.getGrade(),
                 submission.getFeedback(), submission.getQualityScore(), submission.getIsLate(), status,
                 submission.getGradedAt(), eta, submitterName(submission.getSubmitter()), submission.getContent(),
-                submission.getComment(), submission.getAiSummary(), submission.getSubmittedAt(), earlierVersions);
+                submission.getComment(), submission.getAiSummary(), SubmissionGradingState.of(submission), earlierVersions);
     }
 
     private static String submitterName(Submitter submitter) {

@@ -138,8 +138,10 @@
                 <button class="g-btn" type="button" id="randomizeGraders">Randomize peer graders</button>
                 <button class="g-btn" type="button" data-more="frontmatter">Frontmatter</button>
                 <button class="g-btn" type="button" id="exportAssignment">Export assignment</button>
+                <button class="g-btn primary" type="button" id="closeAssignment">Close &amp; finalize grades</button>
                 <button class="g-btn danger" type="button" id="deleteAssignment">Delete assignment</button>
             </div>
+            <div class="g-sub mb-3" id="closeStatus"></div>
             <div id="moreChecks" data-more-panel="checks"></div>
             <div data-more-panel="graders" style="display:none">
                 <input type="text" id="graderSearch" class="w-100" placeholder="Search students to add as graders" autocomplete="off">
@@ -153,6 +155,64 @@
                 <button class="g-btn mt-2" type="button" id="copyFrontmatter">Copy</button>
             </div>
         </section>
+    </div>
+</div>
+
+<!-- Teacher review after close: reason, evidence, decision -->
+<div class="g-modal" id="reviewModal" role="dialog" aria-modal="true" aria-labelledby="reviewTitle">
+    <div class="g-modal-box" style="width:min(760px,100%)">
+        <div class="g-modal-head">
+            <div>
+                <h3 id="reviewTitle">Teacher review</h3>
+                <div class="g-sub mb-0" id="reviewSubtitle"></div>
+            </div>
+            <button class="g-btn" type="button" data-close aria-label="Close">&times;</button>
+        </div>
+        <div class="g-sub mb-2">The grade is final. It changes only if you approve an adjustment here, with a rationale; every step is recorded.</div>
+
+        <!-- 1. Open a review -->
+        <form id="reviewOpenForm" class="g-panel">
+            <b>Open a review</b>
+            <label class="d-block mt-2">Reason<br>
+                <select id="reviewReason" class="w-100" required></select>
+            </label>
+            <label class="d-block mt-2">Evidence and policy context<br>
+                <textarea id="reviewOpenEvidence" rows="3" placeholder="What prompted the review, and anything relevant"></textarea>
+            </label>
+            <button class="g-btn primary mt-2" type="submit">Open review</button>
+        </form>
+
+        <!-- 2. Collect evidence, 3. decide -->
+        <div id="reviewOpen" style="display:none">
+            <div class="g-panel">
+                <b>Evidence</b> <span class="g-sub" id="reviewOpenedBy"></span>
+                <textarea id="reviewEvidence" rows="4" class="mt-2" aria-label="Evidence notes"></textarea>
+                <div class="mt-2 d-flex flex-wrap gap-2">
+                    <button class="g-btn" type="button" id="reviewSaveEvidence">Save notes</button>
+                    <button class="g-btn" type="button" id="reviewAiEvaluate">AI re-evaluation</button>
+                    <button class="g-btn" type="button" id="reviewSimilarity">Find identical submissions</button>
+                </div>
+                <div id="reviewEvidenceDetail" class="mt-2"></div>
+            </div>
+            <form id="reviewDecisionForm" class="g-panel">
+                <b>Decision</b>
+                <div class="mt-2 d-flex flex-wrap gap-3">
+                    <label><input type="radio" name="reviewDecision" value="NO_CHANGE" checked> No change: preserve the current grade</label>
+                    <label><input type="radio" name="reviewDecision" value="ADJUST"> Approve a grade adjustment</label>
+                </div>
+                <div class="g-two-col mt-2" id="reviewAdjustFields" style="display:none">
+                    <label>Corrected grade<br><input type="number" id="reviewGrade" class="w-100" min="0" step="0.01"></label>
+                    <label>Feedback for the student<br><input type="text" id="reviewFeedback" class="w-100"></label>
+                </div>
+                <label class="d-block mt-2">Rationale (required)<br>
+                    <textarea id="reviewRationale" rows="3" required></textarea>
+                </label>
+                <button class="g-btn primary mt-2" type="submit">Record decision</button>
+            </form>
+        </div>
+
+        <div class="g-sub mt-3 mb-1">Earlier reviews</div>
+        <div id="reviewHistory"></div>
     </div>
 </div>
 

@@ -5,14 +5,15 @@ import static com.open.spring.mvc.assignments.AssignmentCreatorFixtures.student;
 import static com.open.spring.mvc.assignments.AssignmentCreatorFixtures.submission;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.startsWith;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.same;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -29,8 +30,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.test.util.ReflectionTestUtils;
-import org.springframework.transaction.PlatformTransactionManager;
-import org.springframework.transaction.support.TransactionTemplate;
 
 import com.open.spring.mvc.groups.CourseGroupProperties;
 import com.open.spring.mvc.groups.Groups;
@@ -40,14 +39,13 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.synergy.GradebookService;
 
 /**
- * Resubmitting replaces the submission in place and keeps the earlier version in history; rows
+ * A resubmit becomes the next revision of the existing submission instead of a second row; rows
  * from before that (a resubmit used to add a row) are left alone and read as earlier versions.
  */
 class AssignmentSubmissionHistoryTest {
 
     private AssignmentSubmissionJPA submissionRepo;
-    private AssignmentSubmissionHistoryJPA historyRepo;
-    private AssignmentAiGradingService aiGradingService;
+    private SubmissionGradingService gradingService;
     private AssignmentSubmissionHistoryService service;
     private Person alice;
     private Assignment assignment;
@@ -55,23 +53,16 @@ class AssignmentSubmissionHistoryTest {
     @BeforeEach
     void setUp() {
         submissionRepo = mock(AssignmentSubmissionJPA.class);
-        historyRepo = mock(AssignmentSubmissionHistoryJPA.class);
-        aiGradingService = mock(AssignmentAiGradingService.class);
-        service = historyService(submissionRepo, historyRepo, aiGradingService);
+        gradingService = mock(SubmissionGradingService.class);
+        service = new AssignmentSubmissionHistoryService(submissionRepo, gradingService);
         alice = student(1L, "alice");
         assignment = assignment(10L, "Loops");
-        when(submissionRepo.save(any(AssignmentSubmission.class))).thenAnswer(invocation -> invocation.getArgument(0));
-    }
-
-    /** A real history service over mocked repositories; its transactions just run the callback. */
-    static AssignmentSubmissionHistoryService historyService(AssignmentSubmissionJPA submissionRepo,
-            AssignmentSubmissionHistoryJPA historyRepo, AssignmentAiGradingService aiGradingService) {
-        return new AssignmentSubmissionHistoryService(submissionRepo, historyRepo, aiGradingService,
-                new TransactionTemplate(mock(PlatformTransactionManager.class)), mock(JdbcTemplate.class), null);
+        when(gradingService.submit(any(), any())).thenReturn(GradingResult.of(GradingOutcome.REVISION_CREATED, null));
+        when(gradingService.revise(any(), any(), any())).thenReturn(GradingResult.of(GradingOutcome.REVISION_CREATED, null));
     }
 
     private AssignmentSubmission draft(String url) {
-        return new AssignmentSubmission(assignment, alice, Map.of("type", "link", "url", url), "comment", false);
+        return new AssignmentSubmission(assignment, alice, Map.of("type", "link", "url", url), "new comment", false);
     }
 
     private AssignmentSubmission stored(Long id, String url, Double grade) {
@@ -79,116 +70,109 @@ class AssignmentSubmissionHistoryTest {
         submission.setSubmitter(alice);
         submission.setContent(Map.of("type", "link", "url", url));
         submission.setGrade(grade);
-        submission.setFeedback(grade == null ? null : "feedback for " + url);
         return submission;
+    }
+
+    private static SubmissionGradeEvent event(int revision, SubmissionGradeEvent.Type type, String url, Double grade,
+            int minute) {
+        SubmissionGradeEvent event = SubmissionGradeEvent.of(7L, revision, type, LocalDateTime.of(2026, 10, 27, 9, minute));
+        event.setContent(url == null ? null : Map.of("type", "link", "url", url));
+        event.setGrade(grade);
+        event.setEffective(grade != null);
+        return event;
     }
 
     @Nested
     class Submit {
         @Test
-        void firstSubmissionIsInsertedWithoutHistory() {
+        void firstSubmissionIsANewSubmission() {
             AssignmentSubmission draft = draft("https://a");
 
-            AssignmentSubmissionHistoryService.SubmitResult result = service.submit(draft);
+            AssignmentSubmissionHistoryService.SubmitResult result = service.submit(draft, alice);
 
             assertFalse(result.replaced());
             assertSame(draft, result.submission());
-            assertNotNull(draft.getSubmittedAt());
-            verify(historyRepo, never()).save(any());
+            verify(gradingService).submit(draft, alice);
+            verify(gradingService, never()).revise(any(), any(), any());
         }
 
         @Test
-        void resubmitKeepsTheRowAndMovesTheGradedVersionToHistory() {
+        void resubmitRevisesTheExistingSubmission() {
             AssignmentSubmission current = stored(5L, "https://old", 0.9);
-            current.setSubmittedAt(LocalDateTime.of(2026, 10, 1, 9, 0));
-            current.setNeedsAiRegrade(true);
             when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(current));
+            AssignmentSubmission draft = draft("https://new");
 
-            AssignmentSubmissionHistoryService.SubmitResult result = service.submit(draft("https://new"));
+            AssignmentSubmissionHistoryService.SubmitResult result = service.submit(draft, alice);
 
             assertTrue(result.replaced());
             assertSame(current, result.submission());
-            assertEquals(5L, current.getId());
-            assertEquals("https://new", current.getContent().get("url"));
-            assertNull(current.getGrade());
-            assertNull(current.getFeedback());
-            assertNull(current.getNeedsAiRegrade());
-            assertTrue(current.getSubmittedAt().isAfter(LocalDateTime.of(2026, 10, 1, 9, 0)));
-
-            ArgumentCaptor<AssignmentSubmissionHistory> saved = ArgumentCaptor.forClass(AssignmentSubmissionHistory.class);
-            verify(historyRepo).save(saved.capture());
-            AssignmentSubmissionHistory earlier = saved.getValue();
-            assertSame(current, earlier.getSubmission());
-            assertEquals("https://old", earlier.getContent().get("url"));
-            assertEquals(0.9, earlier.getGrade());
-            assertEquals("feedback for https://old", earlier.getFeedback());
-            assertEquals(LocalDateTime.of(2026, 10, 1, 9, 0), earlier.getSubmittedAt());
-            assertNotNull(earlier.getReplacedAt());
+            assertEquals("new comment", current.getComment());
+            verify(gradingService).revise(same(current), eq(draft.getContent()), same(alice));
+            verify(gradingService, never()).submit(any(), any());
         }
 
         @Test
-        void resubmitOverOldDuplicatesOnlyReplacesTheNewestAndLeavesOlderRowsAlone() {
-            AssignmentSubmission newest = stored(7L, "https://second", 0.5);
+        void resubmitOverOldDuplicatesRevisesTheNewestAndLeavesOlderRowsAlone() {
             AssignmentSubmission oldest = stored(3L, "https://first", 0.8);
-            when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(newest, oldest));
+            AssignmentSubmission newest = stored(7L, "https://second", 0.5);
+            when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(oldest, newest));
 
-            service.submit(draft("https://third"));
+            service.submit(draft("https://third"), alice);
 
-            assertEquals("https://third", newest.getContent().get("url"));
+            verify(gradingService).revise(same(newest), any(), any());
             assertEquals("https://first", oldest.getContent().get("url"));
-            assertEquals(0.8, oldest.getGrade());
-            verify(submissionRepo, never()).save(oldest);
         }
     }
 
+    /** The first revision of a submission from before the grading history records what it replaces. */
     @Nested
-    class AutoGrade {
-        @Test
-        void appliesTheGradeWhenTheWorkIsStillCurrent() throws Exception {
-            AssignmentSubmission submitted = service.submit(draft("https://a")).submission();
-            submitted.setId(5L);
-            AssignmentSubmission reloaded = stored(5L, "https://a", null);
-            reloaded.setSubmittedAt(submitted.getSubmittedAt());
-            when(submissionRepo.findById(5L)).thenReturn(Optional.of(reloaded));
-            when(aiGradingService.grade(submitted))
-                    .thenReturn(AssignmentAiGradingService.GradeResult.graded(0.9, 4, "Good", false));
+    class PreHistoryRevision {
+        private SubmissionGradeEventJPA eventRepo;
+        private SubmissionGradingService realGrading;
+        private AssignmentSubmission legacy;
 
-            service.autoGrade(submitted);
-
-            assertEquals(0.9, submitted.getGrade());
-            assertEquals(0.9, reloaded.getGrade());
-            verify(submissionRepo).save(reloaded);
+        @BeforeEach
+        void setUpGrading() {
+            eventRepo = mock(SubmissionGradeEventJPA.class);
+            realGrading = new SubmissionGradingService(submissionRepo, mock(AssignmentJpaRepository.class), eventRepo,
+                    new AssignmentAuthorizationService());
+            legacy = stored(5L, "https://legacy", 0.6);
+            when(submissionRepo.lockForGrading(5L)).thenReturn(1);
+            when(submissionRepo.findGradingState(5L)).thenReturn(Optional.of(new SubmissionGradingState(
+                    5L, 1, 0.6, "legacy feedback", null, null, null, null, false, null, null, false, null)));
+            when(submissionRepo.startRevision(eq(5L), eq(1), any())).thenReturn(1);
         }
 
         @Test
-        void dropsAStaleGradeWhenTheStudentResubmittedWhileGrading() throws Exception {
-            AssignmentSubmission first = stored(5L, "https://first", null);
-            first.setSubmittedAt(LocalDateTime.of(2026, 10, 1, 9, 0, 0));
-            AssignmentSubmission afterResubmit = stored(5L, "https://second", null);
-            afterResubmit.setSubmittedAt(LocalDateTime.of(2026, 10, 1, 9, 0, 20));
-            when(submissionRepo.findById(5L)).thenReturn(Optional.of(afterResubmit));
-            when(aiGradingService.grade(first))
-                    .thenReturn(AssignmentAiGradingService.GradeResult.graded(0.2, 2, "Old work", false));
+        void itsContentAndGradeAreSavedBeforeTheRevisionReplacesThem() {
+            when(eventRepo.findBySubmissionIdOrderByIdAsc(5L)).thenReturn(List.of());
 
-            service.autoGrade(first);
+            realGrading.revise(legacy, Map.of("type", "link", "url", "https://new"), alice);
 
-            assertNull(afterResubmit.getGrade());
-            verify(submissionRepo, never()).save(any());
+            ArgumentCaptor<SubmissionGradeEvent> saved = ArgumentCaptor.forClass(SubmissionGradeEvent.class);
+            verify(eventRepo, times(3)).save(saved.capture());
+            SubmissionGradeEvent submitted = saved.getAllValues().get(0);
+            assertEquals(SubmissionGradeEvent.Type.SUBMITTED, submitted.getType());
+            assertEquals(1, submitted.getRevision());
+            assertEquals("https://legacy", submitted.getContent().get("url"));
+            assertNull(submitted.getActorId());
+            SubmissionGradeEvent graded = saved.getAllValues().get(1);
+            assertEquals(SubmissionGradeEvent.Type.AI_GRADED, graded.getType());
+            assertEquals(0.6, graded.getGrade());
+            assertTrue(graded.getEffective());
+            assertEquals(SubmissionGradeEvent.Type.REVISED, saved.getAllValues().get(2).getType());
         }
 
         @Test
-        void aFailedGradeOfStaleWorkDoesNotQueueTheNewWork() throws Exception {
-            AssignmentSubmission first = stored(5L, "https://first", null);
-            first.setSubmittedAt(LocalDateTime.of(2026, 10, 1, 9, 0, 0));
-            AssignmentSubmission afterResubmit = stored(5L, "https://second", null);
-            afterResubmit.setSubmittedAt(LocalDateTime.of(2026, 10, 1, 9, 0, 20));
-            when(submissionRepo.findById(5L)).thenReturn(Optional.of(afterResubmit));
-            when(aiGradingService.grade(first)).thenReturn(AssignmentAiGradingService.GradeResult.failed("timeout"));
+        void aSubmissionWithHistoryIsNotRecordedAgain() {
+            when(eventRepo.findBySubmissionIdOrderByIdAsc(5L))
+                    .thenReturn(List.of(event(1, SubmissionGradeEvent.Type.SUBMITTED, "https://legacy", null, 0)));
 
-            service.autoGrade(first);
+            realGrading.revise(legacy, Map.of("type", "link", "url", "https://new"), alice);
 
-            assertNull(afterResubmit.getNeedsAiRegrade());
-            verify(submissionRepo, never()).save(any());
+            ArgumentCaptor<SubmissionGradeEvent> saved = ArgumentCaptor.forClass(SubmissionGradeEvent.class);
+            verify(eventRepo).save(saved.capture());
+            assertEquals(SubmissionGradeEvent.Type.REVISED, saved.getValue().getType());
         }
     }
 
@@ -196,61 +180,61 @@ class AssignmentSubmissionHistoryTest {
     class Versions {
         @Test
         void latestOnlyKeepsTheNewestRowPerAssignmentAndSubmitter() {
-            Assignment other = assignment(11L, "Arrays");
             AssignmentSubmission older = stored(1L, "https://1", 0.5);
             AssignmentSubmission newer = stored(2L, "https://2", null);
-            AssignmentSubmission otherAssignment = submission(3L, other);
+            AssignmentSubmission otherAssignment = submission(3L, assignment(11L, "Arrays"));
             otherAssignment.setSubmitter(alice);
 
-            List<AssignmentSubmission> latest =
-                    AssignmentSubmissionHistoryService.latestOnly(List.of(older, newer, otherAssignment));
-
-            assertEquals(List.of(newer, otherAssignment), latest);
+            assertEquals(List.of(newer, otherAssignment),
+                    AssignmentSubmissionHistoryService.latestOnly(List.of(older, newer, otherAssignment)));
         }
 
         @Test
-        void gradebookCardShowsOnlyTheCurrentRowAndCountsOldDuplicatesWithSavedHistory() {
+        void historyListsCurrentThenEarlierRevisionsThenOldDuplicates() {
+            AssignmentSubmission legacy = stored(3L, "https://legacy", 0.4);
+            AssignmentSubmission current = stored(7L, "https://now", null);
+            current.setRevision(3);
+            when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(current, legacy));
+            when(gradingService.history(7L)).thenReturn(List.of(
+                    event(1, SubmissionGradeEvent.Type.SUBMITTED, "https://first", null, 0),
+                    event(1, SubmissionGradeEvent.Type.AI_GRADED, null, 0.6, 1),
+                    event(2, SubmissionGradeEvent.Type.REVISED, "https://second", null, 2),
+                    event(2, SubmissionGradeEvent.Type.MANUAL_OVERRIDE_SET, null, 0.8, 3),
+                    event(3, SubmissionGradeEvent.Type.REVISED, "https://now", null, 4)));
+
+            assertSame(current, service.currentOf(legacy));
+            List<AssignmentSubmissionHistoryService.Version> versions = service.historyOf(current).versions();
+
+            assertEquals(4, versions.size());
+            assertTrue(versions.get(0).current());
+            assertEquals("https://now", versions.get(0).content().get("url"));
+            assertEquals(LocalDateTime.of(2026, 10, 27, 9, 4), versions.get(0).submittedAt());
+            assertNull(versions.get(2).submittedAt()); // revision 1 was recorded later, with no actor
+            assertEquals(2, versions.get(1).revision());
+            assertEquals("https://second", versions.get(1).content().get("url"));
+            assertEquals(0.8, versions.get(1).grade());
+            assertEquals(LocalDateTime.of(2026, 10, 27, 9, 4), versions.get(1).replacedAt());
+            assertEquals(0.6, versions.get(2).grade());
+            assertEquals(3L, versions.get(3).submissionId());
+            assertEquals(0.4, versions.get(3).grade());
+        }
+
+        @Test
+        void gradebookCardShowsOnlyTheCurrentRowAndCountsItsEarlierVersions() {
             AssignmentSubmission older = stored(1L, "https://1", 0.5);
             AssignmentSubmission newer = stored(2L, "https://2", null);
-            GroupsJpaRepository groups = mock(GroupsJpaRepository.class);
+            newer.setRevision(3);
             AssignmentAiRegradeService queue = mock(AssignmentAiRegradeService.class);
-            JdbcTemplate jdbc = mock(JdbcTemplate.class);
             when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(older, newer));
             when(queue.queueSnapshot()).thenReturn(new AssignmentAiRegradeService.QueueSnapshot(false, 0, 15, List.of()));
-            when(jdbc.queryForList(startsWith("SELECT submission_id")))
-                    .thenReturn(List.of(Map.of("submission_id", 2L, "n", 2L)));
-            GradebookService gradebook = new GradebookService(groups, submissionRepo, queue, new CourseGroupProperties(),
-                    jdbc, mock(PersonJpaRepository.class));
+            GradebookService gradebook = new GradebookService(mock(GroupsJpaRepository.class), submissionRepo, queue,
+                    new CourseGroupProperties(), mock(JdbcTemplate.class), mock(PersonJpaRepository.class));
 
             List<GradebookService.SubmissionEntry> entries = gradebook.card(alice).submissions();
 
             assertEquals(1, entries.size());
             assertEquals(2L, entries.get(0).submissionId());
-            assertEquals(3, entries.get(0).earlierVersions()); // 1 old duplicate row + 2 saved versions
-        }
-
-        @Test
-        void historyListsCurrentThenSavedVersionsThenOldDuplicates() {
-            AssignmentSubmission legacy = stored(3L, "https://legacy", 0.4);
-            AssignmentSubmission current = stored(7L, "https://now", null);
-            AssignmentSubmissionHistory saved = AssignmentSubmissionHistory.snapshotOf(stored(7L, "https://before", 0.6),
-                    LocalDateTime.of(2026, 10, 20, 8, 0));
-            saved.setId(40L);
-            when(historyRepo.findBySubmissionIdOrderByIdDesc(7L)).thenReturn(List.of(saved));
-            when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(current, legacy));
-
-            assertSame(current, service.currentOf(legacy));
-            AssignmentSubmissionHistoryService.SubmissionHistory history = service.historyOf(current);
-
-            assertEquals(7L, history.submissionId());
-            assertEquals("Loops", history.assignmentName());
-            assertEquals(3, history.versions().size());
-            assertTrue(history.versions().get(0).current());
-            assertEquals("https://now", history.versions().get(0).content().get("url"));
-            assertEquals(40L, history.versions().get(1).historyId());
-            assertEquals(0.6, history.versions().get(1).grade());
-            assertEquals(3L, history.versions().get(2).submissionId());
-            assertEquals(0.4, history.versions().get(2).grade());
+            assertEquals(3, entries.get(0).earlierVersions()); // 2 earlier revisions + 1 old duplicate row
         }
     }
 
@@ -258,27 +242,27 @@ class AssignmentSubmissionHistoryTest {
     class Api {
         private AssignmentSubmissionAPIController controller;
         private PersonJpaRepository people;
-        private AssignmentJpaRepository assignments;
         private GroupsJpaRepository groups;
 
         @BeforeEach
-        void setUpController() throws Exception {
+        void setUpController() {
             controller = new AssignmentSubmissionAPIController();
             people = mock(PersonJpaRepository.class);
-            assignments = mock(AssignmentJpaRepository.class);
+            groups = mock(GroupsJpaRepository.class);
+            AssignmentJpaRepository assignments = mock(AssignmentJpaRepository.class);
             ReflectionTestUtils.setField(controller, "personRepo", people);
             ReflectionTestUtils.setField(controller, "assignmentRepo", assignments);
+            ReflectionTestUtils.setField(controller, "groupRepo", groups);
             ReflectionTestUtils.setField(controller, "submissionRepo", submissionRepo);
-            ReflectionTestUtils.setField(controller, "aiGradingService", aiGradingService);
+            ReflectionTestUtils.setField(controller, "gradingService", gradingService);
+            ReflectionTestUtils.setField(controller, "aiGrader", mock(SubmissionAiGrader.class));
             ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
             ReflectionTestUtils.setField(controller, "historyService", service);
-            groups = mock(GroupsJpaRepository.class);
-            ReflectionTestUtils.setField(controller, "groupRepo", groups);
             when(people.findByUid("alice")).thenReturn(alice);
             when(people.findById(1L)).thenReturn(Optional.of(alice));
+            when(people.findByUid("bob")).thenReturn(student(2L, "bob"));
             assignment.setAssignmentType("link");
             when(assignments.findById(10L)).thenReturn(Optional.of(assignment));
-            when(aiGradingService.grade(any())).thenReturn(AssignmentAiGradingService.GradeResult.notGradeable("link"));
         }
 
         private UserDetails login(String uid) {
@@ -294,8 +278,7 @@ class AssignmentSubmissionHistoryTest {
 
         @Test
         void resubmitReturnsOkWithTheSameSubmissionId() {
-            when(submissionRepo.findBySubmitterId(1L))
-                    .thenReturn(List.of(stored(5L, "https://old", 0.9)));
+            when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(stored(5L, "https://old", 0.9)));
 
             var response = controller.submitAssignment(10L, request("https://new"), login("alice"));
 
@@ -305,9 +288,18 @@ class AssignmentSubmissionHistoryTest {
 
         @Test
         void firstSubmitStillReturnsCreated() {
+            assertEquals(201, controller.submitAssignment(10L, request("https://new"), login("alice")).getStatusCode().value());
+        }
+
+        @Test
+        void resubmitToAClosedAssignmentIsRefused() {
+            when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(stored(5L, "https://old", 0.9)));
+            when(gradingService.revise(any(), any(), any())).thenReturn(GradingResult.of(GradingOutcome.ASSIGNMENT_CLOSED, null));
+
             var response = controller.submitAssignment(10L, request("https://new"), login("alice"));
 
-            assertEquals(201, response.getStatusCode().value());
+            assertEquals(GradingResponse.from(GradingResult.of(GradingOutcome.ASSIGNMENT_CLOSED, null)).getStatusCode(),
+                    response.getStatusCode());
         }
 
         @Test
@@ -316,7 +308,6 @@ class AssignmentSubmissionHistoryTest {
             ReflectionTestUtils.setField(team, "id", 50L);
             when(groups.findById(50L)).thenReturn(Optional.of(team));
             when(groups.findGroupsByPersonId(1L)).thenReturn(List.of(team));
-            when(people.findByUid("bob")).thenReturn(student(2L, "bob"));
             var request = request("https://group");
             request.submitterId = 50L;
             request.isGroupSubmission = true;
@@ -330,11 +321,12 @@ class AssignmentSubmissionHistoryTest {
             AssignmentSubmission current = stored(5L, "https://now", null);
             when(submissionRepo.findById(5L)).thenReturn(Optional.of(current));
             when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(current));
-            when(people.findByUid("bob")).thenReturn(student(2L, "bob"));
+            when(gradingService.history(5L)).thenReturn(List.of());
 
             assertEquals(200, controller.getSubmissionHistory(5L, login("alice")).getStatusCode().value());
             assertEquals(403, controller.getSubmissionHistory(5L, login("bob")).getStatusCode().value());
             assertEquals(404, controller.getSubmissionHistory(6L, login("alice")).getStatusCode().value());
+            assertNull(service.historyOf(current).versions().get(0).submittedAt());
         }
     }
 }

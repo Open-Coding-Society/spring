@@ -38,6 +38,15 @@ Entity-removal helpers (run before any large cleanup):
 - Realtime chat uses STOMP over a **second connector on port 8589**: broker config in `WebSocketBrokerConfig.java` (`/ws-chat`, `/app`, `/topic`), port gating in `ChatWebSocketPortFilter.java`, presence in `GroupChatPresenceService.java`. The native `/websocket` endpoint in `mvc/mortevision/nativesocket/WebSocketConfig.java` is separate.
 - Gotcha: Java package is `mvc.groups` (plural) but templates live in `templates/group/` (singular); static JS exists both as legacy files in `static/js/group-*.js` and packaged versions in `static/js/group/*.js` — prefer the latter.
 
+## Assignment grading
+
+The grading policy lives in one place, [SubmissionGradingService.java](src/main/java/com/open/spring/mvc/assignments/SubmissionGradingService.java), with closing in `AssignmentClosureService` and teacher reviews in `GradeReviewService`; read their class comments before changing grading.
+- A submission keeps the AI grade, a manual override and the effective grade apart. New content is a new `revision` that releases the override; every grading write names its revision.
+- Before close, teachers and student teachers (assignment creators, assigned graders) override and request AI re-grades. `POST /api/assignments/{id}/close` (teacher-only, no reopen) finalizes every grade and copies it to `SynergyGrade`. After close only a teacher's `GradeReview` (`/api/grade-reviews/**`: reason, evidence, decision with rationale) can change a grade.
+- Grading and content columns are mapped `updatable = false`: never set them on an entity and `save()`; use the service, whose conditional UPDATEs take the row lock first (`lockForGrading`, a no-op UPDATE, because SQLite has no `SELECT ... FOR UPDATE` and a read-then-write transaction fails with `SQLITE_BUSY`). Don't save a new `GenerationType.AUTO` entity after taking a lock: its id comes from a sequence table on another connection, which on SQLite waits on that lock.
+- Services return a typed `GradingOutcome`; `GradingResponse.statusOf` is the only outcome-to-status mapping, and the pages hold the text (`static/js/grading/common.js` here, `assets/js/submissions/grading.js` in Pages). Tests check both cover every outcome.
+- Tests: `./mvnw test -Dtest='Submission*Test,Grad*Test,AssignmentSubmission*Test'`. `SubmissionGradingPersistenceTest` runs the rules and races on a real SQLite file with the `.env` test accounts hop (student) and niko (teacher).
+
 ## Architecture
 
 Single Spring Boot app, root package `com.open.spring`, three layers:

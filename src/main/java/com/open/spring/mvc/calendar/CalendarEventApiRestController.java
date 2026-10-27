@@ -1,4 +1,4 @@
-package com.open.spring.mvc.slack;
+package com.open.spring.mvc.calendar;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -23,43 +23,58 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-import lombok.Getter;
-import lombok.Setter;
+import com.fasterxml.jackson.annotation.JsonProperty;
 
+/**
+ * The calendar's REST API (ingress and egress). Jackson turns each JSON body into
+ * one of the DTO records below; events go out as EventView records, never as
+ * CalendarEventEntity. The rules are in CalendarEventService.
+ */
 @RestController
 @RequestMapping("/api/calendar")
-public class CalendarEventController {
+public class CalendarEventApiRestController {
 
     @Autowired
     private CalendarEventService calendarEventService;
 
+    /** DTO for one event to add (add_event, add_bulk, and each item of add_events). Dates are YYYY-MM-DD. */
+    public record EventRequest(String title, String date, String description, String type, String period,
+                               String classPeriod, String groupName, String individual) {}
+
+    /** DTO for the edit/{id} body; the calendar page sends the title as newTitle. */
+    public record EditRequest(String newTitle, String description, String date, String period, String type,
+                              String classPeriod, String groupName, String individual) {}
+
+    /** DTO for the breaks/create and breaks/{id} body; moveToNextNonBreakDay defaults to true. */
+    public record BreakRequest(String date, String name, String description, Boolean moveToNextNonBreakDay) {}
+
+    /**
+     * DTO for an event in a response. Same JSON names the entity always produced,
+     * including "break" (a Java name can't be break, so the component is breakDay).
+     */
+    public record EventView(Long id, LocalDate date, String title, String description, String type, String period,
+                            String classPeriod, String groupName, String individual,
+                            @JsonProperty("break") boolean breakDay, String name) {
+        static EventView from(CalendarEventEntity e) {
+            return new EventView(e.getId(), e.getDate(), e.getTitle(), e.getDescription(), e.getType(), e.getPeriod(),
+                    e.getClassPeriod(), e.getGroupName(), e.getIndividual(), e.isBreak(), e.getName());
+        }
+
+        static List<EventView> from(List<CalendarEventEntity> events) {
+            return events.stream().map(EventView::from).toList();
+        }
+    }
+
     /**
      * DTO for bulk event creation request
      */
-    @Getter
-    @Setter
-    public static class BulkEventsRequest {
-        private List<Map<String, String>> events;
-    }
+    public record BulkEventsRequest(List<EventRequest> events) {}
 
     /**
      * DTO for bulk event creation response
      */
-    @Getter
-    @Setter
-    public static class BulkEventsResponse {
-        private boolean success;
-        private int created;
-        private int updated;
-        private int failed;
-        private List<CalendarEvent> events;
-        private List<String> errors;
-
-        public BulkEventsResponse() {
-            this.events = new ArrayList<>();
-            this.errors = new ArrayList<>();
-        }
-    }
+    public record BulkEventsResponse(boolean success, int created, int updated, int failed,
+                                     List<EventView> events, List<String> errors) {}
 
     /**
      * POST /api/calendar/add_events
@@ -69,32 +84,33 @@ public class CalendarEventController {
     @PostMapping("/add_events")
     public ResponseEntity<BulkEventsResponse> addEvents(@RequestBody BulkEventsRequest request,
                                                         @AuthenticationPrincipal UserDetails userDetails) {
-        BulkEventsResponse response = new BulkEventsResponse();
+        List<EventView> events = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+        int created = 0, updated = 0, failed = 0;
         String currentIndividual = resolveIndividual(userDetails);
-        
-        if (request.getEvents() == null || request.getEvents().isEmpty()) {
-            response.setSuccess(false);
-            response.getErrors().add("No events provided");
-            return ResponseEntity.badRequest().body(response);
+
+        if (request.events() == null || request.events().isEmpty()) {
+            errors.add("No events provided");
+            return ResponseEntity.badRequest().body(new BulkEventsResponse(false, created, updated, failed, events, errors));
         }
 
-        for (Map<String, String> eventMap : request.getEvents()) {
+        for (EventRequest item : request.events()) {
             try {
-                String title = eventMap.get("title");
-                String dateStr = eventMap.get("date");
-                String description = eventMap.getOrDefault("description", "");
-                String type = eventMap.getOrDefault("type", "event");
-                String period = eventMap.get("period");
-                String classPeriod = eventMap.getOrDefault("classPeriod", "");
-                String groupName = eventMap.getOrDefault("groupName", "");
-                String individual = eventMap.getOrDefault("individual", currentIndividual != null ? currentIndividual : "");
+                String title = item.title();
+                String dateStr = item.date();
+                String description = orDefault(item.description(), "");
+                String type = orDefault(item.type(), "event");
+                String period = item.period();
+                String classPeriod = orDefault(item.classPeriod(), "");
+                String groupName = orDefault(item.groupName(), "");
+                String individual = orDefault(item.individual(), currentIndividual != null ? currentIndividual : "");
                 if (currentIndividual != null && !currentIndividual.isBlank()) {
                     individual = currentIndividual;
                 }
 
                 if (title == null || title.trim().isEmpty() || dateStr == null || dateStr.trim().isEmpty()) {
-                    response.setFailed(response.getFailed() + 1);
-                    response.getErrors().add("Missing title or date for event");
+                    failed++;
+                    errors.add("Missing title or date for event");
                     continue;
                 }
 
@@ -102,13 +118,13 @@ public class CalendarEventController {
                 try {
                     date = LocalDate.parse(dateStr);
                 } catch (Exception e) {
-                    response.setFailed(response.getFailed() + 1);
-                    response.getErrors().add("Invalid date format for: " + title);
+                    failed++;
+                    errors.add("Invalid date format for: " + title);
                     continue;
                 }
 
                 // Check for duplicate (same title and date)
-                CalendarEvent existingEvent = (individual != null && !individual.isBlank())
+                CalendarEventEntity existingEvent = (individual != null && !individual.isBlank())
                     ? calendarEventService.findByTitleAndDateAndIndividual(title.trim(), date, individual.trim())
                     : calendarEventService.findByTitleAndDate(title.trim(), date);
                 if (existingEvent != null) {
@@ -119,24 +135,23 @@ public class CalendarEventController {
                     existingEvent.setClassPeriod(classPeriod);
                     existingEvent.setGroupName(groupName);
                     existingEvent.setIndividual(individual);
-                    CalendarEvent updatedEvent = calendarEventService.saveEvent(existingEvent);
-                    response.getEvents().add(updatedEvent);
-                    response.setUpdated(response.getUpdated() + 1);
+                    CalendarEventEntity updatedEvent = calendarEventService.saveEvent(existingEvent);
+                    events.add(EventView.from(updatedEvent));
+                    updated++;
                 } else {
                     // Create new event
-                    CalendarEvent event = new CalendarEvent(date, title.trim(), description, type, period, classPeriod, groupName, individual);
-                    CalendarEvent savedEvent = calendarEventService.saveEvent(event);
-                    response.getEvents().add(savedEvent);
-                    response.setCreated(response.getCreated() + 1);
+                    CalendarEventEntity event = new CalendarEventEntity(date, title.trim(), description, type, period, classPeriod, groupName, individual);
+                    CalendarEventEntity savedEvent = calendarEventService.saveEvent(event);
+                    events.add(EventView.from(savedEvent));
+                    created++;
                 }
             } catch (Exception e) {
-                response.setFailed(response.getFailed() + 1);
-                response.getErrors().add("Error processing event: " + e.getMessage());
+                failed++;
+                errors.add("Error processing event: " + e.getMessage());
             }
         }
 
-        response.setSuccess(response.getFailed() == 0);
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(new BulkEventsResponse(failed == 0, created, updated, failed, events, errors));
     }
 
     @PostMapping("/add")
@@ -147,33 +162,33 @@ public class CalendarEventController {
     }
 
     @PostMapping("/add_bulk")
-    public void addBulkEvents(@RequestBody List<Map<String, String>> events,
+    public void addBulkEvents(@RequestBody List<EventRequest> events,
                               @AuthenticationPrincipal UserDetails userDetails) {
         String currentIndividual = resolveIndividual(userDetails);
-        for (Map<String, String> eventMap : events) {
-            String dateStr = eventMap.get("date");
-            String title = eventMap.get("title");
-            String description = eventMap.get("description");
-            String type = eventMap.getOrDefault("type", "event");
-            String period = eventMap.get("period");
-            String classPeriod = eventMap.getOrDefault("classPeriod", "");
-            String groupName = eventMap.getOrDefault("groupName", "");
-            String individual = eventMap.getOrDefault("individual", currentIndividual != null ? currentIndividual : "");
+        for (EventRequest item : events) {
+            String dateStr = item.date();
+            String title = item.title();
+            String description = item.description();
+            String type = orDefault(item.type(), "event");
+            String period = item.period();
+            String classPeriod = orDefault(item.classPeriod(), "");
+            String groupName = orDefault(item.groupName(), "");
+            String individual = orDefault(item.individual(), currentIndividual != null ? currentIndividual : "");
 
             LocalDate date = LocalDate.parse(dateStr);
-            CalendarEvent event = new CalendarEvent(date, title, description, type, period, classPeriod, groupName, individual);
+            CalendarEventEntity event = new CalendarEventEntity(date, title, description, type, period, classPeriod, groupName, individual);
             calendarEventService.saveEvent(event);
         }
     }
 
     @PostMapping("/add_event")
-    public ResponseEntity<Object> addEvent(@RequestBody Map<String, String> jsonMap,
+    public ResponseEntity<Object> addEvent(@RequestBody EventRequest request,
                                            @AuthenticationPrincipal UserDetails userDetails) {
         Map<String, String> errorResponse = new HashMap<>();
         String currentIndividual = resolveIndividual(userDetails);
         try {
-            String title = jsonMap.get("title");
-            String dateStr = jsonMap.get("date");
+            String title = request.title();
+            String dateStr = request.date();
 
             if (title == null || title.trim().isEmpty()) {
                 errorResponse.put("message", "Invalid input: 'title' cannot be null or empty.");
@@ -192,12 +207,12 @@ public class CalendarEventController {
                 return ResponseEntity.badRequest().body(errorResponse);
             }
 
-            String description = jsonMap.getOrDefault("description", "");
-            String type = jsonMap.getOrDefault("type", "event");
-            String period = jsonMap.get("period"); // Might be null
-            String classPeriod = jsonMap.getOrDefault("classPeriod", "");
-            String groupName = jsonMap.getOrDefault("groupName", "");
-            String individual = jsonMap.getOrDefault("individual", currentIndividual != null ? currentIndividual : "");
+            String description = orDefault(request.description(), "");
+            String type = orDefault(request.type(), "event");
+            String period = request.period(); // Might be null
+            String classPeriod = orDefault(request.classPeriod(), "");
+            String groupName = orDefault(request.groupName(), "");
+            String individual = orDefault(request.individual(), currentIndividual != null ? currentIndividual : "");
 
             // Validation for appointments
             if ("appointment".equals(type)) {
@@ -218,7 +233,7 @@ public class CalendarEventController {
             }
 
             // Check for duplicate (same title and date)
-                CalendarEvent existingEvent = (individual != null && !individual.isBlank())
+                CalendarEventEntity existingEvent = (individual != null && !individual.isBlank())
                     ? calendarEventService.findByTitleAndDateAndIndividual(title.trim(), date, individual.trim())
                     : calendarEventService.findByTitleAndDate(title.trim(), date);
             if (existingEvent != null) {
@@ -229,15 +244,15 @@ public class CalendarEventController {
                 existingEvent.setClassPeriod(classPeriod);
                 existingEvent.setGroupName(groupName);
                 existingEvent.setIndividual(individual);
-                CalendarEvent updatedEvent = calendarEventService.saveEvent(existingEvent);
-                return ResponseEntity.ok(updatedEvent);
+                CalendarEventEntity updatedEvent = calendarEventService.saveEvent(existingEvent);
+                return ResponseEntity.ok(EventView.from(updatedEvent));
             }
 
-            CalendarEvent event = new CalendarEvent(date, title, description, type, period, classPeriod, groupName, individual);
-            CalendarEvent savedEvent = calendarEventService.saveEvent(event);
+            CalendarEventEntity event = new CalendarEventEntity(date, title, description, type, period, classPeriod, groupName, individual);
+            CalendarEventEntity savedEvent = calendarEventService.saveEvent(event);
 
             // Return the full event object with id
-            return ResponseEntity.ok(savedEvent);
+            return ResponseEntity.ok(EventView.from(savedEvent));
         } catch (Exception e) {
             errorResponse.put("message", "Error adding event: " + e.getMessage());
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(errorResponse);
@@ -245,27 +260,27 @@ public class CalendarEventController {
     }
 
     @GetMapping("/events/{date}")
-    public List<CalendarEvent> getEventsByDate(@PathVariable String date,
+    public List<EventView> getEventsByDate(@PathVariable String date,
                                                @AuthenticationPrincipal UserDetails userDetails) {
         LocalDate localDate = LocalDate.parse(date);
-        return filterForCurrentUser(calendarEventService.getEventsByDate(localDate), resolveIndividual(userDetails));
+        return EventView.from(filterForCurrentUser(calendarEventService.getEventsByDate(localDate), resolveIndividual(userDetails)));
     }
 
     @PutMapping("/edit/{id}")
     @CrossOrigin(origins = {"http://127.0.0.1:4500","https://pages.opencodingsociety.com"}, allowCredentials = "true")
-    public ResponseEntity<Object> editEvent(@PathVariable int id, @RequestBody Map<String, String> payload,
+    public ResponseEntity<Object> editEvent(@PathVariable int id, @RequestBody EditRequest request,
                                             @AuthenticationPrincipal UserDetails userDetails) {
         Map<String, String> errorResponse = new HashMap<>();
         String currentIndividual = resolveIndividual(userDetails);
         try {
-            String newTitle = payload.get("newTitle");
-            String description = payload.get("description");
-            String dateStr = payload.get("date");
-            String period = payload.get("period");
-            String type = payload.getOrDefault("type", "event");
-            String classPeriod = payload.getOrDefault("classPeriod", "");
-            String groupName = payload.getOrDefault("groupName", "");
-            String individual = payload.getOrDefault("individual", currentIndividual != null ? currentIndividual : "");
+            String newTitle = request.newTitle();
+            String description = request.description();
+            String dateStr = request.date();
+            String period = request.period();
+            String type = orDefault(request.type(), "event");
+            String classPeriod = orDefault(request.classPeriod(), "");
+            String groupName = orDefault(request.groupName(), "");
+            String individual = orDefault(request.individual(), currentIndividual != null ? currentIndividual : "");
 
             if (newTitle == null || newTitle.trim().isEmpty()) {
                 errorResponse.put("message", "New title cannot be null or empty.");
@@ -302,7 +317,7 @@ public class CalendarEventController {
 
                 // Check appointment limit per classPeriod per date (exclude current event)
                 if (classPeriod != null && !classPeriod.isEmpty()) {
-                    CalendarEvent existingEvent = calendarEventService.getEventById(id);
+                    CalendarEventEntity existingEvent = calendarEventService.getEventById(id);
                     // Only check limit if classPeriod or date changed
                     boolean needsLimitCheck = existingEvent == null 
                         || !classPeriod.equals(existingEvent.getClassPeriod())
@@ -337,8 +352,8 @@ public class CalendarEventController {
     }
 
     @GetMapping("/events")
-    public List<CalendarEvent> getAllEvents(@AuthenticationPrincipal UserDetails userDetails) {
-        return filterForCurrentUser(calendarEventService.getAllEvents(), resolveIndividual(userDetails));
+    public List<EventView> getAllEvents(@AuthenticationPrincipal UserDetails userDetails) {
+        return EventView.from(filterForCurrentUser(calendarEventService.getAllEvents(), resolveIndividual(userDetails)));
     }
 
     /**
@@ -346,7 +361,7 @@ public class CalendarEventController {
      * Optional query params: type, groupName, individual, classPeriod, start, end (YYYY-MM-DD)
      */
     @GetMapping("/events/filter")
-    public List<CalendarEvent> getFilteredEvents(
+    public List<EventView> getFilteredEvents(
             @RequestParam(required = false) String type,
             @RequestParam(required = false) String groupName,
             @RequestParam(required = false) String individual,
@@ -366,25 +381,25 @@ public class CalendarEventController {
             return List.of();
         }
 
-        return filterForCurrentUser(
+        return EventView.from(filterForCurrentUser(
                 calendarEventService.filterEvents(type, groupName, effectiveIndividual, classPeriod, startDate, endDate),
-                currentIndividual);
+                currentIndividual));
     }
 
     @GetMapping("/events/range")
-    public List<CalendarEvent> getEventsWithinDateRange(@RequestParam String start,
+    public List<EventView> getEventsWithinDateRange(@RequestParam String start,
                                                        @RequestParam String end,
                                                        @AuthenticationPrincipal UserDetails userDetails) {
-        return filterForCurrentUser(
+        return EventView.from(filterForCurrentUser(
                 calendarEventService.getEventsWithinDateRange(LocalDate.parse(start), LocalDate.parse(end)),
-                resolveIndividual(userDetails));
+                resolveIndividual(userDetails)));
     }
 
     @GetMapping("/events/next-day")
-    public List<CalendarEvent> getNextDayEvents(@AuthenticationPrincipal UserDetails userDetails) {
-        return filterForCurrentUser(
+    public List<EventView> getNextDayEvents(@AuthenticationPrincipal UserDetails userDetails) {
+        return EventView.from(filterForCurrentUser(
                 calendarEventService.getEventsByDate(LocalDate.now().plusDays(1)),
-                resolveIndividual(userDetails));
+                resolveIndividual(userDetails)));
     }
 
     /**
@@ -428,12 +443,12 @@ public class CalendarEventController {
     }
 
     @GetMapping("/events/bulk")
-    public ResponseEntity<List<CalendarEvent>> bulkExtractEvents(
+    public ResponseEntity<List<EventView>> bulkExtractEvents(
             @RequestParam(required = false) String startDate,
             @RequestParam(required = false) String endDate,
             @AuthenticationPrincipal UserDetails userDetails) {
         try {
-            List<CalendarEvent> events;
+            List<CalendarEventEntity> events;
             if (startDate != null && endDate != null) {
                 LocalDate start = LocalDate.parse(startDate);
                 LocalDate end = LocalDate.parse(endDate);
@@ -441,7 +456,7 @@ public class CalendarEventController {
             } else {
                 events = calendarEventService.getAllEvents();
             }
-            return ResponseEntity.ok(filterForCurrentUser(events, resolveIndividual(userDetails)));
+            return ResponseEntity.ok(EventView.from(filterForCurrentUser(events, resolveIndividual(userDetails))));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(null);
@@ -451,32 +466,28 @@ public class CalendarEventController {
     /**
      * DTO for bulk delete request
      */
-    @Getter
-    @Setter
-    public static class BulkDeleteRequest {
-        private List<String> titles;
-    }
+    public record BulkDeleteRequest(List<String> titles) {}
 
     /**
      * DTO for single delete by title request
      */
-    @Getter
-    @Setter
-    public static class DeleteByTitleRequest {
-        private String title;
+    public record DeleteByTitleRequest(String title) {}
+
+    private static String orDefault(String value, String fallback) {
+        return value != null ? value : fallback;
     }
 
     private String resolveIndividual(UserDetails userDetails) {
         return userDetails != null ? userDetails.getUsername() : null;
     }
 
-    private List<CalendarEvent> filterForCurrentUser(List<CalendarEvent> events, String individual) {
+    private List<CalendarEventEntity> filterForCurrentUser(List<CalendarEventEntity> events, String individual) {
         if (individual == null || individual.isBlank()) {
             return events;
         }
 
-        List<CalendarEvent> visibleEvents = new ArrayList<>();
-        for (CalendarEvent event : events) {
+        List<CalendarEventEntity> visibleEvents = new ArrayList<>();
+        for (CalendarEventEntity event : events) {
             if (event.getIndividual() == null || event.getIndividual().isBlank() || individual.equalsIgnoreCase(event.getIndividual())) {
                 visibleEvents.add(event);
             }
@@ -487,18 +498,7 @@ public class CalendarEventController {
     /**
      * DTO for bulk delete response
      */
-    @Getter
-    @Setter
-    public static class BulkDeleteResponse {
-        private boolean success;
-        private int deleted;
-        private int notFound;
-        private List<String> errors;
-
-        public BulkDeleteResponse() {
-            this.errors = new ArrayList<>();
-        }
-    }
+    public record BulkDeleteResponse(boolean success, int deleted, int notFound, List<String> errors) {}
 
     /**
      * DELETE /api/calendar/delete_events
@@ -507,34 +507,33 @@ public class CalendarEventController {
      */
     @DeleteMapping("/delete_events")
     public ResponseEntity<BulkDeleteResponse> deleteEvents(@RequestBody BulkDeleteRequest request) {
-        BulkDeleteResponse response = new BulkDeleteResponse();
+        List<String> errors = new ArrayList<>();
+        int deletedCount = 0, notFound = 0;
 
-        if (request.getTitles() == null || request.getTitles().isEmpty()) {
-            response.setSuccess(false);
-            response.getErrors().add("No titles provided");
-            return ResponseEntity.badRequest().body(response);
+        if (request.titles() == null || request.titles().isEmpty()) {
+            errors.add("No titles provided");
+            return ResponseEntity.badRequest().body(new BulkDeleteResponse(false, deletedCount, notFound, errors));
         }
 
-        for (String title : request.getTitles()) {
+        for (String title : request.titles()) {
             try {
                 if (title == null || title.trim().isEmpty()) {
-                    response.setNotFound(response.getNotFound() + 1);
+                    notFound++;
                     continue;
                 }
 
                 boolean deleted = calendarEventService.deleteEventByTitle(title.trim());
                 if (deleted) {
-                    response.setDeleted(response.getDeleted() + 1);
+                    deletedCount++;
                 } else {
-                    response.setNotFound(response.getNotFound() + 1);
+                    notFound++;
                 }
             } catch (Exception e) {
-                response.getErrors().add("Error deleting: " + title + " - " + e.getMessage());
+                errors.add("Error deleting: " + title + " - " + e.getMessage());
             }
         }
 
-        response.setSuccess(response.getErrors().isEmpty());
-        return ResponseEntity.ok(response);
+        return ResponseEntity.ok(new BulkDeleteResponse(errors.isEmpty(), deletedCount, notFound, errors));
     }
 
     /**
@@ -546,21 +545,21 @@ public class CalendarEventController {
     public ResponseEntity<Map<String, Object>> deleteEventByTitle(@RequestBody DeleteByTitleRequest request) {
         Map<String, Object> response = new HashMap<>();
 
-        if (request.getTitle() == null || request.getTitle().trim().isEmpty()) {
+        if (request.title() == null || request.title().trim().isEmpty()) {
             response.put("success", false);
             response.put("message", "Title cannot be null or empty");
             return ResponseEntity.badRequest().body(response);
         }
 
         try {
-            boolean deleted = calendarEventService.deleteEventByTitle(request.getTitle().trim());
+            boolean deleted = calendarEventService.deleteEventByTitle(request.title().trim());
             if (deleted) {
                 response.put("success", true);
                 response.put("message", "Event deleted successfully");
                 return ResponseEntity.ok(response);
             } else {
                 response.put("success", false);
-                response.put("message", "Event not found with title: " + request.getTitle());
+                response.put("message", "Event not found with title: " + request.title());
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(response);
             }
         } catch (Exception e) {
@@ -578,12 +577,12 @@ public class CalendarEventController {
      * When a break is created, all regular events on that day can be moved to the next non-break day.
      */
     @PostMapping("/breaks/create")
-    public ResponseEntity<?> createBreak(@RequestBody Map<String, Object> payload) {
+    public ResponseEntity<?> createBreak(@RequestBody BreakRequest request) {
         try {
-            String dateStr = (String) payload.get("date");
-            String name = (String) payload.get("name");
-            String description = (String) payload.get("description");
-            Boolean moveToNextNonBreakDay = (Boolean) payload.getOrDefault("moveToNextNonBreakDay", true);
+            String dateStr = request.date();
+            String name = request.name();
+            String description = request.description();
+            boolean moveToNextNonBreakDay = request.moveToNextNonBreakDay() == null || request.moveToNextNonBreakDay();
 
             // Validate date
             if (dateStr == null || dateStr.isEmpty()) {
@@ -602,12 +601,12 @@ public class CalendarEventController {
                 description = "";
             }
 
-            CalendarEvent breakEvent = calendarEventService.createBreak(date, name, description, moveToNextNonBreakDay);
+            CalendarEventEntity breakEvent = calendarEventService.createBreak(date, name, description, moveToNextNonBreakDay);
 
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Break created successfully",
-                "break", breakEvent
+                "break", EventView.from(breakEvent)
             ));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of(
@@ -627,8 +626,8 @@ public class CalendarEventController {
     @GetMapping("/breaks")
     public ResponseEntity<?> getAllBreaks() {
         try {
-            List<CalendarEvent> breaks = calendarEventService.getAllBreaks();
-            return ResponseEntity.ok(breaks);
+            List<CalendarEventEntity> breaks = calendarEventService.getAllBreaks();
+            return ResponseEntity.ok(EventView.from(breaks));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                 "error", "Failed to retrieve breaks: " + e.getMessage()
@@ -645,8 +644,8 @@ public class CalendarEventController {
             @RequestParam("date") String dateStr) {
         try {
             LocalDate date = LocalDate.parse(dateStr);
-            List<CalendarEvent> breaks = calendarEventService.getBreaksByDate(date);
-            return ResponseEntity.ok(breaks);
+            List<CalendarEventEntity> breaks = calendarEventService.getBreaksByDate(date);
+            return ResponseEntity.ok(EventView.from(breaks));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
                 "error", "Failed to retrieve breaks: " + e.getMessage()
@@ -677,17 +676,17 @@ public class CalendarEventController {
      * Edit a break's name and description.
      */
     @PutMapping("/breaks/{id}")
-    public ResponseEntity<?> editBreak(@PathVariable Long id, @RequestBody Map<String, Object> payload) {
+    public ResponseEntity<?> editBreak(@PathVariable Long id, @RequestBody BreakRequest request) {
         try {
-            String name = (String) payload.get("name");
-            String description = (String) payload.get("description");
+            String name = request.name();
+            String description = request.description();
 
             // Validate name if provided
             if (name != null && name.trim().isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Break name cannot be empty"));
             }
 
-            CalendarEvent updatedBreak = calendarEventService.updateBreak(id, name, description);
+            CalendarEventEntity updatedBreak = calendarEventService.updateBreak(id, name, description);
 
             if (updatedBreak == null) {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
@@ -698,7 +697,7 @@ public class CalendarEventController {
             return ResponseEntity.ok(Map.of(
                 "success", true,
                 "message", "Break updated successfully",
-                "break", updatedBreak
+                "break", EventView.from(updatedBreak)
             ));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of(
@@ -739,9 +738,9 @@ public class CalendarEventController {
     @GetMapping("/breaks/{id}")
     public ResponseEntity<?> getBreakById(@PathVariable Long id) {
         try {
-            CalendarEvent breakEvent = calendarEventService.getBreakById(id);
+            CalendarEventEntity breakEvent = calendarEventService.getBreakById(id);
             if (breakEvent != null) {
-                return ResponseEntity.ok(breakEvent);
+                return ResponseEntity.ok(EventView.from(breakEvent));
             } else {
                 return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of(
                     "error", "Break not found with ID: " + id

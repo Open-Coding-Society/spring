@@ -94,6 +94,9 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/api/**", "/authenticate", "/run/**").permitAll()  // Allow only relevant CORS preflight requests
                         .requestMatchers("/authenticate").permitAll()
                         .requestMatchers(HttpMethod.POST, "/authenticate").permitAll() // allow POST on auth
+                        // Logout only expires the caller's own cookies. It must work with an expired
+                        // or invalid token, or a stale jwt cookie can never be cleared.
+                        .requestMatchers(HttpMethod.POST, "/api/logout").permitAll()
                         // Admin-only writes are listed FIRST: rules are first-match-wins, and a
                         // method-less permitAll on /api/person/create would otherwise also permit
                         // DELETE and PUT on that path, shadowing the ROLE_ADMIN rules below.
