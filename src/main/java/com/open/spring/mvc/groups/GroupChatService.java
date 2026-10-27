@@ -117,7 +117,7 @@ public class GroupChatService {
         boolean found = false;
         for (GroupChatMessage m : messages) {
             if (messageId.equals(m.getId())) {
-                if (requesterDisplayName == null || !requesterDisplayName.equals(m.getName())) {
+                if (requesterDisplayName == null || !requesterDisplayName.equals(m.getAuthor())) {
                     throw new SecurityException("Not the message sender");
                 }
                 m.setMessage(newMessage);
@@ -150,7 +150,7 @@ public class GroupChatService {
                 .findFirst()
                 .orElse(null);
         if (target == null) return;
-        if (requesterDisplayName == null || !requesterDisplayName.equals(target.getName())) {
+        if (requesterDisplayName == null || !requesterDisplayName.equals(target.getAuthor())) {
             throw new SecurityException("Not the message sender");
         }
 
@@ -209,7 +209,7 @@ public class GroupChatService {
             List<GroupChatMessage> messages = getMessages(groupName);
 
             List<GroupChatMessage> userMessages = messages.stream()
-                    .filter(m -> personName.equals(m.getName()))
+                    .filter(m -> personName.equals(m.getAuthor()))
                     .collect(Collectors.toList());
 
             int messagesSent = userMessages.size();
