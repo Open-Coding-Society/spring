@@ -19,7 +19,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.open.spring.mvc.announcement.Announcement;
-import com.open.spring.mvc.announcement.AnnouncementJPA;
+import com.open.spring.mvc.announcement.AnnouncementJpaRepository;
 import com.open.spring.mvc.assignments.Assignment;
 import com.open.spring.mvc.assignments.AssignmentJpaRepository;
 import com.open.spring.mvc.assignments.AssignmentSubmissionJPA;
@@ -75,7 +75,7 @@ public class ModelInit {
     @Autowired PersonRoleJpaRepository roleJpaRepository;
     @Autowired PersonDetailsService personDetailsService;
     @Autowired PersonJpaRepository personJpaRepository;
-    @Autowired AnnouncementJPA announcementJPA;
+    @Autowired AnnouncementJpaRepository announcementJPA;
     @Autowired CommentJPA CommentJPA;
     @Autowired TinkleJPARepository tinkleJPA;
     @Autowired BathroomQueueJPARepository queueJPA;

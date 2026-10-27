@@ -17,10 +17,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 @RequestMapping("/api/announcements")
 public class AnnouncementControl {
 
-    private final AnnouncementJPA announcementRepo;
+    private final AnnouncementJpaRepository announcementRepo;
 
     
-    public AnnouncementControl(AnnouncementJPA announcementRepo) {
+    public AnnouncementControl(AnnouncementJpaRepository announcementRepo) {
         this.announcementRepo = announcementRepo;
     }
 
