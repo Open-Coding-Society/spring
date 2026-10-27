@@ -49,10 +49,6 @@ build/
 *.db-shm
 *.db-wal
 volumes/backups/
-# Local stand-in for the S3 bucket, written only when aws.s3.* is unset (see
-# S3FileHandler). Holds group chat history, shared files and chat images on a dev
-# machine; never part of the repo.
-volumes/s3-local/
 backups/*
 
 ### Plots ###
