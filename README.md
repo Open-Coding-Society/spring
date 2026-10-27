@@ -47,6 +47,7 @@ The site is build on Springboot.  The project is primarly used to store and retr
 
 ## Architecture guides
 
+- [Group chat architecture guide](docs/group-chat-architecture.md) — explains groups and group chat: the REST routes, the STOMP WebSocket on port 8589, S3 message storage, a diagram, known issues, and `api/groups.http`.
 - [Toolchain architecture guide](docs/toolchain-architecture.md) — explains Setup, Scoring, Help, the interactive local agent, report-upload versus station-check flows, API routes, and persistence.
 - [Announcement architecture guide](docs/announcement-architecture.md) — a small example of the five standard parts (REST controller, entity, JPA repository, service, table initializer), with its routes, a diagram, and `api/announcement.http`.
 
