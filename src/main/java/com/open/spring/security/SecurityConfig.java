@@ -134,7 +134,8 @@ public class SecurityConfig {
                         // ========== API ENDPOINTS (REQUIRE AT LEAST USER) ==========
                         // Previously public endpoints now require authenticated roles
                         .requestMatchers("/api/jokes/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
-                        // Pause Menu APIs should be public
+                        // Pause Menu APIs should be public, except deleting a score
+                        .requestMatchers(HttpMethod.DELETE, "/api/pausemenu/**").hasAuthority("ROLE_ADMIN")
                         .requestMatchers("/api/pausemenu/**").permitAll()
                         // Leaderboard should be public - displays scores without authentication
                         .requestMatchers("/api/leaderboard/**").permitAll()
@@ -296,6 +297,7 @@ public class SecurityConfig {
         policy.put("POST /api/toolchain/pair", "permitAll");
         policy.put("GET /api/toolchain/sessions/*/next", "permitAll");
         policy.put("POST /api/toolchain/sessions/*/results", "permitAll");
+        policy.put("DELETE /api/pausemenu/**", "ROLE_ADMIN");
         policy.put("/api/pausemenu/**", "permitAll");
         policy.put("/api/leaderboard/**", "permitAll");
         policy.put("/api/exports/**", "ROLE_ADMIN");
