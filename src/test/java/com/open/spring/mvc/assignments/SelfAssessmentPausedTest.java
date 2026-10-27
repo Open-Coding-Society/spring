@@ -74,8 +74,10 @@ class SelfAssessmentPausedTest {
         ReflectionTestUtils.setField(controller, "aiGrader", aiGrader);
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
 
+        AssignmentSubmissionHistoryService historyService = new AssignmentSubmissionHistoryService(submissionRepo, gradingService);
+        ReflectionTestUtils.setField(controller, "historyService", historyService);
         AssignmentSubmissionUploadService uploadService = new AssignmentSubmissionUploadService(
-                fileHandler, personRepo, assignmentRepo, gradingService, aiGrader);
+                fileHandler, personRepo, assignmentRepo, historyService, aiGrader);
         fileController = new AssignmentSubmissionFileApiController(uploadService);
 
         student = student(1L, "toby");

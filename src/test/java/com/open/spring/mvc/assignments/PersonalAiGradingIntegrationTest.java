@@ -187,6 +187,7 @@ class PersonalAiGradingIntegrationTest {
             new AssignmentAuthorizationService());
         ReflectionTestUtils.setField(controller, "gradingService", gradingService);
         ReflectionTestUtils.setField(controller, "aiGrader", new SubmissionAiGrader(ai, gradingService, mock(GradeReviewService.class)));
+        ReflectionTestUtils.setField(controller, "historyService", new AssignmentSubmissionHistoryService(submissions, gradingService));
     }
     private UserDetails login(String uid) { return User.withUsername(uid).password("unused").authorities("ROLE_USER").build(); }
 }
