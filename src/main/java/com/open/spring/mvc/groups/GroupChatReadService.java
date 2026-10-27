@@ -63,12 +63,12 @@ public class GroupChatReadService {
             }
         }
 
-        String displayName = person.getName();
+        String uid = person.getUid();
         Map<Long, Long> unread = new HashMap<>();
         for (Groups group : groups) {
             Instant lastRead = lastReadByGroup.get(group.getId());
             long count = groupChatService.getMessages(group.getName()).stream()
-                    .filter(message -> !isFrom(message, displayName))
+                    .filter(message -> !isFrom(message, uid))
                     .filter(message -> isAfter(message.getDate(), lastRead))
                     .count();
             if (count > 0) {
@@ -88,8 +88,9 @@ public class GroupChatReadService {
         readStateRepository.save(state);
     }
 
-    private boolean isFrom(GroupChatMessage message, String displayName) {
-        return displayName != null && displayName.equals(message.getName());
+    // Match on uid, not display name: two members can share a name
+    private boolean isFrom(GroupChatMessage message, String uid) {
+        return uid != null && uid.equals(message.getAuthor_uid());
     }
 
     /**
