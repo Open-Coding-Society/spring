@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.*;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 
 import com.open.spring.mvc.person.PersonJpaRepository;
 
@@ -103,9 +105,17 @@ public class GradeController {
     }
 
     @PostMapping
-    public Grade createGrade(@RequestBody Grade grade) {
+    public ResponseEntity<Grade> createGrade(@AuthenticationPrincipal UserDetails caller, @RequestBody Grade grade) {
+        // Students may only file their own submission; scoring and comments are for teachers
+        if (!isStaff(caller)) {
+            if (caller == null || !caller.getUsername().equals(grade.getUid())) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+            grade.setScore(null);
+            grade.setTeacherComments(null);
+        }
         com.open.spring.mvc.person.Person p = personRepository.findByUid(grade.getUid());
-        if (p == null) return null;
+        if (p == null) return ResponseEntity.ok(null);
         Map<String, Object> m = new HashMap<>();
 
         Long newId = generateNextGradeId();
@@ -124,10 +134,16 @@ public class GradeController {
         }
         p.getGradesJson().add(m);
         personRepository.save(p);
-        return grade;
+        return ResponseEntity.ok(grade);
+    }
+
+    private static boolean isStaff(UserDetails caller) {
+        return caller != null && caller.getAuthorities().stream().anyMatch(a ->
+                "ROLE_TEACHER".equals(a.getAuthority()) || "ROLE_ADMIN".equals(a.getAuthority()));
     }
 
     @PostMapping("/{id}/submit")
+    @PreAuthorize("hasAnyAuthority('ROLE_TEACHER','ROLE_ADMIN')")
     public ResponseEntity<Grade> submitGrade(@PathVariable Long id, @RequestBody Grade gradeDetails) {
         for (com.open.spring.mvc.person.Person p : personRepository.findAll()) {
             List<Map<String, Object>> gjs = p.getGradesJson();
@@ -183,6 +199,7 @@ public class GradeController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_TEACHER','ROLE_ADMIN')")
     public ResponseEntity<Grade> updateGrade(@PathVariable Long id, @RequestBody Grade gradeDetails) {
         for (com.open.spring.mvc.person.Person p : personRepository.findAll()) {
             List<Map<String, Object>> gjs = p.getGradesJson();
@@ -206,6 +223,7 @@ public class GradeController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_TEACHER','ROLE_ADMIN')")
     public ResponseEntity<Void> deleteGrade(@PathVariable Long id) {
         for (com.open.spring.mvc.person.Person p : personRepository.findAll()) {
             List<Map<String, Object>> gjs = p.getGradesJson();
