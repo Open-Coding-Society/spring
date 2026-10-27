@@ -3,6 +3,7 @@ package com.open.spring.mvc.calendar;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
@@ -10,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -155,5 +157,37 @@ public class CalendarEventApiRestControllerTest {
                 .andExpect(jsonPath("$.break.break").value(true));
 
         verify(calendarEventService).createBreak(eq(LocalDate.of(2026, 11, 26)), eq("Thanksgiving"), eq(""), eq(true));
+    }
+
+    @Test
+    public void editKeepsTheFieldsTheRequestLeavesOut() throws Exception {
+        // An announcement-calendar event: class periods P3 and P4, visible to everyone.
+        CalendarEventEntity event = new CalendarEventEntity(LocalDate.of(2026, 10, 27), "Sprint review",
+                "Show the calendar", "event", "CSA", "P3,P4", "UGRC", "");
+        when(calendarEventService.getEventById(7)).thenReturn(event);
+        when(calendarEventService.updateEventById(anyInt(), any(), any(), any(), any(), any(), any(), any(), any()))
+                .thenReturn(true);
+
+        // Like the calendar page, it sends no classPeriod; it leaves out type, groupName and individual too.
+        mvc.perform(put("/api/calendar/edit/7")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"newTitle\": \"Sprint review (moved)\", \"description\": \"Show the calendar\","
+                                + " \"date\": \"2026-10-28\", \"priority\": \"P2\", \"period\": \"CSA\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.message").value("Event updated successfully."));
+
+        verify(calendarEventService).updateEventById(7, "Sprint review (moved)", "Show the calendar",
+                LocalDate.of(2026, 10, 28), "CSA", "event", "P3,P4", "UGRC", "");
+    }
+
+    @Test
+    public void editOfAMissingEventIsNotFound() throws Exception {
+        mvc.perform(put("/api/calendar/edit/99")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"newTitle\": \"Quiz\", \"description\": \"Unit 3\", \"date\": \"2026-10-28\", \"period\": \"CSA\"}"))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.message").value("Event with the given id not found."));
+
+        verify(calendarEventService, never()).updateEventById(anyInt(), any(), any(), any(), any(), any(), any(), any(), any());
     }
 }

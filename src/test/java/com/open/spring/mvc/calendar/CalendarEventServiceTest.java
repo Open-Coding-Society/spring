@@ -12,15 +12,10 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
 
-import com.open.spring.mvc.slack.SlackService;
-
 public class CalendarEventServiceTest {
 
     @Mock
     private CalendarEventJpaRepository calendarEventRepository;
-
-    @Mock
-    private SlackService slackService;
 
     @InjectMocks
     private CalendarEventService eventService;
