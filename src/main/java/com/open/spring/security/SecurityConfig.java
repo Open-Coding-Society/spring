@@ -103,9 +103,6 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.DELETE, "/api/person/**").hasAuthority("ROLE_ADMIN")
                         .requestMatchers(HttpMethod.PUT, "/api/person/**").hasAuthority("ROLE_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/person/create").permitAll()
-                        // Public grades submission - no authentication required
-                        .requestMatchers(HttpMethod.POST, "/api/grades").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/grades/").permitAll()
                         // updated so that it takes auth to actually hit endpoint
                         .requestMatchers("/api/scraper/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // Personal connections and Gist creation require the caller's login.
@@ -273,8 +270,6 @@ public class SecurityConfig {
         policy.put("/api/person/create", "permitAll");
         policy.put("/api/person/create/", "permitAll");
         policy.put("POST /api/person/create", "permitAll");
-        policy.put("POST /api/grades", "permitAll");
-        policy.put("POST /api/grades/", "permitAll");
         policy.put("DELETE /api/person/**", "ROLE_ADMIN");
         policy.put("PUT /api/person/**", "ROLE_ADMIN");
         policy.put("GET /api/person/uid/**", "permitAll");
