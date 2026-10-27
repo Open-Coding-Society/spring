@@ -416,10 +416,12 @@ public class AssignmentsApiController {
             // resynchronized here, otherwise frontmatter edits would only ever reach
             // assignments on their very first deploy.
             Assignment assignment = existing;
+            boolean assignmentWasResaved = false;
             if (requestedAssignmentType != null
                     && !requestedAssignmentType.equalsIgnoreCase(assignment.getAssignmentType())) {
                 assignment.setAssignmentType(requestedAssignmentType);
                 assignment = saveAssignmentWithRetry(assignment);
+                assignmentWasResaved = true;
             }
             // Keep hack weights in step with the page, so editing a "(Weight: N%)" heading
             // changes how new submissions are graded.
@@ -428,6 +430,7 @@ public class AssignmentsApiController {
             if (!Objects.equals(hackWeights, assignment.getHackWeights())) {
                 assignment.setHackWeights(hackWeights);
                 assignment = saveAssignmentWithRetry(assignment);
+                assignmentWasResaved = true;
                 logger.info("Updated hack weights for assignment ID {}: {}", assignment.getId(), hackWeights);
             }
             if (pageContent != null && !pageContent.isBlank()
@@ -441,8 +444,20 @@ public class AssignmentsApiController {
                 || metadataChanged;
             if (metadataChanged) {
                 assignment = saveAssignmentWithRetry(assignment);
+                assignmentWasResaved = true;
                 logger.info("Synchronized metadata for existing assignment ID {} (contentUrl: {})",
                     assignment.getId(), canonicalUrl);
+            }
+            if (assignmentWasResaved) {
+                // saveAssignmentWithRetry runs each attempt in its own REQUIRES_NEW
+                // transaction (see its own Javadoc), so the entity it returns is bound to
+                // that transaction's now-closed session, not this method's still-open outer
+                // one. Re-fetching through the outer session is what makes the lazy
+                // creators/courseGroups collections toDto() reads below actually loadable -
+                // without it, the response 500s with LazyInitializationException even though
+                // the save itself already committed successfully, making a real metadata
+                // sync look like it failed to whoever (or whatever CI run) called this.
+                assignment = assignmentRepo.findById(assignment.getId()).orElse(assignment);
             }
             logger.info("Assignment already exists for contentUrl: " + canonicalUrl + ", ID: " + assignment.getId());
             return ResponseEntity.ok(toDto(assignment, synchronizeCreators || synchronizeCourses));
