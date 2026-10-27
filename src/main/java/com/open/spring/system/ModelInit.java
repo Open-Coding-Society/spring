@@ -18,8 +18,8 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.open.spring.mvc.announcement.Announcement;
-import com.open.spring.mvc.announcement.AnnouncementJPA;
+import com.open.spring.mvc.announcement.AnnouncementEntity;
+import com.open.spring.mvc.announcement.AnnouncementJpaRepository;
 import com.open.spring.mvc.assignments.Assignment;
 import com.open.spring.mvc.assignments.AssignmentJpaRepository;
 import com.open.spring.mvc.assignments.AssignmentSubmissionJPA;
@@ -75,7 +75,7 @@ public class ModelInit {
     @Autowired PersonRoleJpaRepository roleJpaRepository;
     @Autowired PersonDetailsService personDetailsService;
     @Autowired PersonJpaRepository personJpaRepository;
-    @Autowired AnnouncementJPA announcementJPA;
+    @Autowired AnnouncementJpaRepository announcementJPA;
     @Autowired CommentJPA CommentJPA;
     @Autowired TinkleJPARepository tinkleJPA;
     @Autowired BathroomQueueJPARepository queueJPA;
@@ -253,11 +253,11 @@ public class ModelInit {
                 }
             }
             
-            List<Announcement> announcements = Announcement.init();
-            for (Announcement announcement : announcements) {
-                Announcement announcementFound = announcementJPA.findByAuthor(announcement.getAuthor());  
+            List<AnnouncementEntity> announcements = AnnouncementEntity.init();
+            for (AnnouncementEntity announcement : announcements) {
+                AnnouncementEntity announcementFound = announcementJPA.findByAuthor(announcement.getAuthor());  
                 if (announcementFound == null) {
-                    announcementJPA.save(new Announcement(announcement.getAuthor(), announcement.getTitle(), announcement.getBody(), announcement.getTags())); // JPA save
+                    announcementJPA.save(new AnnouncementEntity(announcement.getAuthor(), announcement.getTitle(), announcement.getBody(), announcement.getTags())); // JPA save
                 }
             }
             // Adventure sub-APIs have been merged into a single Adventure table/entity.
