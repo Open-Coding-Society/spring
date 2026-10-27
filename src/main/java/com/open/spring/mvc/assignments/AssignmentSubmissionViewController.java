@@ -313,6 +313,7 @@ public class AssignmentSubmissionViewController {
         private Boolean isGroup;
         private String aiSummary;
         private Integer qualityScore;
+        private SubmissionGradingState grading;
 
         // Private constructor for factory use
         private SubmissionListDTO() {}
@@ -397,6 +398,7 @@ public class AssignmentSubmissionViewController {
                 dto.isLate = submission.getIsLate() != null ? submission.getIsLate() : false;
                 dto.aiSummary = submission.getAiSummary();
                 dto.qualityScore = submission.getQualityScore();
+                dto.grading = SubmissionGradingState.of(submission);
             } catch (Exception e) {
                 dto.content = null;
                 dto.comment = "";
@@ -457,6 +459,7 @@ public class AssignmentSubmissionViewController {
         public Boolean getIsGroup() { return isGroup; }
         public String getAiSummary() { return aiSummary; }
         public Integer getQualityScore() { return qualityScore; }
+        public SubmissionGradingState getGrading() { return grading; }
     }
 
     /**

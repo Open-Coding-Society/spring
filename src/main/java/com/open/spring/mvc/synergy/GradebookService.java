@@ -22,6 +22,7 @@ import com.open.spring.mvc.assignments.AssignmentAiRegradeService;
 import com.open.spring.mvc.assignments.AssignmentRubricService;
 import com.open.spring.mvc.assignments.AssignmentSubmission;
 import com.open.spring.mvc.assignments.AssignmentSubmissionJPA;
+import com.open.spring.mvc.assignments.SubmissionGradingState;
 import com.open.spring.mvc.groups.CourseGroupProperties;
 import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
@@ -75,7 +76,7 @@ public class GradebookService {
     public record SubmissionEntry(Long submissionId, Long assignmentId, String assignmentName, Double points,
             Double grade, String feedback, Integer qualityScore, Boolean isLate, String status,
             LocalDateTime gradedAt, Long etaSeconds, String submitterName, Map<String, Object> content,
-            String comment, String aiSummary) {
+            String comment, String aiSummary, SubmissionGradingState grading) {
     }
 
     public record StudentCard(Long id, String uid, String name, Double overallPct, List<SubmissionEntry> recentChanges,
@@ -204,7 +205,7 @@ public class GradebookService {
                 assignment == null ? "(deleted assignment)" : assignment.getName(), points, submission.getGrade(),
                 submission.getFeedback(), submission.getQualityScore(), submission.getIsLate(), status,
                 submission.getGradedAt(), eta, submitterName(submission.getSubmitter()), submission.getContent(),
-                submission.getComment(), submission.getAiSummary());
+                submission.getComment(), submission.getAiSummary(), SubmissionGradingState.of(submission));
     }
 
     private static String submitterName(Submitter submitter) {

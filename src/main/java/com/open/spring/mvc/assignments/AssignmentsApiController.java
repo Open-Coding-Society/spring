@@ -3,6 +3,7 @@ package com.open.spring.mvc.assignments;
 import java.nio.file.Paths;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -951,10 +952,13 @@ public class AssignmentsApiController {
         public long ungradedCount;
         public long pendingAiCount;
         public Double averageGrade;
+        // When a teacher closed it and its grades became final; null while open.
+        public LocalDateTime closedAt;
 
         public TrackerAssignmentDto(Assignment assignment, List<String> courseCodes) {
             super(assignment, null, courseCodes);
             this.rubricReady = AssignmentRubricService.isAiRubricReady(assignment.getAiRubric(), assignment.getPoints());
+            this.closedAt = assignment.getClosedAt();
         }
     }
 

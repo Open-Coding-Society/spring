@@ -1,10 +1,13 @@
 package com.open.spring.mvc.assignments;
 
 import static com.open.spring.mvc.assignments.AssignmentCreatorFixtures.assignment;
+import static com.open.spring.mvc.assignments.AssignmentCreatorFixtures.gradingService;
 import static com.open.spring.mvc.assignments.AssignmentCreatorFixtures.student;
 import static com.open.spring.mvc.assignments.AssignmentCreatorFixtures.submission;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.util.List;
@@ -75,6 +78,8 @@ class AssignmentSubmissionGraderTest {
         when(submissionRepo.findById(101L)).thenReturn(Optional.of(submissionOnB));
         when(submissionRepo.save(any(AssignmentSubmission.class)))
             .thenAnswer(invocation -> invocation.getArgument(0));
+        ReflectionTestUtils.setField(controller, "gradingService",
+            gradingService(submissionRepo, submissionOnA, submissionOnB));
     }
 
     private UserDetails caller(String uid) {
@@ -83,7 +88,7 @@ class AssignmentSubmissionGraderTest {
 
     @Test
     void unassignedStudentCannotGradeASubmission() {
-        ResponseEntity<?> response = controller.gradeSubmission(100L, caller("csse-grader"), 90.0, "nice");
+        ResponseEntity<?> response = controller.gradeSubmission(100L, caller("csse-grader"), 0.9, "nice", null);
 
         assertEquals(403, response.getStatusCode().value());
     }
@@ -92,11 +97,10 @@ class AssignmentSubmissionGraderTest {
     void assignedGraderCanGradeTheSubmission() {
         assignmentA.setAssignedGraders(List.of(grader));
 
-        ResponseEntity<?> response = controller.gradeSubmission(100L, caller("csse-grader"), 90.0, "nice work");
+        ResponseEntity<?> response = controller.gradeSubmission(100L, caller("csse-grader"), 0.9, "nice work", null);
 
         assertEquals(200, response.getStatusCode().value());
-        assertEquals(90.0, submissionOnA.getGrade());
-        assertEquals("nice work", submissionOnA.getFeedback());
+        verify(submissionRepo).applyManualOverride(eq(100L), eq(1), eq(0.9), eq("nice work"), any());
     }
 
     @Test
@@ -104,17 +108,17 @@ class AssignmentSubmissionGraderTest {
         // The narrower /submissions/{id}/assignGraders grant, not the whole-assignment one.
         submissionOnA.setAssignedGraders(List.of(grader));
 
-        ResponseEntity<?> response = controller.gradeSubmission(100L, caller("csse-grader"), 85.0, null);
+        ResponseEntity<?> response = controller.gradeSubmission(100L, caller("csse-grader"), 0.85, null, null);
 
         assertEquals(200, response.getStatusCode().value());
-        assertEquals(85.0, submissionOnA.getGrade());
+        verify(submissionRepo).applyManualOverride(eq(100L), eq(1), eq(0.85), eq(null), any());
     }
 
     @Test
     void anUnrelatedStudentStaysBlockedAfterSomeoneElseIsAssigned() {
         assignmentA.setAssignedGraders(List.of(grader));
 
-        ResponseEntity<?> response = controller.gradeSubmission(100L, caller("unrelated-student"), 50.0, null);
+        ResponseEntity<?> response = controller.gradeSubmission(100L, caller("unrelated-student"), 0.5, null, null);
 
         assertEquals(403, response.getStatusCode().value());
     }
@@ -124,7 +128,7 @@ class AssignmentSubmissionGraderTest {
         // Assigned as a grader on assignment A only - must not be able to grade B's submission.
         assignmentA.setAssignedGraders(List.of(grader));
 
-        ResponseEntity<?> response = controller.gradeSubmission(101L, caller("csse-grader"), 50.0, null);
+        ResponseEntity<?> response = controller.gradeSubmission(101L, caller("csse-grader"), 0.5, null, null);
 
         assertEquals(403, response.getStatusCode().value());
     }
@@ -134,9 +138,10 @@ class AssignmentSubmissionGraderTest {
         // Assigned to grade this one specific submission, not the whole assignment.
         submissionOnA.setAssignedGraders(List.of(grader));
         AssignmentSubmission secondSubmissionOnA = submission(102L, assignmentA);
-        when(submissionRepo.findById(102L)).thenReturn(Optional.of(secondSubmissionOnA));
+        ReflectionTestUtils.setField(controller, "gradingService",
+            gradingService(submissionRepo, submissionOnA, submissionOnB, secondSubmissionOnA));
 
-        ResponseEntity<?> response = controller.gradeSubmission(102L, caller("csse-grader"), 50.0, null);
+        ResponseEntity<?> response = controller.gradeSubmission(102L, caller("csse-grader"), 0.5, null, null);
 
         assertEquals(403, response.getStatusCode().value());
     }
