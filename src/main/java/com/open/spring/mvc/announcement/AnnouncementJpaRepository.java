@@ -5,12 +5,12 @@ import org.springframework.stereotype.Repository;
 import java.util.List; 
 
 @Repository
-public interface AnnouncementJpaRepository extends JpaRepository<Announcement, Long> {
-    Announcement findByAuthor(String author); // Method to find announcement by author
+public interface AnnouncementJpaRepository extends JpaRepository<AnnouncementEntity, Long> {
+    AnnouncementEntity findByAuthor(String author); // Method to find announcement by author
 
-    List<Announcement> findByTags(String tags); // Example method to find announcements by tags
+    List<AnnouncementEntity> findByTags(String tags); // Example method to find announcements by tags
 
-    Announcement findByTitle(String title); // Example method to find announcements by title
+    AnnouncementEntity findByTitle(String title); // Example method to find announcements by title
 
-    List<Announcement> findAllByOrderByTimestampDesc();
+    List<AnnouncementEntity> findAllByOrderByTimestampDesc();
 }

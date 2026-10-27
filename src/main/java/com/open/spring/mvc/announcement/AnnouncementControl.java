@@ -26,25 +26,25 @@ public class AnnouncementControl {
 
     // Create Example
     @PostMapping("/create") 
-    public ResponseEntity<Announcement> createAnnouncement( @RequestParam String author, @RequestParam String title, @RequestParam String body, @RequestParam String tags) {
+    public ResponseEntity<AnnouncementEntity> createAnnouncement( @RequestParam String author, @RequestParam String title, @RequestParam String body, @RequestParam String tags) {
         
-        Announcement newAnnouncement = new Announcement(author, title, body, tags);
-        Announcement savedAnnouncement = announcementRepo.save(newAnnouncement);
+        AnnouncementEntity newAnnouncement = new AnnouncementEntity(author, title, body, tags);
+        AnnouncementEntity savedAnnouncement = announcementRepo.save(newAnnouncement);
         
         return new ResponseEntity<>(savedAnnouncement, HttpStatus.CREATED);
     }
 
     // Read Example
     @GetMapping 
-    public ResponseEntity<List<Announcement>> getAllAnnouncements() {
-        List<Announcement> announcements = announcementRepo.findAll();
+    public ResponseEntity<List<AnnouncementEntity>> getAllAnnouncements() {
+        List<AnnouncementEntity> announcements = announcementRepo.findAll();
         return new ResponseEntity<>(announcements, HttpStatus.OK);
     }
 
     // Update Example
     @PostMapping("/edit/{title}")
-    public ResponseEntity<Announcement> editAnnouncement(@PathVariable String title, @RequestBody String body) {
-        Announcement announcement = announcementRepo.findByTitle(title);
+    public ResponseEntity<AnnouncementEntity> editAnnouncement(@PathVariable String title, @RequestBody String body) {
+        AnnouncementEntity announcement = announcementRepo.findByTitle(title);
         announcement.setBody(body);
         announcementRepo.save(announcement);
         return new ResponseEntity<>(announcement, HttpStatus.OK);
@@ -54,7 +54,7 @@ public class AnnouncementControl {
     @PostMapping("/delete/{title}")
     public ResponseEntity<HttpStatus> deleteAnnouncement(@PathVariable String title) {
         try {
-            Announcement announcement = announcementRepo.findByTitle(title);
+            AnnouncementEntity announcement = announcementRepo.findByTitle(title);
             announcementRepo.delete(announcement);
             return new ResponseEntity<>(HttpStatus.NO_CONTENT);
         } catch (Exception e) {
@@ -64,8 +64,8 @@ public class AnnouncementControl {
 
 
     @GetMapping("/author/{author}")
-    public ResponseEntity<Announcement> getAnnouncementByAuthor(@PathVariable String author) {
-        Announcement announcement = announcementRepo.findByAuthor(author);
+    public ResponseEntity<AnnouncementEntity> getAnnouncementByAuthor(@PathVariable String author) {
+        AnnouncementEntity announcement = announcementRepo.findByAuthor(author);
         if (announcement != null) {
             return new ResponseEntity<>(announcement, HttpStatus.OK);
         } else {
@@ -74,14 +74,14 @@ public class AnnouncementControl {
     }
 
     @GetMapping("/tags/{tags}")
-    public ResponseEntity<List<Announcement>> getAnnouncementsByTags(@PathVariable String tags) {
-        List<Announcement> announcements = announcementRepo.findByTags(tags);
+    public ResponseEntity<List<AnnouncementEntity>> getAnnouncementsByTags(@PathVariable String tags) {
+        List<AnnouncementEntity> announcements = announcementRepo.findByTags(tags);
         return new ResponseEntity<>(announcements, HttpStatus.OK);
     }
 
     @GetMapping("/orderedByTime")
-    public ResponseEntity<List<Announcement>> getAllAnnouncementsOrderedByTime() {
-        List<Announcement> announcements = announcementRepo.findAllByOrderByTimestampDesc();
+    public ResponseEntity<List<AnnouncementEntity>> getAllAnnouncementsOrderedByTime() {
+        List<AnnouncementEntity> announcements = announcementRepo.findAllByOrderByTimestampDesc();
         return new ResponseEntity<>(announcements, HttpStatus.OK);
     }
 }
