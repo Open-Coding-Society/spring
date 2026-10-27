@@ -33,16 +33,19 @@ public class GroupChatApiController {
 
     private final GroupChatService groupChatService;
     private final GroupChatRealtimeService realtimeService;
+    private final GroupChatReadService readService;
     private final GroupsJpaRepository groupsRepository;
     private final PersonJpaRepository personRepository;
 
     public GroupChatApiController(
             GroupChatService groupChatService,
             GroupChatRealtimeService realtimeService,
+            GroupChatReadService readService,
             GroupsJpaRepository groupsRepository,
             PersonJpaRepository personRepository) {
         this.groupChatService = groupChatService;
         this.realtimeService = realtimeService;
+        this.readService = readService;
         this.groupsRepository = groupsRepository;
         this.personRepository = personRepository;
     }
@@ -70,6 +73,12 @@ public class GroupChatApiController {
             return null;
         }
         return name;
+    }
+
+    /** The signed-in Person, or null when nobody is signed in. */
+    private Person currentPerson() {
+        String uid = getCurrentUsername();
+        return uid == null ? null : personRepository.findByUid(uid);
     }
 
     // GroupChatMessage only stores the sender's display name (no Person link), so the
@@ -215,6 +224,43 @@ public class GroupChatApiController {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
 
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
+
+    /**
+     * Unread counts for the signed-in member's own groups, keyed by group id. Groups
+     * with nothing unread are left out, so an empty map means nothing is waiting.
+     */
+    @GetMapping("/unread")
+    public ResponseEntity<?> getUnread() {
+        Person person = currentPerson();
+        if (person == null) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+
+        Map<Long, Long> unreadByGroup = readService.unreadByGroup(person);
+        long total = unreadByGroup.values().stream().mapToLong(Long::longValue).sum();
+
+        Map<String, Object> body = new HashMap<>();
+        body.put("unreadByGroup", unreadByGroup);
+        body.put("total", total);
+        return new ResponseEntity<>(body, HttpStatus.OK);
+    }
+
+    /** Marks a group read, as of now, for the signed-in member. */
+    @PostMapping("/{groupId}/read")
+    public ResponseEntity<?> markRead(@PathVariable Long groupId) {
+        Person person = currentPerson();
+        if (person == null) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+
+        Optional<Groups> groupOpt = groupsRepository.findById(groupId);
+        if (groupOpt.isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+
+        readService.markRead(groupOpt.get(), person);
         return new ResponseEntity<>(HttpStatus.OK);
     }
 
