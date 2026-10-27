@@ -86,6 +86,9 @@ public class AssignmentSubmissionAPIController {
 
     @Autowired
     private AssignmentAuthorizationService assignmentAuthorizationService;
+
+    @Autowired
+    private AssignmentSubmissionHistoryService historyService;
     
     /**
      * A DTO class for returning only necessary assignment submission details.
@@ -213,9 +216,7 @@ public class AssignmentSubmissionAPIController {
             submission.setWorkHabits(submissionInfo.workHabits);
             submission.setAiOrchestration(submissionInfo.aiOrchestration);
             submission.setSelfAssessmentReflection(submissionInfo.selfAssessmentReflection);
-            AssignmentSubmission savedSubmission = submissionRepo.save(submission);
-            savedSubmission = tryAutoGrade(savedSubmission);
-            return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
+            return saveAndGrade(submission);
         }
         Map<String, String> error = new HashMap<>();
         error.put("error", "Assignment not found");
@@ -295,9 +296,7 @@ public class AssignmentSubmissionAPIController {
             submission.setWorkHabits(requestData.workHabits);
             submission.setAiOrchestration(requestData.aiOrchestration);
             submission.setSelfAssessmentReflection(requestData.selfAssessmentReflection);
-            AssignmentSubmission savedSubmission = submissionRepo.save(submission);
-            savedSubmission = tryAutoGrade(savedSubmission);
-            return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission), HttpStatus.CREATED);
+            return saveAndGrade(submission);
         }
         Map<String, String> error = new HashMap<>();
         error.put("error", "Assignment not found");
@@ -382,22 +381,23 @@ public class AssignmentSubmissionAPIController {
         Map<String, Object> existingContent = submission.getContent() != null ? submission.getContent() : Collections.emptyMap();
         boolean contentChanged = !Objects.equals(existingContent, updatedContent);
 
+        // New work replaces the old like a resubmit: keep the old version (and its grade) in history.
+        if (contentChanged) {
+            historyService.saveVersionBeforeEdit(submission);
+        }
+
         submission.setContent(updatedContent);
         submission.setComment(comment == null ? "" : comment);
         submission.setIsLate(Boolean.TRUE.equals(isLate));
 
         // Only clear grade/feedback/AI summary/quality score when the content actually changed
         if (contentChanged) {
-            submission.setGrade(null);
-            submission.setFeedback(null);
-            submission.setAiSummary(null);
-            submission.setQualityScore(null);
-            submission.setNeedsAiRegrade(null);
+            AssignmentSubmissionHistoryService.clearGrade(submission);
         }
 
         AssignmentSubmission savedSubmission = submissionRepo.save(submission);
         if (contentChanged) {
-            savedSubmission = tryAutoGrade(savedSubmission);
+            savedSubmission = historyService.autoGrade(savedSubmission);
         }
         return ResponseEntity.ok(new AssignmentSubmissionReturnDto(savedSubmission));
     }
@@ -651,6 +651,35 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
+     * Every version of a submission: the current one first, then earlier ones newest first.
+     * Given an older duplicate row, answers for the current submission it was replaced by.
+     * Staff and the assignment's managers can view any; students only their own or their group's.
+     */
+    @GetMapping("/{submissionId}/history")
+    @Transactional
+    public ResponseEntity<?> getSubmissionHistory(
+            @PathVariable Long submissionId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (currentUser == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                    .body(Map.of("error", "Authentication required"));
+        }
+
+        AssignmentSubmission submission = submissionRepo.findById(submissionId).orElse(null);
+        if (submission == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(Map.of("error", "Submission not found"));
+        }
+        AssignmentSubmission current = historyService.currentOf(submission);
+        if (!canManageSubmission(currentUser, current) && !canEditSubmission(currentUser, current)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "You can only view your own submissions"));
+        }
+        return ResponseEntity.ok(historyService.historyOf(current));
+    }
+
+    /**
      * Get all submissions for a specific assignment.
      * 
      * @param assignmentId the ID of the assignment whose submissions are to be fetched
@@ -841,43 +870,24 @@ public class AssignmentSubmissionAPIController {
         if (assignmentAuthorizationService.isTeacherOrAdmin(currentUser)) return null;
         boolean ownsIdentity = submitter instanceof Person person
             && Objects.equals(person.getId(), currentUser.getId());
-        boolean groupMember = submitter instanceof Groups group && group.getGroupMembers() != null
-            && group.getGroupMembers().stream().anyMatch(member -> Objects.equals(member.getId(), currentUser.getId()));
+        // Queried, not group.getGroupMembers(): that lazy list can't load here (no session open).
+        boolean groupMember = submitter instanceof Groups group && groupRepo.findGroupsByPersonId(currentUser.getId())
+            .stream().anyMatch(memberOf -> Objects.equals(memberOf.getId(), group.getId()));
         if (!ownsIdentity && !groupMember) return ResponseEntity.status(HttpStatus.FORBIDDEN)
             .body(Map.of("error", "You can only submit as yourself or a group you belong to"));
         return null;
     }
 
     /**
-     * Attempts to AI-grade a freshly created submission immediately, best-effort.
-     * Grading failures never fail the submission itself — the student's work is
-     * saved either way, ungraded if the AI grader can't produce a result.
+     * Saves a new submission, or replaces the submitter's existing one for the assignment (the
+     * earlier version goes to history), then AI-grades it best-effort. 201 when new, 200 when it
+     * replaced an earlier submission.
      */
-    private AssignmentSubmission tryAutoGrade(AssignmentSubmission submission) {
-        try {
-            AssignmentAiGradingService.GradeResult result = aiGradingService.grade(submission);
-            if ("graded".equals(result.status())) {
-                result.applyTo(submission);
-                // Return the caller's instance, not save()'s merged copy: the copy's assignment is a
-                // lazy proxy, and building the response DTO outside a session would throw.
-                submissionRepo.save(submission);
-                logger.info("Auto-grade save completed submission={} grade={}", submission.getId(), submission.getGrade());
-                return submission;
-            }
-            if ("failed".equals(result.status())) {
-                flagForRegrade(submission);
-            }
-        } catch (Exception e) {
-            logger.warn("Auto-grade failed submission={} failureType={}; saved work retained", submission.getId(), e.getClass().getSimpleName());
-            flagForRegrade(submission);
-        }
-        return submission;
-    }
-
-    /** Lets AssignmentAiRegradeService retry a grade that failed (e.g. Gemini timed out). */
-    private void flagForRegrade(AssignmentSubmission submission) {
-        submission.setNeedsAiRegrade(true);
-        submissionRepo.save(submission);
+    private ResponseEntity<?> saveAndGrade(AssignmentSubmission submission) {
+        AssignmentSubmissionHistoryService.SubmitResult result = historyService.submit(submission);
+        AssignmentSubmission savedSubmission = historyService.autoGrade(result.submission());
+        return new ResponseEntity<>(new AssignmentSubmissionReturnDto(savedSubmission),
+                result.replaced() ? HttpStatus.OK : HttpStatus.CREATED);
     }
 
     private Person getAuthenticatedPerson(UserDetails userDetails) {

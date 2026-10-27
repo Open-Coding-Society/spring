@@ -163,8 +163,11 @@ public class AssignmentAiRegradeService {
             return;
         }
         try {
+            // Only current submissions: an older row a resubmit superseded (from before resubmits
+            // replaced the row) is history, not work waiting for a grade.
             List<Map<String, Object>> pending = jdbcTemplate.queryForList(
-                    "SELECT id, assignment_id FROM assignment_submission WHERE needs_ai_regrade = 1 ORDER BY id");
+                    "SELECT s.id, s.assignment_id FROM assignment_submission s WHERE s.needs_ai_regrade = 1 AND "
+                            + AssignmentSubmissionHistoryService.currentRowSql("s") + " ORDER BY s.id");
             if (pending.isEmpty()) {
                 return;
             }
@@ -260,13 +263,15 @@ public class AssignmentAiRegradeService {
                         + "LEFT JOIN assignment a ON a.id = s.assignment_id "
                         + "LEFT JOIN person p ON p.id = s.submitter_id "
                         + "LEFT JOIN `groups` g ON g.id = s.submitter_id "
-                        + "WHERE s.needs_ai_regrade = 1 ORDER BY s.id");
+                        + "WHERE s.needs_ai_regrade = 1 AND " + AssignmentSubmissionHistoryService.currentRowSql("s")
+                        + " ORDER BY s.id");
         Map<Long, List<String>> groupMembers = new HashMap<>();
         jdbcTemplate.queryForList(
                 "SELECT DISTINCT gm.group_id, p.name, p.uid FROM group_members gm "
                         + "JOIN person p ON p.id = gm.person_id "
                         + "JOIN assignment_submission s ON s.submitter_id = gm.group_id "
-                        + "WHERE s.needs_ai_regrade = 1 ORDER BY p.name")
+                        + "WHERE s.needs_ai_regrade = 1 AND " + AssignmentSubmissionHistoryService.currentRowSql("s")
+                        + " ORDER BY p.name")
                 .forEach(row -> groupMembers
                         .computeIfAbsent(((Number) row.get("group_id")).longValue(), id -> new ArrayList<>())
                         .add(row.get("name") + " (" + row.get("uid") + ")"));

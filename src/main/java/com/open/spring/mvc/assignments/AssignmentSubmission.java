@@ -9,11 +9,13 @@ import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.person.Person;
 
+import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Convert;
 import jakarta.persistence.Entity;
@@ -24,10 +26,13 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.JoinTable;
 import jakarta.persistence.ManyToMany;
 import jakarta.persistence.ManyToOne;
+import jakarta.persistence.OneToMany;
 import jakarta.persistence.PreRemove;
 import lombok.AllArgsConstructor;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
+import lombok.ToString;
 
 @Data
 @NoArgsConstructor
@@ -58,6 +63,13 @@ public class AssignmentSubmission {
     )
     private List<Person> assignedGraders;
 
+    // Earlier versions, removed with the submission (including when its assignment is deleted).
+    @OneToMany(mappedBy = "submission", cascade = CascadeType.REMOVE)
+    @JsonIgnore
+    @ToString.Exclude
+    @EqualsAndHashCode.Exclude
+    private List<AssignmentSubmissionHistory> history;
+
     @Convert(converter = SubmissionContentConverter.class)
     @Column(columnDefinition = "text")
     private Map<String, Object> content;
@@ -75,6 +87,10 @@ public class AssignmentSubmission {
 
     // When the grade was last set (AI or teacher); drives "recent grade changes" in the gradebook.
     private LocalDateTime gradedAt;
+
+    // When this version was submitted; a resubmit overwrites the row and moves the earlier
+    // version to AssignmentSubmissionHistory. Null on rows from before this was recorded.
+    private LocalDateTime submittedAt;
 
     private String comment;
 

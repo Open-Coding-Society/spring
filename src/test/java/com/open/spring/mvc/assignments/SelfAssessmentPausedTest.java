@@ -66,8 +66,11 @@ class SelfAssessmentPausedTest {
         ReflectionTestUtils.setField(controller, "aiGradingService", aiGradingService);
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
 
+        AssignmentSubmissionHistoryService historyService = AssignmentSubmissionHistoryTest.historyService(
+                submissionRepo, Mockito.mock(AssignmentSubmissionHistoryJPA.class), aiGradingService);
+        ReflectionTestUtils.setField(controller, "historyService", historyService);
         AssignmentSubmissionUploadService uploadService = new AssignmentSubmissionUploadService(
-                fileHandler, personRepo, assignmentRepo, submissionRepo, aiGradingService);
+                fileHandler, personRepo, assignmentRepo, historyService);
         fileController = new AssignmentSubmissionFileApiController(uploadService);
 
         student = student(1L, "toby");

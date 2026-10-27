@@ -86,6 +86,41 @@
         modal.querySelector('[data-close]').focus();
     }
 
+    function formatWhen(value) {
+        return value ? new Date(value).toLocaleString() : null;
+    }
+
+    // Every version of a submission, the current one first (open), earlier ones collapsed below it.
+    async function showHistory(id) {
+        const s = card.submissions.find(x => String(x.submissionId) === String(id));
+        if (!s) return;
+        const submitter = s.submitterName || card.name || 'Unknown';
+        document.getElementById('submissionTitle').textContent = `${s.assignmentName || 'Submission'} · history`;
+        const body = document.getElementById('submissionBody');
+        body.innerHTML = '<div class="g-sub">Loading…</div>';
+        modal.classList.add('open');
+        modal.querySelector('[data-close]').focus();
+        try {
+            const history = await api(`/api/submissions/${id}/history`);
+            const count = history.versions.length;
+            body.innerHTML = `<div class="g-sub mb-2">${count} version${count === 1 ? '' : 's'}, newest first</div>`
+                + history.versions.map((v, i) => {
+                    const submitted = formatWhen(v.submittedAt);
+                    const label = v.current ? 'Current submission'
+                        : `Version ${count - i}${v.replacedAt ? ` · replaced ${esc(formatWhen(v.replacedAt))}` : ''}`;
+                    return `<details class="g-panel" ${v.current ? 'open' : ''}>
+                        <summary><b>${label}</b>
+                            ${v.current ? '<span class="g-badge ok">Current</span>' : ''}
+                            <span class="g-sub">${submitted ? `submitted ${esc(submitted)}` : 'submitted before dates were recorded'}</span>
+                        </summary>
+                        <div class="mt-2">${submissionDetailHtml(v, submitter, history.points ?? s.points)}</div>
+                    </details>`;
+                }).join('');
+        } catch (e) {
+            body.innerHTML = `<div class="g-sub">Could not load history: ${esc(e.message)}</div>`;
+        }
+    }
+
     modal.addEventListener('click', e => {
         if (e.target === modal || e.target.closest('[data-close]')) modal.classList.remove('open');
     });
@@ -133,6 +168,8 @@
                 <td>${statusBadge(s.status, s.etaSeconds)}</td>
                 <td><span title="${esc(s.feedback)}">${esc(truncate(s.feedback, 80))}</span></td>
                 <td class="text-nowrap"><button class="g-btn" data-action="view" type="button">View</button>
+                    <button class="g-btn" data-action="history" type="button"
+                        title="${s.earlierVersions} earlier version${s.earlierVersions === 1 ? '' : 's'}">History${s.earlierVersions ? ` (${s.earlierVersions + 1})` : ''}</button>
                     ${isStaff ? staffActions(s) : studentActions(s)}</td>
             </tr>`).join('');
     }
@@ -162,6 +199,10 @@
         const id = row.dataset.id;
         if (button.dataset.action === 'view') {
             showSubmission(id);
+            return;
+        }
+        if (button.dataset.action === 'history') {
+            showHistory(id);
             return;
         }
         button.disabled = true;

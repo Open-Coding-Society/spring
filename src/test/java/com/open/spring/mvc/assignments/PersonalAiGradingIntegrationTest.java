@@ -117,13 +117,12 @@ class PersonalAiGradingIntegrationTest {
         verifyNoInteractions(submissions, ai);
     }
     @Test void submissionIsSavedAndFlaggedForReviewWhenAiFails() throws Exception {
-        var controller = new AssignmentSubmissionAPIController();
         var submissions = mock(AssignmentSubmissionJPA.class); var ai = mock(AssignmentAiGradingService.class);
-        ReflectionTestUtils.setField(controller, "submissionRepo", submissions);
-        ReflectionTestUtils.setField(controller, "aiGradingService", ai);
+        var history = AssignmentSubmissionHistoryTest.historyService(submissions, mock(AssignmentSubmissionHistoryJPA.class), ai);
         var submission = submission(1L, assignment(1L, "test"));
+        when(submissions.findById(1L)).thenReturn(Optional.of(submission));
         when(ai.grade(submission)).thenReturn(AssignmentAiGradingService.GradeResult.failed("No provider available"));
-        AssignmentSubmission returned = ReflectionTestUtils.invokeMethod(controller, "tryAutoGrade", submission);
+        AssignmentSubmission returned = history.autoGrade(submission);
         assertSame(submission, returned); assertTrue(submission.getNeedsAiRegrade());
         assertNull(submission.getGrade()); verify(submissions).save(submission);
     }
@@ -136,12 +135,16 @@ class PersonalAiGradingIntegrationTest {
         ReflectionTestUtils.setField(controller, "submissionRepo", submissions);
         ReflectionTestUtils.setField(controller, "aiGradingService", ai);
         ReflectionTestUtils.setField(controller, "assignmentAuthorizationService", new AssignmentAuthorizationService());
+        ReflectionTestUtils.setField(controller, "historyService",
+            AssignmentSubmissionHistoryTest.historyService(submissions, mock(AssignmentSubmissionHistoryJPA.class), ai));
         Person alice = student(1L, "alice"); var assignment = assignment(1L, "test"); assignment.setAssignmentType("code");
         when(people.findByUid("alice")).thenReturn(alice); when(people.findById(1L)).thenReturn(Optional.of(alice));
         when(assignments.findById(1L)).thenReturn(Optional.of(assignment));
+        var stored = new AssignmentSubmission[1];
         when(submissions.save(any())).thenAnswer(invocation -> {
-            AssignmentSubmission saved = invocation.getArgument(0); saved.setId(99L); return saved;
+            AssignmentSubmission saved = invocation.getArgument(0); saved.setId(99L); stored[0] = saved; return saved;
         });
+        when(submissions.findById(99L)).thenAnswer(invocation -> Optional.ofNullable(stored[0]));
         when(ai.grade(any())).thenReturn(AssignmentAiGradingService.GradeResult.failed("No provider available"));
         var request = new AssignmentSubmissionAPIController.SubmissionRequestDto(); request.submitterId = 1L;
         request.content = Map.of("type", "code", "url", "https://gist.github.com/alice/123abcdef");
