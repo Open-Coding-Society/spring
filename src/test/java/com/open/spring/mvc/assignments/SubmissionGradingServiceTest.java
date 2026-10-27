@@ -38,7 +38,7 @@ class SubmissionGradingServiceTest {
 
     private final AssignmentSubmissionJPA submissionRepo = mock(AssignmentSubmissionJPA.class);
     private final AssignmentJpaRepository assignmentRepo = mock(AssignmentJpaRepository.class);
-    private final SubmissionGradeEventJPA eventRepo = mock(SubmissionGradeEventJPA.class);
+    private final SubmissionGradeEventJpaRepository eventRepo = mock(SubmissionGradeEventJpaRepository.class);
     private final SubmissionGradingService service =
             new SubmissionGradingService(submissionRepo, assignmentRepo, eventRepo, new AssignmentAuthorizationService());
 
@@ -76,8 +76,8 @@ class SubmissionGradingServiceTest {
         when(submissionRepo.findGradingState(100L)).thenReturn(first, rest);
     }
 
-    private List<SubmissionGradeEvent> savedEvents(int count) {
-        ArgumentCaptor<SubmissionGradeEvent> events = ArgumentCaptor.forClass(SubmissionGradeEvent.class);
+    private List<SubmissionGradeEventEntity> savedEvents(int count) {
+        ArgumentCaptor<SubmissionGradeEventEntity> events = ArgumentCaptor.forClass(SubmissionGradeEventEntity.class);
         verify(eventRepo, times(count)).save(events.capture());
         return events.getAllValues();
     }
@@ -93,8 +93,8 @@ class SubmissionGradingServiceTest {
 
         assertEquals(1, submission.getRevision());
         assertFalse(submission.hasManualOverride());
-        SubmissionGradeEvent event = savedEvents(1).get(0);
-        assertEquals(SubmissionGradeEvent.Type.SUBMITTED, event.getType());
+        SubmissionGradeEventEntity event = savedEvents(1).get(0);
+        assertEquals(SubmissionGradeEventEntity.Type.SUBMITTED, event.getType());
         assertEquals(submission.getContent(), event.getContent());
         assertEquals(5L, event.getActorId());
     }
@@ -111,8 +111,8 @@ class SubmissionGradingServiceTest {
         assertEquals(GradingOutcome.MANUAL_GRADE_APPLIED, result.outcome());
         assertEquals(GradeSource.MANUAL, result.state().source());
         assertEquals(0.8, submission.getGrade());
-        SubmissionGradeEvent event = savedEvents(1).get(0);
-        assertEquals(SubmissionGradeEvent.Type.MANUAL_OVERRIDE_SET, event.getType());
+        SubmissionGradeEventEntity event = savedEvents(1).get(0);
+        assertEquals(SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET, event.getType());
         assertEquals(0.8, event.getGrade());
         assertTrue(event.getEffective());
         assertEquals(3L, event.getActorId());
@@ -202,8 +202,8 @@ class SubmissionGradingServiceTest {
         assertEquals(GradingOutcome.MANUAL_OVERRIDE_CLEARED, result.outcome());
         assertEquals(GradeSource.AI, result.state().source());
         verify(submissionRepo, never()).flagForAiRegrade(anyLong(), anyInt());
-        SubmissionGradeEvent event = savedEvents(1).get(0);
-        assertEquals(SubmissionGradeEvent.Type.MANUAL_OVERRIDE_CLEARED, event.getType());
+        SubmissionGradeEventEntity event = savedEvents(1).get(0);
+        assertEquals(SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_CLEARED, event.getType());
         assertEquals(0.8, event.getGrade());
     }
 
@@ -238,8 +238,8 @@ class SubmissionGradingServiceTest {
                 AssignmentAiGradingService.GradeResult.graded(0.6, 3, "AI says", false));
 
         assertEquals(GradingOutcome.AI_GRADE_APPLIED, result.outcome());
-        SubmissionGradeEvent event = savedEvents(1).get(0);
-        assertEquals(SubmissionGradeEvent.Type.AI_GRADED, event.getType());
+        SubmissionGradeEventEntity event = savedEvents(1).get(0);
+        assertEquals(SubmissionGradeEventEntity.Type.AI_GRADED, event.getType());
         assertTrue(event.getEffective());
         assertNull(event.getActorId());
     }
@@ -303,9 +303,9 @@ class SubmissionGradingServiceTest {
     // ---- revisions ----
 
     @Test
-    void newContentStartsANewRevisionAndReleasesTheOverride() {
+    void newContentStartsANewRevisionAndKeepsTheOverride() {
         Map<String, Object> newContent = Map.of("type", "link", "url", "https://example.com/v2");
-        stateIs(state(1, 0.8, 0.6, 0.8), state(2, null, null, null));
+        stateIs(state(1, 0.8, 0.6, 0.8), state(2, 0.8, null, 0.8));
         when(submissionRepo.startRevision(100L, 1, newContent)).thenReturn(1);
         Person author = student(5L, "author");
 
@@ -314,14 +314,18 @@ class SubmissionGradingServiceTest {
         assertEquals(GradingOutcome.REVISION_CREATED, result.outcome());
         assertEquals(newContent, submission.getContent());
         assertEquals(2, submission.getRevision());
-        assertNull(submission.getGrade());
-        List<SubmissionGradeEvent> events = savedEvents(2);
-        assertEquals(SubmissionGradeEvent.Type.MANUAL_OVERRIDE_RELEASED_BY_REVISION, events.get(0).getType());
-        assertEquals(1, events.get(0).getRevision());
-        assertEquals(0.8, events.get(0).getGrade());
-        assertEquals(SubmissionGradeEvent.Type.REVISED, events.get(1).getType());
+        assertEquals(0.8, submission.getGrade());
+        assertTrue(submission.hasManualOverride());
+        List<SubmissionGradeEventEntity> events = savedEvents(2);
+        assertEquals(SubmissionGradeEventEntity.Type.REVISED, events.get(0).getType());
+        assertEquals(2, events.get(0).getRevision());
+        assertEquals(newContent, events.get(0).getContent());
+        assertEquals(SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_KEPT_BY_REVISION, events.get(1).getType());
         assertEquals(2, events.get(1).getRevision());
-        assertEquals(newContent, events.get(1).getContent());
+        assertEquals(0.8, events.get(1).getGrade());
+        assertEquals("Teacher says", events.get(1).getFeedback());
+        assertTrue(events.get(1).getEffective());
+        assertEquals(5L, events.get(1).getActorId());
     }
 
     @Test
@@ -332,7 +336,7 @@ class SubmissionGradingServiceTest {
 
         service.revise(submission, newContent, null);
 
-        assertEquals(SubmissionGradeEvent.Type.REVISED, savedEvents(1).get(0).getType());
+        assertEquals(SubmissionGradeEventEntity.Type.REVISED, savedEvents(1).get(0).getType());
     }
 
     @Test
@@ -433,27 +437,43 @@ class SubmissionGradingServiceTest {
     }
 
     @Test
-    void anAuthorizedCorrectionIsAManualOverrideLinkedToItsReview() {
+    void aReviewedGradeAfterCloseIsAnAuthorizedCorrectionLinkedToItsReview() {
         stateIs(closed(state(1, 0.6, 0.6, null)), closed(state(1, 0.8, 0.6, 0.8)));
         when(submissionRepo.applyManualOverride(eq(100L), eq(1), eq(0.8), eq("Corrected"), any())).thenReturn(1);
-        GradeReview review = new GradeReview();
+        GradeReviewEntity review = new GradeReviewEntity();
         review.setId(55L);
 
-        GradingResult result = service.applyAuthorizedCorrection(submission, review, 0.8, "Corrected", mort);
+        GradingResult result = service.applyReviewedGrade(submission, review, 0.8, "Corrected", mort);
 
         assertEquals(GradingOutcome.GRADE_CORRECTED, result.outcome());
-        SubmissionGradeEvent event = savedEvents(1).get(0);
-        assertEquals(SubmissionGradeEvent.Type.AUTHORIZED_CORRECTION, event.getType());
+        SubmissionGradeEventEntity event = savedEvents(1).get(0);
+        assertEquals(SubmissionGradeEventEntity.Type.AUTHORIZED_CORRECTION, event.getType());
         assertEquals(55L, event.getReviewId());
         assertEquals(0.8, event.getGrade());
         assertEquals(3L, event.getActorId());
     }
 
     @Test
-    void anAuthorizedCorrectionStillValidatesTheGrade() {
+    void aReviewedGradeBeforeCloseIsAManualGradeLinkedToItsReview() {
+        stateIs(state(2, 0.8, 0.5, 0.8), state(2, 0.7, 0.5, 0.7));
+        when(submissionRepo.applyManualOverride(eq(100L), eq(2), eq(0.7), eq("Petition granted"), any())).thenReturn(1);
+        GradeReviewEntity review = new GradeReviewEntity();
+        review.setId(57L);
+
+        GradingResult result = service.applyReviewedGrade(submission, review, 0.7, "Petition granted", mort);
+
+        assertEquals(GradingOutcome.MANUAL_GRADE_APPLIED, result.outcome());
+        SubmissionGradeEventEntity event = savedEvents(1).get(0);
+        assertEquals(SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET, event.getType());
+        assertEquals(57L, event.getReviewId());
+        assertEquals(2, event.getRevision());
+    }
+
+    @Test
+    void aReviewedGradeStillValidatesTheGrade() {
         stateIs(closed(state(1, 0.6, 0.6, null)));
 
-        GradingResult result = service.applyAuthorizedCorrection(submission, new GradeReview(), 5.0, null, mort);
+        GradingResult result = service.applyReviewedGrade(submission, new GradeReviewEntity(), 5.0, null, mort);
 
         assertEquals(GradingOutcome.INVALID_GRADE, result.outcome());
         verify(submissionRepo, never()).applyManualOverride(anyLong(), anyInt(), any(), any(), any());
@@ -463,17 +483,17 @@ class SubmissionGradingServiceTest {
     @Test
     void closingAndReviewDecisionsAreRecordedInTheHistory() {
         SubmissionGradingState finalState = closed(state(1, 0.6, 0.6, null));
-        GradeReview review = new GradeReview();
+        GradeReviewEntity review = new GradeReviewEntity();
         review.setId(56L);
         review.setRationale("Rubric applied correctly");
 
         service.recordFinalized(finalState, mort);
         service.recordReviewNoChange(finalState, review, mort);
 
-        List<SubmissionGradeEvent> events = savedEvents(2);
-        assertEquals(SubmissionGradeEvent.Type.FINALIZED, events.get(0).getType());
+        List<SubmissionGradeEventEntity> events = savedEvents(2);
+        assertEquals(SubmissionGradeEventEntity.Type.FINALIZED, events.get(0).getType());
         assertEquals(0.6, events.get(0).getGrade());
-        assertEquals(SubmissionGradeEvent.Type.REVIEW_NO_CHANGE, events.get(1).getType());
+        assertEquals(SubmissionGradeEventEntity.Type.REVIEW_NO_CHANGE, events.get(1).getType());
         assertEquals("Rubric applied correctly", events.get(1).getFeedback());
         assertEquals(56L, events.get(1).getReviewId());
     }

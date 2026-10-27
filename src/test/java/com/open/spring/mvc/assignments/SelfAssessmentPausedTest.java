@@ -50,7 +50,7 @@ class SelfAssessmentPausedTest {
     private FileHandler fileHandler;
 
     @Mock
-    private SubmissionGradeEventJPA eventRepo;
+    private SubmissionGradeEventJpaRepository eventRepo;
 
     private AssignmentSubmissionAPIController controller;
     private AssignmentSubmissionFileApiController fileController;

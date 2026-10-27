@@ -81,12 +81,12 @@ class SubmissionGradingPersistenceTest {
 
     @Autowired private AssignmentSubmissionJPA submissionRepo;
     @Autowired private AssignmentJpaRepository assignmentRepo;
-    @Autowired private SubmissionGradeEventJPA eventRepo;
+    @Autowired private SubmissionGradeEventJpaRepository eventRepo;
     @Autowired private SubmissionGradingService gradingService;
     @Autowired private SubmissionAiGrader aiGrader;
     @Autowired private AssignmentClosureService closureService;
     @Autowired private GradeReviewService reviewService;
-    @Autowired private GradeReviewJPA reviewRepo;
+    @Autowired private GradeReviewJpaRepository reviewRepo;
     @Autowired private SynergyGradeJpaRepository gradebookRepo;
     @Autowired private PersonJpaRepository personRepo;
     @Autowired private PersonRoleJpaRepository roleRepo;
@@ -162,8 +162,8 @@ class SubmissionGradingPersistenceTest {
         return loaded;
     }
 
-    private List<SubmissionGradeEvent.Type> history() {
-        return gradingService.history(submission.getId()).stream().map(SubmissionGradeEvent::getType).toList();
+    private List<SubmissionGradeEventEntity.Type> history() {
+        return gradingService.history(submission.getId()).stream().map(SubmissionGradeEventEntity::getType).toList();
     }
 
     /** Makes the AI block mid-call until {@code release} opens. */
@@ -243,8 +243,8 @@ class SubmissionGradingPersistenceTest {
         assertEquals(0.5, state.aiGrade());
         assertEquals("AI feedback", state.aiFeedback());
         assertEquals(GradeSource.MANUAL, state.source());
-        assertEquals(List.of(SubmissionGradeEvent.Type.SUBMITTED, SubmissionGradeEvent.Type.MANUAL_OVERRIDE_SET,
-                SubmissionGradeEvent.Type.AI_GRADED), history());
+        assertEquals(List.of(SubmissionGradeEventEntity.Type.SUBMITTED, SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET,
+                SubmissionGradeEventEntity.Type.AI_GRADED), history());
         assertFalse(gradingService.history(submission.getId()).get(2).getEffective());
     }
 
@@ -315,33 +315,55 @@ class SubmissionGradingPersistenceTest {
     }
 
     @Test
-    void aRevisionIsANewGradingDecisionAndThePreviousOneStaysInTheHistory() {
+    void aRevisionKeepsTheManualGradeAndTheAiGradesTheNewContentForReference() {
         gradingService.recordAiGrade(submission.getId(), 1, aiGrade(0.6, "Feedback on v1"));
         gradingService.applyManualGrade(submission.getId(), niko, 1, 0.9, "Teacher feedback on v1");
 
         assertEquals(GradingOutcome.REVISION_CREATED,
-                gradingService.revise(fresh(), content("https://example.com/v2"), null).outcome());
+                gradingService.revise(fresh(), content("https://example.com/v2"), hop).outcome());
         SubmissionGradingState afterRevision = stored();
         assertEquals(2, afterRevision.revision());
-        assertEquals(GradeSource.NONE, afterRevision.source());
-        assertFalse(afterRevision.manualOverride());
-        assertNull(afterRevision.manualGrade());
+        assertEquals(GradeSource.MANUAL, afterRevision.source());
+        assertEquals(0.9, afterRevision.effectiveGrade());
+        assertEquals("Teacher feedback on v1", afterRevision.effectiveFeedback());
+        assertNull(afterRevision.aiGrade(), "the AI grade was for the old content");
 
         assertEquals(GradingOutcome.STALE_REVISION,
-                gradingService.applyManualGrade(submission.getId(), niko, 1, 0.9, "late").outcome());
-        assertEquals(GradingOutcome.AI_GRADE_APPLIED,
+                gradingService.applyManualGrade(submission.getId(), niko, 1, 0.1, "late").outcome());
+        assertEquals(GradingOutcome.MANUAL_OVERRIDE_KEPT,
                 gradingService.recordAiGrade(submission.getId(), 2, aiGrade(0.4, "Feedback on v2")).outcome());
-        assertEquals(0.4, stored().effectiveGrade());
+        assertEquals(0.9, stored().effectiveGrade());
+        assertEquals(0.4, stored().aiGrade());
 
-        List<SubmissionGradeEvent> events = gradingService.history(submission.getId());
-        assertEquals(List.of(SubmissionGradeEvent.Type.SUBMITTED, SubmissionGradeEvent.Type.AI_GRADED,
-                SubmissionGradeEvent.Type.MANUAL_OVERRIDE_SET, SubmissionGradeEvent.Type.MANUAL_OVERRIDE_RELEASED_BY_REVISION,
-                SubmissionGradeEvent.Type.REVISED, SubmissionGradeEvent.Type.AI_GRADED), history());
+        List<SubmissionGradeEventEntity> events = gradingService.history(submission.getId());
+        assertEquals(List.of(SubmissionGradeEventEntity.Type.SUBMITTED, SubmissionGradeEventEntity.Type.AI_GRADED,
+                SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET, SubmissionGradeEventEntity.Type.REVISED,
+                SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_KEPT_BY_REVISION,
+                SubmissionGradeEventEntity.Type.AI_GRADED), history());
         assertEquals(content("https://example.com/v1"), events.get(0).getContent());
-        assertEquals(0.9, events.get(2).getGrade());
-        assertEquals(niko.getId(), events.get(2).getActorId());
-        assertEquals(content("https://example.com/v2"), events.get(4).getContent());
-        assertEquals(2, events.get(5).getRevision());
+        assertEquals(content("https://example.com/v2"), events.get(3).getContent());
+        assertEquals(2, events.get(4).getRevision());
+        assertEquals(0.9, events.get(4).getGrade());
+        assertEquals(hop.getId(), events.get(4).getActorId());
+        assertFalse(events.get(5).getEffective());
+
+        assertEquals(GradingOutcome.MANUAL_OVERRIDE_CLEARED,
+                gradingService.clearManualOverride(submission.getId(), niko, 2).outcome());
+        assertEquals(0.4, stored().effectiveGrade(), "the teacher can still switch to the new revision's AI grade");
+    }
+
+    @Test
+    void aRevisionWithoutAManualGradeStartsUngraded() {
+        gradingService.recordAiGrade(submission.getId(), 1, aiGrade(0.6, "Feedback on v1"));
+
+        gradingService.revise(fresh(), content("https://example.com/v2"), hop);
+
+        SubmissionGradingState state = stored();
+        assertEquals(GradeSource.NONE, state.source());
+        assertNull(state.effectiveGrade());
+        assertNull(state.gradedAt());
+        assertEquals(List.of(SubmissionGradeEventEntity.Type.SUBMITTED, SubmissionGradeEventEntity.Type.AI_GRADED,
+                SubmissionGradeEventEntity.Type.REVISED), history());
     }
 
     @Test
@@ -398,13 +420,14 @@ class SubmissionGradingPersistenceTest {
     // ---- schema ----
 
     @Test
-    void theMigrationRunsCleanlyOnTheEntitySchemaAndIsIdempotent() {
-        AssignmentSubmissionGradingMigration migration = new AssignmentSubmissionGradingMigration(jdbcTemplate);
-        AssignmentClosureMigration closureMigration = new AssignmentClosureMigration(jdbcTemplate);
-        migration.migrate();
-        closureMigration.migrate();
-        migration.migrate();
-        closureMigration.migrate();
+    void theTableInitializersRunCleanlyOnTheEntitySchemaAndAreIdempotent() {
+        List<Runnable> initializers = List.of(
+                new AssignmentTableInitializer(jdbcTemplate)::initialize,
+                new AssignmentSubmissionTableInitializer(jdbcTemplate)::initialize,
+                new SubmissionGradeEventTableInitializer(jdbcTemplate)::initialize,
+                new GradeReviewTableInitializer(jdbcTemplate)::initialize);
+        initializers.forEach(Runnable::run);
+        initializers.forEach(Runnable::run);
 
         gradingService.recordAiGrade(submission.getId(), 1, aiGrade(0.6, "AI feedback"));
         assertEquals(0.6, stored().effectiveGrade());
@@ -430,7 +453,7 @@ class SubmissionGradingPersistenceTest {
 
         closureService.close(assignment.getId(), niko);
         assertEquals(GradingOutcome.NOT_PERMITTED,
-                reviewService.open(submission.getId(), lex, GradeReview.Reason.REGRADE_REQUEST, null).outcome(),
+                reviewService.open(submission.getId(), lex, GradeReviewEntity.Reason.REGRADE_REQUEST, null).outcome(),
                 "reviews are sensitive and teacher-only");
     }
 
@@ -452,7 +475,7 @@ class SubmissionGradingPersistenceTest {
         assertTrue(stored().closed());
         assertFalse(submissionRepo.findGradingState(ungraded.getId()).orElseThrow().needsAiRegrade(),
                 "a closed assignment leaves the AI queue");
-        assertEquals(SubmissionGradeEvent.Type.FINALIZED, history().get(history().size() - 1));
+        assertEquals(SubmissionGradeEventEntity.Type.FINALIZED, history().get(history().size() - 1));
         assertEquals(GradingOutcome.ASSIGNMENT_CLOSED, closureService.close(assignment.getId(), niko).outcome());
     }
 
@@ -517,8 +540,88 @@ class SubmissionGradingPersistenceTest {
                 "every submission that exists was there when the assignment closed");
         for (AssignmentSubmission each : all) {
             assertTrue(gradingService.history(each.getId()).stream()
-                    .anyMatch(event -> event.getType() == SubmissionGradeEvent.Type.FINALIZED), "finalized " + each.getId());
+                    .anyMatch(event -> event.getType() == SubmissionGradeEventEntity.Type.FINALIZED), "finalized " + each.getId());
         }
+    }
+
+    // ---- student petitions ----
+
+    @Test
+    void aStudentPetitionsAKeptManualGradeBeforeCloseAndTheTeacherAdjustsIt() {
+        gradingService.applyManualGrade(submission.getId(), niko, 1, 0.5, "Missing part 2");
+        gradingService.revise(fresh(), content("https://example.com/v2"), hop);
+
+        assertEquals(GradingOutcome.REASON_REQUIRED, reviewService.petition(submission.getId(), hop, " ").outcome());
+        assertEquals(GradingOutcome.NOT_PERMITTED,
+                reviewService.petition(submission.getId(), lex, "Not my work").outcome());
+        GradeReviewService.ReviewResult filed = reviewService.petition(submission.getId(), hop, "  v2 adds part 2  ");
+        assertEquals(GradingOutcome.REVIEW_OPENED, filed.outcome());
+        GradeReviewEntity petition = filed.review();
+        assertEquals(GradeReviewEntity.Reason.PETITION, petition.getReason());
+        assertEquals("v2 adds part 2", petition.getPetitionMessage());
+        assertEquals(hop.getId(), petition.getOpenedById());
+        assertEquals(0.5, petition.getGradeAtOpen());
+        assertEquals(GradingOutcome.REVIEW_ALREADY_OPEN,
+                reviewService.petition(submission.getId(), hop, "Again").outcome());
+
+        assertEquals(1, reviewService.petitionsOf(submission.getId(), hop).orElseThrow().size());
+        assertTrue(reviewService.petitionsOf(submission.getId(), lex).isEmpty());
+        assertEquals(List.of(petition.getId()), reviewService.openReviewsOf(assignment.getId(), niko).orElseThrow()
+                .stream().map(GradeReviewEntity::getId).toList());
+        assertTrue(reviewService.openReviewsOf(assignment.getId(), hop).isEmpty());
+        assertEquals(GradingOutcome.NOT_PERMITTED, reviewService.decide(petition.getId(), hop,
+                GradeReviewEntity.Decision.ADJUST, "I deserve it", 1.0, null).outcome());
+
+        GradeReviewService.ReviewResult decided = reviewService.decide(petition.getId(), niko,
+                GradeReviewEntity.Decision.ADJUST, "Part 2 is there in v2", 0.9, "Regraded v2");
+
+        assertEquals(GradingOutcome.MANUAL_GRADE_APPLIED, decided.outcome());
+        assertEquals(0.9, stored().effectiveGrade());
+        assertEquals(GradeSource.MANUAL, stored().source());
+        assertFalse(reviewRepo.findById(petition.getId()).orElseThrow().isOpen());
+        assertTrue(gradebookRepo.findByAssignmentIdAndStudentId(assignment.getId(), hop.getId()).isEmpty(),
+                "the gradebook is written at close, not before");
+        SubmissionGradeEventEntity last = gradingService.history(submission.getId()).get(history().size() - 1);
+        assertEquals(SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET, last.getType());
+        assertEquals(petition.getId(), last.getReviewId());
+        assertEquals(2, last.getRevision());
+        assertTrue(reviewService.openReviewsOf(assignment.getId(), niko).orElseThrow().isEmpty());
+    }
+
+    @Test
+    void beforeCloseOnlyAManualGradeCanBePetitioned() {
+        gradingService.recordAiGrade(submission.getId(), 1, aiGrade(0.6, "AI feedback"));
+
+        assertEquals(GradingOutcome.NO_MANUAL_OVERRIDE,
+                reviewService.petition(submission.getId(), hop, "Please look again").outcome());
+        assertTrue(reviewRepo.findBySubmissionIdOrderByIdAsc(submission.getId()).isEmpty());
+    }
+
+    @Test
+    void afterCloseAnyGradeCanBePetitionedAndTheTeacherCanKeepIt() {
+        gradingService.recordAiGrade(submission.getId(), 1, aiGrade(0.6, "AI feedback"));
+        closureService.close(assignment.getId(), niko);
+
+        GradeReviewService.ReviewResult filed = reviewService.petition(submission.getId(), hop, "Part 2 was there");
+        assertEquals(GradingOutcome.REVIEW_OPENED, filed.outcome());
+
+        assertEquals(GradingOutcome.REVIEW_NO_CHANGE, reviewService.decide(filed.review().getId(), niko,
+                GradeReviewEntity.Decision.NO_CHANGE, "Part 2 doesn't meet the rubric", null, null).outcome());
+        assertEquals(0.6, stored().effectiveGrade());
+        assertEquals(GradeReviewEntity.Decision.NO_CHANGE,
+                reviewService.petitionsOf(submission.getId(), hop).orElseThrow().get(0).getDecision());
+    }
+
+    @Test
+    void aPetitionStillOpenAtCloseIsDecidedAsAnAuthorizedCorrection() {
+        gradingService.applyManualGrade(submission.getId(), niko, 1, 0.5, null);
+        Long petitionId = reviewService.petition(submission.getId(), hop, "Rubric says 0.8").review().getId();
+        closureService.close(assignment.getId(), niko);
+
+        assertEquals(GradingOutcome.GRADE_CORRECTED, reviewService.decide(petitionId, niko,
+                GradeReviewEntity.Decision.ADJUST, "Agreed", 0.8, null).outcome());
+        assertEquals(0.8, gradebookGrade(hop));
+        assertEquals(SubmissionGradeEventEntity.Type.AUTHORIZED_CORRECTION, history().get(history().size() - 1));
     }
 
     // ---- teacher review after close ----
@@ -526,7 +629,7 @@ class SubmissionGradingPersistenceTest {
     @Test
     void aReviewNeedsAClosedAssignment() {
         assertEquals(GradingOutcome.REVIEW_REQUIRES_CLOSE,
-                reviewService.open(submission.getId(), niko, GradeReview.Reason.PETITION, null).outcome());
+                reviewService.open(submission.getId(), niko, GradeReviewEntity.Reason.PETITION, null).outcome());
     }
 
     @Test
@@ -535,35 +638,35 @@ class SubmissionGradingPersistenceTest {
         closureService.close(assignment.getId(), niko);
 
         GradeReviewService.ReviewResult opened = reviewService.open(submission.getId(), niko,
-                GradeReview.Reason.PETITION, "Student says part 2 was graded against the wrong rubric");
+                GradeReviewEntity.Reason.PETITION, "Student says part 2 was graded against the wrong rubric");
         assertEquals(GradingOutcome.REVIEW_OPENED, opened.outcome());
         Long reviewId = opened.review().getId();
         assertEquals(GradingOutcome.REVIEW_ALREADY_OPEN,
-                reviewService.open(submission.getId(), niko, GradeReview.Reason.REGRADE_REQUEST, null).outcome());
+                reviewService.open(submission.getId(), niko, GradeReviewEntity.Reason.REGRADE_REQUEST, null).outcome());
 
         assertEquals(GradingOutcome.RATIONALE_REQUIRED,
-                reviewService.decide(reviewId, niko, GradeReview.Decision.ADJUST, " ", 0.9, null).outcome());
+                reviewService.decide(reviewId, niko, GradeReviewEntity.Decision.ADJUST, " ", 0.9, null).outcome());
         assertEquals(GradingOutcome.INVALID_GRADE,
-                reviewService.decide(reviewId, niko, GradeReview.Decision.ADJUST, "Rubric misapplied", 5.0, null).outcome());
+                reviewService.decide(reviewId, niko, GradeReviewEntity.Decision.ADJUST, "Rubric misapplied", 5.0, null).outcome());
         assertTrue(reviewRepo.findById(reviewId).orElseThrow().isOpen(), "a refused decision leaves the review open");
 
         GradeReviewService.ReviewResult decided = reviewService.decide(reviewId, niko,
-                GradeReview.Decision.ADJUST, "Rubric misapplied to part 2", 0.9, "Corrected after petition");
+                GradeReviewEntity.Decision.ADJUST, "Rubric misapplied to part 2", 0.9, "Corrected after petition");
 
         assertEquals(GradingOutcome.GRADE_CORRECTED, decided.outcome());
         assertEquals(0.9, stored().effectiveGrade());
         assertEquals(GradeSource.MANUAL, stored().source());
         assertEquals(0.9, gradebookGrade(hop));
-        GradeReview review = reviewRepo.findById(reviewId).orElseThrow();
-        assertEquals(GradeReview.Decision.ADJUST, review.getDecision());
+        GradeReviewEntity review = reviewRepo.findById(reviewId).orElseThrow();
+        assertEquals(GradeReviewEntity.Decision.ADJUST, review.getDecision());
         assertEquals("Rubric misapplied to part 2", review.getRationale());
         assertEquals(0.6, review.getGradeAtOpen());
-        SubmissionGradeEvent correction = gradingService.history(submission.getId()).stream()
-                .filter(event -> event.getType() == SubmissionGradeEvent.Type.AUTHORIZED_CORRECTION).findFirst().orElseThrow();
+        SubmissionGradeEventEntity correction = gradingService.history(submission.getId()).stream()
+                .filter(event -> event.getType() == SubmissionGradeEventEntity.Type.AUTHORIZED_CORRECTION).findFirst().orElseThrow();
         assertEquals(reviewId, correction.getReviewId());
         assertEquals(niko.getId(), correction.getActorId());
         assertEquals(GradingOutcome.REVIEW_NOT_OPEN,
-                reviewService.decide(reviewId, niko, GradeReview.Decision.NO_CHANGE, "Again", null, null).outcome());
+                reviewService.decide(reviewId, niko, GradeReviewEntity.Decision.NO_CHANGE, "Again", null, null).outcome());
         assertEquals(GradingOutcome.ASSIGNMENT_CLOSED,
                 gradingService.applyManualGrade(submission.getId(), niko, null, 0.1, null).outcome(),
                 "the correction didn't reopen anything");
@@ -574,7 +677,7 @@ class SubmissionGradingPersistenceTest {
         AssignmentSubmission copy = submit(lex, "HTTPS://www.example.com/v1/");
         gradingService.recordAiGrade(submission.getId(), 1, aiGrade(0.6, "AI feedback"));
         closureService.close(assignment.getId(), niko);
-        Long reviewId = reviewService.open(submission.getId(), niko, GradeReview.Reason.SIMILARITY_CHECK, null)
+        Long reviewId = reviewService.open(submission.getId(), niko, GradeReviewEntity.Reason.SIMILARITY_CHECK, null)
                 .review().getId();
 
         GradeReviewService.ReviewResult similar = reviewService.collectSimilarity(reviewId, niko);
@@ -585,19 +688,19 @@ class SubmissionGradingPersistenceTest {
                 reviewService.recordEvidence(reviewId, niko, "Spoke with both students; independent work").outcome());
 
         GradeReviewService.ReviewResult decided = reviewService.decide(reviewId, niko,
-                GradeReview.Decision.NO_CHANGE, "Same starter link from the lesson, not copying", null, null);
+                GradeReviewEntity.Decision.NO_CHANGE, "Same starter link from the lesson, not copying", null, null);
 
         assertEquals(GradingOutcome.REVIEW_NO_CHANGE, decided.outcome());
         assertEquals(0.6, stored().effectiveGrade());
         assertEquals(0.6, gradebookGrade(hop));
-        assertEquals(SubmissionGradeEvent.Type.REVIEW_NO_CHANGE, history().get(history().size() - 1));
+        assertEquals(SubmissionGradeEventEntity.Type.REVIEW_NO_CHANGE, history().get(history().size() - 1));
     }
 
     @Test
     void anAiReEvaluationIsEvidenceOnlyAndNeverChangesTheFinalGrade() throws Exception {
         gradingService.recordAiGrade(submission.getId(), 1, aiGrade(0.6, "AI feedback"));
         closureService.close(assignment.getId(), niko);
-        Long reviewId = reviewService.open(submission.getId(), niko, GradeReview.Reason.REGRADE_REQUEST, null)
+        Long reviewId = reviewService.open(submission.getId(), niko, GradeReviewEntity.Reason.REGRADE_REQUEST, null)
                 .review().getId();
         when(aiGradingService.grade(any())).thenReturn(aiGrade(0.8, "Re-evaluated"));
 
@@ -614,17 +717,17 @@ class SubmissionGradingPersistenceTest {
     void twoTeachersDecidingTheSameReviewAtOnceProduceOneDecision() throws Exception {
         gradingService.recordAiGrade(submission.getId(), 1, aiGrade(0.6, "AI feedback"));
         closureService.close(assignment.getId(), niko);
-        Long reviewId = reviewService.open(submission.getId(), niko, GradeReview.Reason.PETITION, null).review().getId();
+        Long reviewId = reviewService.open(submission.getId(), niko, GradeReviewEntity.Reason.PETITION, null).review().getId();
 
         CompletableFuture<GradingOutcome> adjust = CompletableFuture.supplyAsync(() -> reviewService.decide(reviewId,
-                niko, GradeReview.Decision.ADJUST, "Approve", 0.9, null).outcome());
+                niko, GradeReviewEntity.Decision.ADJUST, "Approve", 0.9, null).outcome());
         CompletableFuture<GradingOutcome> keep = CompletableFuture.supplyAsync(() -> reviewService.decide(reviewId,
-                niko, GradeReview.Decision.NO_CHANGE, "Deny", null, null).outcome());
+                niko, GradeReviewEntity.Decision.NO_CHANGE, "Deny", null, null).outcome());
         List<GradingOutcome> outcomes = List.of(adjust.get(20, TimeUnit.SECONDS), keep.get(20, TimeUnit.SECONDS));
 
         assertEquals(1, outcomes.stream().filter(outcome -> outcome == GradingOutcome.REVIEW_NOT_OPEN).count(), outcomes.toString());
-        GradeReview review = reviewRepo.findById(reviewId).orElseThrow();
-        double expected = review.getDecision() == GradeReview.Decision.ADJUST ? 0.9 : 0.6;
+        GradeReviewEntity review = reviewRepo.findById(reviewId).orElseThrow();
+        double expected = review.getDecision() == GradeReviewEntity.Decision.ADJUST ? 0.9 : 0.6;
         assertEquals(expected, stored().effectiveGrade());
         assertEquals(expected, gradebookGrade(hop));
     }

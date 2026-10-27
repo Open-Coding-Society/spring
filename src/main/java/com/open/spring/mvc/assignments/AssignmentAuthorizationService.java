@@ -64,6 +64,14 @@ public class AssignmentAuthorizationService {
             && submissionGraders.stream().anyMatch(grader -> isSamePerson(grader, user));
     }
 
+    /** Whether the user made this submission, alone or as a member of the submitting group. */
+    public boolean isSubmitter(Person user, AssignmentSubmission submission) {
+        if (user == null || submission == null || submission.getSubmitter() == null) {
+            return false;
+        }
+        return submission.getSubmitter().getMembers().stream().anyMatch(member -> isSamePerson(member, user));
+    }
+
     public boolean isTeacherOrAdmin(Person user) {
         return user != null
             && (user.hasRoleWithName(ROLE_TEACHER) || user.hasRoleWithName(ROLE_ADMIN));

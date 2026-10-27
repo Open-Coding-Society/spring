@@ -17,7 +17,7 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 /** Closes an assignment (see {@link AssignmentClosureService}). */
 @RestController
 @RequestMapping("/api/assignments")
-public class AssignmentClosureApiController {
+public class AssignmentClosureApiRestController {
 
     public record ClosureResponse(GradingOutcome outcome, AssignmentClosureService.Summary summary) {
     }
@@ -25,7 +25,7 @@ public class AssignmentClosureApiController {
     private final AssignmentClosureService closureService;
     private final PersonJpaRepository personRepo;
 
-    public AssignmentClosureApiController(AssignmentClosureService closureService, PersonJpaRepository personRepo) {
+    public AssignmentClosureApiRestController(AssignmentClosureService closureService, PersonJpaRepository personRepo) {
         this.closureService = closureService;
         this.personRepo = personRepo;
     }

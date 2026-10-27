@@ -118,7 +118,7 @@ class PersonalAiGradingIntegrationTest {
     }
     @Test void submissionIsSavedAndFlaggedForReviewWhenAiFails() throws Exception {
         var submissions = mock(AssignmentSubmissionJPA.class); var ai = mock(AssignmentAiGradingService.class);
-        var gradingService = new SubmissionGradingService(submissions, mock(AssignmentJpaRepository.class), mock(SubmissionGradeEventJPA.class),
+        var gradingService = new SubmissionGradingService(submissions, mock(AssignmentJpaRepository.class), mock(SubmissionGradeEventJpaRepository.class),
             new AssignmentAuthorizationService());
         var submission = submission(1L, assignment(1L, "test"));
         when(ai.grade(submission)).thenReturn(AssignmentAiGradingService.GradeResult.failed("No provider available"));
@@ -183,7 +183,7 @@ class PersonalAiGradingIntegrationTest {
     private static void wireGrading(AssignmentSubmissionAPIController controller, AssignmentSubmissionJPA submissions,
             AssignmentAiGradingService ai, AssignmentJpaRepository assignments) {
         when(assignments.lockIfOpen(any())).thenReturn(1); // every assignment here is open
-        var gradingService = new SubmissionGradingService(submissions, assignments, mock(SubmissionGradeEventJPA.class),
+        var gradingService = new SubmissionGradingService(submissions, assignments, mock(SubmissionGradeEventJpaRepository.class),
             new AssignmentAuthorizationService());
         ReflectionTestUtils.setField(controller, "gradingService", gradingService);
         ReflectionTestUtils.setField(controller, "aiGrader", new SubmissionAiGrader(ai, gradingService, mock(GradeReviewService.class)));
