@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.open.spring.mvc.groups.GroupChatIdentityService.AuthenticatedIdentity;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
@@ -79,6 +80,26 @@ public class GroupChatApiController {
     private Person currentPerson() {
         String uid = getCurrentUsername();
         return uid == null ? null : personRepository.findByUid(uid);
+    }
+
+    private AuthenticatedIdentity getCurrentIdentity() {
+        Authentication auth =
+                SecurityContextHolder.getContext().getAuthentication();
+
+        if (auth == null
+                || !auth.isAuthenticated()
+                || "anonymousUser".equals(auth.getName())) {
+            return null;
+        }
+
+        String uid = auth.getName();
+        Person person = personRepository.findByUid(uid);
+
+        if (person == null) {
+            return null;
+        }
+
+        return new AuthenticatedIdentity(uid, person.getName());
     }
 
     // GroupChatMessage only stores the sender's display name (no Person link), so the
@@ -143,6 +164,12 @@ public class GroupChatApiController {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
 
+        AuthenticatedIdentity identity = getCurrentIdentity();
+
+        if (identity == null) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+
         // String currentUsername = getCurrentUsername();
         // if (currentUsername == null) {
         //     return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
@@ -156,7 +183,7 @@ public class GroupChatApiController {
         }
 
         try {
-            realtimeService.publishMessage(groupId, message.getMessage(), message.getImage());
+            realtimeService.publishMessage(groupId, message.getMessage(), message.getImage(), identity);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }

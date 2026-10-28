@@ -1,5 +1,7 @@
 package com.open.spring.mvc.groups;
 
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import com.open.spring.mvc.person.Person;
