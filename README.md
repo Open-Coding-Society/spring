@@ -179,9 +179,9 @@ GIST_TOKEN=your-github-gist-token-here
 # spring.mail.password=your-app-password
 
 # S3 Bucket Defaults
-AWS_BUCKET_NAME=your-bucket-name
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_BUCKET_NAME=my-bucket
+AWS_ACCESS_KEY_ID=local-access-key
+AWS_SECRET_ACCESS_KEY=local-secret-key-change-me
 AWS_REGION=us-east-2
 # if developing locally, set the endoint heree
 # AWS_S3_ENDPOINT=http://localhost:9000
