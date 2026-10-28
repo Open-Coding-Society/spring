@@ -47,7 +47,9 @@ The site is build on Springboot.  The project is primarly used to store and retr
 
 ## Architecture guides
 
+- [Group chat architecture guide](docs/group-chat-architecture.md) — explains groups and group chat: the REST routes, the STOMP WebSocket on port 8589, S3 message storage, a diagram, known issues, and `api/groups.http`.
 - [Toolchain architecture guide](docs/toolchain-architecture.md) — explains Setup, Scoring, Help, the interactive local agent, report-upload versus station-check flows, API routes, and persistence.
+- [Announcement architecture guide](docs/announcement-architecture.md) — a small example of the five standard parts (REST controller, entity, JPA repository, service, table initializer), with its routes, a diagram, and `api/announcement.http`.
 
 The Java implementation for CS Pathway is now together in `src/main/java/com/open/spring/mvc/toolchain/`. The interactive Toolchain Trail agent/session flow is the current integrated station-check implementation. A separate text-report upload and AI-review flow is still present in the code; confirm whether students still use it before removing it. Existing `/api/cs-pathway` and `/api/toolchain` routes are preserved even though the Java package and class names are now unified.
 
@@ -371,7 +373,7 @@ first migration; this section is the summary.
 
 1. Start the local instance of RustFS:
 ```
-docker compose --f rustfs.yml up -d
+docker-compose -f rustfs.yml up -d
 ```
 2. Uncomment this line in `.env`:
 ```

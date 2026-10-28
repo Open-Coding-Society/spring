@@ -61,7 +61,9 @@ public class GroupChatRealtimeService {
      */
     public boolean editMessage(Long groupId, String messageId, String newMessage, String requesterDisplayName) {
         Groups group = getGroupOrThrow(groupId);
-        boolean updated = groupChatService.editMessage(group.getName(), messageId, newMessage, requesterDisplayName);
+        AuthenticatedIdentity identity = identityService.getCurrentIdentity();
+
+        boolean updated = groupChatService.editMessage(identity.getUid(), group.getName(), messageId, newMessage, requesterDisplayName);
         if (!updated) {
             return false;
         }
@@ -82,7 +84,9 @@ public class GroupChatRealtimeService {
     /** Throws {@link SecurityException} if {@code requesterDisplayName} didn't send it. */
     public void deleteMessage(Long groupId, String messageId, String requesterDisplayName) {
         Groups group = getGroupOrThrow(groupId);
-        groupChatService.deleteMessage(group.getName(), messageId, requesterDisplayName);
+        AuthenticatedIdentity identity = identityService.getCurrentIdentity();
+        
+        groupChatService.deleteMessage(identity.getUid(), group.getName(), messageId, requesterDisplayName);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("deleteMessageServer")
