@@ -48,6 +48,28 @@ Content-Type: application/json
   "message": "I am stuck on the git commit step!"
 }
 
+### 3b. Station Helper chat
+
+# Ask the Gemini Station Helper a question (Requires Authentication)
+POST {{baseUrl}}/api/cs-pathway/chat
+Content-Type: application/json
+
+{
+  "levelKey": "toolchain-trail",
+  "question": "git --version says command not found. What do I do?",
+  "progress": {
+    "stationName": "Git Village Hall",
+    "stationSkill": "Version control with git",
+    "stationStatus": "failed",
+    "os": "macOS",
+    "completedStations": ["Terminal Town Gate"],
+    "totalStations": 7,
+    "stationSteps": ["Check git: git --version"],
+    "failedChecks": ["git: command not found"]
+  },
+  "history": []
+}
+
 ### 4. Scoring & Progress
 
 # Get my current scores (Requires Authentication)

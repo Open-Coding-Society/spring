@@ -7,6 +7,7 @@ Toolchain is the Java feature area for the CS Pathway learning experience. It su
 - Setup: collect and review evidence that a student's local development tools are ready.
 - Scoring: record and display progress through the five learning levels.
 - Help: let a student send a request to a teacher. This is a teacher help-request queue, not OCS chat. OCS chat is a possible future direction and is not implemented by this package.
+- Station Helper: let a student ask an AI helper (Gemini) about the station they are on. Answers are not saved and do not reach a teacher.
 
 | Area | Location or prefix | Notes |
 | --- | --- | --- |
@@ -131,6 +132,7 @@ The package follows the Spring MVC and persistence pattern used by the rest of t
 | GET | `/api/cs-pathway/scores` | Read the signed-in student's level scores | Signed-in account |
 | PUT | `/api/cs-pathway/scores/{levelKey}` | Record progress for one level | Signed-in account |
 | POST | `/api/cs-pathway/help-requests` | Create a help request | Signed-in account |
+| POST | `/api/cs-pathway/chat` | Ask the Station Helper (Gemini) a question | Signed-in account |
 | POST | `/api/toolchain/sessions` | Start an agent session and issue a pairing code | Signed-in account |
 | POST | `/api/toolchain/pair` | Exchange a one-time code for a scoped agent token | Pairing code |
 | POST | `/api/toolchain/sessions/{sessionId}/check` | Tell the paired agent which station to check | Session owner |
@@ -176,6 +178,12 @@ The persisted record is keyed by student UID in `cs_pathway_setup_report`. It st
 - The service validates the level and text lengths, then stores a request in `cs_pathway_help_request`. A student can submit at most one request per minute.
 - The teacher/admin dashboard shows up to the 200 most recent requests at `/mvc/cs-pathway/read`.
 
+### Station Helper flow
+
+- The game's chat button sends `POST /api/cs-pathway/chat` with `levelKey`, `question`, `progress` (current station and its steps for the student's OS, verified stations, OS, a failed check) and the last few `history` turns. The page builds `progress` in the pages repo's `model/chatContext.js`.
+- `ToolchainChatService` validates the level and question (at most 500 characters, one question per student every 3 seconds), clips every `progress` field to one short line, and puts the progress in Gemini's system instruction so the answer fits the student's station. `ToolchainGeminiClient` sends the request with `gemini.api.key` and `gemini.api.url` and retries HTTP 429/503.
+- Nothing is stored: the conversation lives in the page. Errors are written for students and never name server settings.
+
 ## Persistence and security
 
 - `cs_pathway_setup_report`, `cs_pathway_help_request`, and `toolchain_session` are initialized by `ToolchainReportTableInitializer`, `ToolchainHelpTableInitializer`, and `ToolchainSessionTableInitializer`. These `ApplicationRunner` components are needed because Hibernate uses `ddl-auto=none`. Keep their DDL and corresponding entity mappings aligned for both SQLite and MySQL.
@@ -195,6 +203,7 @@ The Java types are consolidated under `mvc.toolchain` so students can discuss sc
 | Help | `ToolchainHelp*` handles help submissions, dashboard rows, and persistence. `ToolchainHelpExceptionTooSoon` represents the submission cooldown. |
 | Reports | `ToolchainReport*` handles report pairing, uploads, and persistence. |
 | Review | `ToolchainReviewService` produces the advisory AI assessment as its nested `EvidenceRecord`. |
+| Station Helper | `ToolchainChat*` answers students' questions; request records are nested in `ToolchainChatApiRestController`, and `ToolchainChatExceptionTooSoon` represents the question cooldown. `ToolchainGeminiClient` makes the Gemini call. |
 | Sessions | `ToolchainSession*` manages the paired session, credentials, current station, and results. The local agent is a participant, not the server-side resource. |
 | Station rules | `ToolchainStationRules` evaluates evidence and returns `CheckResult` records; it does not execute commands. |
 | Scores | `ToolchainScores*` handles progress and dashboard summaries; `ToolchainStatsJpaRepository` accesses the shared `Stats` entity. |
