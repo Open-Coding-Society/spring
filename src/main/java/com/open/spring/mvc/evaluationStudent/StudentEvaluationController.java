@@ -5,6 +5,8 @@ import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -15,6 +17,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.open.spring.mvc.person.Person;
+import com.open.spring.mvc.person.PersonJpaRepository;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -26,6 +30,22 @@ public class StudentEvaluationController {
 
     @Autowired
     private StudentEvaluationRepository studentEvaluationRepository;
+    @Autowired
+    private PersonJpaRepository personJpaRepository;
+
+    private static final ResponseEntity<?> FORBIDDEN =
+        ResponseEntity.status(403).body(Map.of("error", "You can only access your own evaluation"));
+
+    /** A student reaches only their own evaluation; a teacher or admin reaches any. */
+    private boolean canAccess(UserDetails caller, Integer userId) {
+        if (caller == null || userId == null) return false;
+        if (caller.getAuthorities().stream().anyMatch(a ->
+                "ROLE_TEACHER".equals(a.getAuthority()) || "ROLE_ADMIN".equals(a.getAuthority()))) {
+            return true;
+        }
+        Person person = personJpaRepository.findByUid(caller.getUsername());
+        return person != null && person.getId() != null && person.getId().longValue() == userId.longValue();
+    }
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
@@ -57,10 +77,11 @@ public class StudentEvaluationController {
     }
 
     @PostMapping("/post")
-    public ResponseEntity<?> createEvaluation(@RequestBody StudentEvaluationRequest req) {
+    public ResponseEntity<?> createEvaluation(@AuthenticationPrincipal UserDetails caller, @RequestBody StudentEvaluationRequest req) {
         if (req.getUserId() == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "userId is required"));
         }
+        if (!canAccess(caller, req.getUserId())) return FORBIDDEN;
         if (studentEvaluationRepository.findByUserId(req.getUserId()).isPresent()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Evaluation for this userId already exists"));
         }
@@ -88,7 +109,8 @@ public class StudentEvaluationController {
     }
 
     @GetMapping("/get/{user_id}")
-    public ResponseEntity<?> getEvaluationByUserId(@PathVariable("user_id") Integer userId) {
+    public ResponseEntity<?> getEvaluationByUserId(@AuthenticationPrincipal UserDetails caller, @PathVariable("user_id") Integer userId) {
+        if (!canAccess(caller, userId)) return FORBIDDEN;
         Optional<StudentEvaluation> optionalEval = studentEvaluationRepository.findByUserId(userId);
         if (optionalEval.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Evaluation not found"));
@@ -99,7 +121,10 @@ public class StudentEvaluationController {
     }
 
     @PutMapping("/update/{user_id}")
-    public ResponseEntity<?> updateEvaluation(@PathVariable("user_id") Integer userId, @RequestBody StudentEvaluationRequest req) {
+    public ResponseEntity<?> updateEvaluation(@AuthenticationPrincipal UserDetails caller, @PathVariable("user_id") Integer userId, @RequestBody StudentEvaluationRequest req) {
+        if (!canAccess(caller, userId)) return FORBIDDEN;
+        // Moving an evaluation to another user needs access to that user too.
+        if (req.getUserId() != null && !canAccess(caller, req.getUserId())) return FORBIDDEN;
         Optional<StudentEvaluation> optionalEval = studentEvaluationRepository.findByUserId(userId);
         if (optionalEval.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Evaluation not found"));
@@ -127,7 +152,8 @@ public class StudentEvaluationController {
     }
 
     @DeleteMapping("/delete/{user_id}")
-    public ResponseEntity<?> deleteEvaluation(@PathVariable("user_id") Integer userId) {
+    public ResponseEntity<?> deleteEvaluation(@AuthenticationPrincipal UserDetails caller, @PathVariable("user_id") Integer userId) {
+        if (!canAccess(caller, userId)) return FORBIDDEN;
         Optional<StudentEvaluation> optionalEval = studentEvaluationRepository.findByUserId(userId);
         if (optionalEval.isEmpty()) {
             return ResponseEntity.status(404).body(Map.of("error", "Evaluation not found"));
