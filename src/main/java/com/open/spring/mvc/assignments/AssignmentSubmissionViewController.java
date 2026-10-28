@@ -189,8 +189,13 @@ public class AssignmentSubmissionViewController {
         }
     }
 
-    /** Build all course membership metadata in one query before mapping individual rows. */
-    private List<SubmissionListDTO> toDtos(List<AssignmentSubmission> submissions) {
+    /**
+     * Build all course membership metadata in one query before mapping individual rows.
+     * Lists only the current submission per assignment and submitter: rows a resubmit superseded
+     * before resubmits replaced the row are earlier versions, shown in the gradebook's history.
+     */
+    private List<SubmissionListDTO> toDtos(List<AssignmentSubmission> allRows) {
+        List<AssignmentSubmission> submissions = AssignmentSubmissionHistoryService.latestOnly(allRows);
         Map<Long, List<String>> courseCodesByPersonId = loadCourseCodesByPersonId(submissions);
         List<String> canonicalCourses = courseGroupProperties.getGroupNames();
         List<SubmissionListDTO> dtos = new ArrayList<>();
