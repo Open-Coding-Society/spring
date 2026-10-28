@@ -1,7 +1,6 @@
 package com.open.spring.mvc.calendar;
 
 import java.time.LocalDate;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -41,7 +40,10 @@ public class CalendarEventApiRestController {
     public record EventRequest(String title, String date, String description, String type, String period,
                                String classPeriod, String groupName, String individual) {}
 
-    /** DTO for the edit/{id} body; the calendar page sends the title as newTitle. */
+    /**
+     * DTO for the edit/{id} body; the calendar page sends the title as newTitle.
+     * type, classPeriod, groupName and individual are optional: left out, they keep the event's values.
+     */
     public record EditRequest(String newTitle, String description, String date, String period, String type,
                               String classPeriod, String groupName, String individual) {}
 
@@ -154,11 +156,10 @@ public class CalendarEventApiRestController {
         return ResponseEntity.ok(new BulkEventsResponse(failed == 0, created, updated, failed, events, errors));
     }
 
+    /** POST /api/calendar/add - a Slack message; CalendarImportMsg reads any weekly plan in it. */
     @PostMapping("/add")
     public void addEventsFromSlackMessage(@RequestBody Map<String, String> jsonMap) {
-        LocalDateTime now = LocalDateTime.now();
-        LocalDate weekStartDate = LocalDate.of(now.getYear(), now.getMonthValue(), now.getDayOfMonth());
-        calendarEventService.parseSlackMessage(jsonMap, weekStartDate);
+        calendarEventService.parseSlackMessage(jsonMap, LocalDate.now());
     }
 
     @PostMapping("/add_bulk")
@@ -271,16 +272,11 @@ public class CalendarEventApiRestController {
     public ResponseEntity<Object> editEvent(@PathVariable int id, @RequestBody EditRequest request,
                                             @AuthenticationPrincipal UserDetails userDetails) {
         Map<String, String> errorResponse = new HashMap<>();
-        String currentIndividual = resolveIndividual(userDetails);
         try {
             String newTitle = request.newTitle();
             String description = request.description();
             String dateStr = request.date();
             String period = request.period();
-            String type = orDefault(request.type(), "event");
-            String classPeriod = orDefault(request.classPeriod(), "");
-            String groupName = orDefault(request.groupName(), "");
-            String individual = orDefault(request.individual(), currentIndividual != null ? currentIndividual : "");
 
             if (newTitle == null || newTitle.trim().isEmpty()) {
                 errorResponse.put("message", "New title cannot be null or empty.");
@@ -307,6 +303,20 @@ public class CalendarEventApiRestController {
                 return ResponseEntity.badRequest().body(errorResponse);
             }
 
+            CalendarEventEntity existingEvent = calendarEventService.getEventById(id);
+            if (existingEvent == null) {
+                errorResponse.put("message", "Event with the given id not found.");
+                return ResponseEntity.status(HttpStatus.NOT_FOUND).body(errorResponse);
+            }
+
+            // Fields the request leaves out keep their current values. The calendar page
+            // doesn't send classPeriod, so an edit there used to erase an appointment's period
+            // and the announcement calendar's class periods.
+            String type = orDefault(request.type(), existingEvent.getType());
+            String classPeriod = orDefault(request.classPeriod(), existingEvent.getClassPeriod());
+            String groupName = orDefault(request.groupName(), existingEvent.getGroupName());
+            String individual = orDefault(request.individual(), existingEvent.getIndividual());
+
             // Validation for appointments
             if ("appointment".equals(type)) {
                 // Require authentication for appointments
@@ -317,10 +327,8 @@ public class CalendarEventApiRestController {
 
                 // Check appointment limit per classPeriod per date (exclude current event)
                 if (classPeriod != null && !classPeriod.isEmpty()) {
-                    CalendarEventEntity existingEvent = calendarEventService.getEventById(id);
                     // Only check limit if classPeriod or date changed
-                    boolean needsLimitCheck = existingEvent == null 
-                        || !classPeriod.equals(existingEvent.getClassPeriod())
+                    boolean needsLimitCheck = !classPeriod.equals(existingEvent.getClassPeriod())
                         || !date.equals(existingEvent.getDate())
                         || !"appointment".equals(existingEvent.getType());
                     

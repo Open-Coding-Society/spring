@@ -8,7 +8,7 @@ The calendar backend stores three kinds of rows in the `calendar_events` table:
 - **Appointments**: a student's booking with a class period (`classPeriod` such as `P3`), at most four per period per day.
 - **Breaks**: a day with no school. Creating one can move that day's events to the next school day.
 
-The calendar page (`_projects/systems/calendar` in pages) and the CS Pathway game call `/api/calendar`. `SlackController` turns Slack weekly-plan messages into events, and `SprintDateService` saves sprint events through the repository.
+The calendar page (`_projects/systems/calendar` in pages) and the CS Pathway game call `/api/calendar`. `SlackController` passes every Slack message to `/add`, where `CalendarImportMsg` turns weekly-plan lines into events. `SprintDateService` saves sprint events through the repository.
 
 ## The five standard files
 
@@ -19,8 +19,10 @@ The calendar follows the `mvc/toolchain` layout in `src/main/java/com/open/sprin
 | `CalendarEventApiRestController` | Ingress and egress: JSON in, JSON out. Holds the DTO records. |
 | `CalendarEventEntity` | A POJO with `@Entity`: one row of `calendar_events`. |
 | `CalendarEventJpaRepository` | Reads and writes the table. Spring Data writes the SQL from the method names. |
-| `CalendarEventService` | The rules: duplicates, visibility, filters, breaks, Slack parsing. |
+| `CalendarEventService` | The rules: duplicates, visibility, filters, breaks. |
 | `CalendarEventTableInitializer` | Creates or upgrades the table at startup, because `ddl-auto` is `none`. |
+
+`CalendarImportMsg` sits beside them: it reads a Slack weekly plan (`Week of 10/26/2026`, then lines like `[Mon]: Sprint review` or `[Tue - Wed]: *Check-ins`) and returns the events for the service to save. `*` marks a check-in, `**` a grade, and a `•` line adds to the description above it.
 
 <!-- mermaid-checked: no \n, no em-dash/en-dash, no {} in labels, subgraphs are id["label"], arrows are -->|"label"|, all subgraphs closed by end, ids unique -->
 ```mermaid
@@ -41,6 +43,7 @@ flowchart TD
         Repo["CalendarEventJpaRepository"]
         Table[("calendar_events")]
         Init["CalendarEventTableInitializer"]
+        Import["CalendarImportMsg"]
     end
 
     Page -->|"JSON request"| Api
@@ -49,6 +52,7 @@ flowchart TD
     Api -->|"Jackson reads the body into"| InDto
     InDto -->|"checked and copied into"| Entity
     Api -->|"delegates the rules"| Service
+    Service -->|"reads Slack plans with"| Import
     Service -->|"save and find"| Repo
     Repo -->|"SQL"| Table
     Init -->|"creates and upgrades at startup"| Table
@@ -104,7 +108,7 @@ Every route requires a signed-in account (`/api/calendar/**` in `SecurityConfig`
 | POST | `/add` | Slack message map | empty |
 | GET | `/events`, `/events/{date}`, `/events/range`, `/events/filter`, `/events/next-day`, `/events/bulk` | | list of `EventView` |
 | GET | `/appointments/count?date&classPeriod` | | `{"count"}` |
-| PUT | `/edit/{id}` | `EditRequest` | `{"message"}` |
+| PUT | `/edit/{id}` | `EditRequest`; left-out `type`, `classPeriod`, `groupName` and `individual` keep their values | `{"message"}` |
 | DELETE | `/delete/{id}` | | text |
 | DELETE | `/delete_event` | `DeleteByTitleRequest` | `{"success", "message"}` |
 | DELETE | `/delete_events` | `BulkDeleteRequest` | `BulkDeleteResponse` |
@@ -127,4 +131,4 @@ These are unchanged here and are the next things to fix:
 - Anyone signed in can edit or delete any event or break by id; there is no owner or teacher check (UGRC-CSA/Pages#77).
 - Delete by title removes every user's events with that title.
 - Creating a break with `moveToNextNonBreakDay` (the default) moves everyone's events on that date.
-- `CalendarIssue*` (`/api/calendar/issues`), the admin page controller and the Slack import are still in `mvc/slack`.
+- `CalendarIssue*` (`/api/calendar/issues`) and the admin page controller are still in `mvc/slack`. `SlackController` stays there too: it receives every Slack message, not only weekly plans.

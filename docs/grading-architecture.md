@@ -119,7 +119,7 @@ flowchart TD
 
 ### Resubmitting after a manual grade
 
-A resubmission is a new revision, and the manual grade stays on it. The AI grades the new content in the background and saves its grade next to the manual one (`MANUAL_OVERRIDE_KEPT`), so the grader can compare them, but students keep seeing the manual grade. The history records `REVISED` followed by `MANUAL_OVERRIDE_KEPT_BY_REVISION` at the new revision.
+A resubmission, whether an edit or a new submit for the same assignment (`AssignmentSubmissionHistoryService`), is a new revision of the same submission, and the manual grade stays on it. The AI grades the new content in the background and saves its grade next to the manual one (`MANUAL_OVERRIDE_KEPT`), so the grader can compare them, but students keep seeing the manual grade. The history records `REVISED` followed by `MANUAL_OVERRIDE_KEPT_BY_REVISION` at the new revision.
 
 To get the new revision looked at, the student petitions. Before close a student can petition only a manual grade, because an AI grade already follows every revision. After close they can petition any grade. A teacher decides a petition like any other review:
 
@@ -148,6 +148,7 @@ Every route requires a signed-in account.
 | POST | `/api/submissions/grade/{id}?grade&feedback&revision` | grader | | `GradingResponse` |
 | DELETE | `/api/submissions/grade/{id}?revision` | grader | | `GradingResponse` |
 | POST | `/api/submissions/ai-grade/{id}` | grader | | `GradingResponse` |
+| POST | `/api/submissions/submit/{assignmentId}` | submitter | `SubmitAssignmentDto` | submission; a resubmit revises the existing one |
 | PUT | `/api/submissions/{id}` | submitter | multipart content | submission |
 | GET | `/api/submissions/{id}/grading-history` | grader or submitter | | `GradingHistoryResponse` |
 | POST | `/api/assignments/{id}/close` | teacher | | `ClosureResponse` |

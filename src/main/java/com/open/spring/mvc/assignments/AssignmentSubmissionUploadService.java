@@ -25,19 +25,19 @@ public class AssignmentSubmissionUploadService {
     private final FileHandler fileHandler;
     private final PersonJpaRepository personRepo;
     private final AssignmentJpaRepository assignmentRepo;
-    private final SubmissionGradingService gradingService;
+    private final AssignmentSubmissionHistoryService historyService;
     private final SubmissionAiGrader aiGrader;
 
     public AssignmentSubmissionUploadService(
             FileHandler fileHandler,
             PersonJpaRepository personRepo,
             AssignmentJpaRepository assignmentRepo,
-            SubmissionGradingService gradingService,
+            AssignmentSubmissionHistoryService historyService,
             SubmissionAiGrader aiGrader) {
         this.fileHandler = fileHandler;
         this.personRepo = personRepo;
         this.assignmentRepo = assignmentRepo;
-        this.gradingService = gradingService;
+        this.historyService = historyService;
         this.aiGrader = aiGrader;
     }
 
@@ -253,11 +253,12 @@ public class AssignmentSubmissionUploadService {
         submission.setAiOrchestration(aiOrchestration);
         submission.setSelfAssessmentReflection(selfAssessmentReflection);
 
-        GradingResult submitted = gradingService.submit(submission, authenticatedUser);
-        if (submitted.outcome() != GradingOutcome.REVISION_CREATED) {
-            throw new UploadException(submitted.outcome());
+        // A student's earlier submission for this assignment gets this upload as its next revision.
+        AssignmentSubmissionHistoryService.SubmitResult submitted = historyService.submit(submission, authenticatedUser);
+        if (submitted.result().outcome() != GradingOutcome.REVISION_CREATED) {
+            throw new UploadException(submitted.result().outcome());
         }
-        return submission;
+        return submitted.submission();
     }
 
     private Map<String, Object> buildResponse(

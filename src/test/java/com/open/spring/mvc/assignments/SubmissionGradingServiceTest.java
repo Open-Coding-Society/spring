@@ -54,6 +54,9 @@ class SubmissionGradingServiceTest {
         when(submissionRepo.lockForGrading(100L)).thenReturn(1);
         when(submissionRepo.findById(100L)).thenReturn(Optional.of(submission));
         when(assignmentRepo.lockIfOpen(10L)).thenReturn(1);
+        // Submitted with the grading history in place; a submission without one is covered in AssignmentSubmissionHistoryTest.
+        when(eventRepo.findBySubmissionIdOrderByIdAsc(100L))
+                .thenReturn(List.of(SubmissionGradeEventEntity.of(100L, 1, SubmissionGradeEventEntity.Type.SUBMITTED, LocalDateTime.of(2026, 10, 1, 9, 0))));
     }
 
     private static SubmissionGradingState state(int revision, Double effective, Double ai, Double manual) {

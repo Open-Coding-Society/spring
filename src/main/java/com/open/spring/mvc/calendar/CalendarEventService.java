@@ -1,22 +1,17 @@
 package com.open.spring.mvc.calendar;
 
 import java.time.LocalDate;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import com.open.spring.mvc.slack.SlackService;
-
 /**
  * The calendar's rules: duplicate detection by title and date, who can see an
  * event, filters, breaks (and moving a break day's events to the next school day),
- * and turning a Slack weekly-plan message into events. Works only with
+ * and saving the events CalendarImportMsg reads from a Slack message. Works only with
  * CalendarEventEntity; the controller converts to and from its DTO records.
  */
 @Service
@@ -24,9 +19,6 @@ public class CalendarEventService {
 
     @Autowired
     private CalendarEventJpaRepository calendarEventRepository;
-
-    @Autowired
-    private SlackService slackService;
 
     private static final int MAX_DAYS_AHEAD = 365;
 
@@ -180,124 +172,11 @@ public class CalendarEventService {
         return calendarEventRepository.findById((long) id).orElse(null);
     }
 
-    // Parse Slack message and create events
-    public void parseSlackMessage(Map<String, String> jsonMap, LocalDate weekStartDate) {
-        List<CalendarEventEntity> events = extractEventsFromText(jsonMap, weekStartDate);
-        for (CalendarEventEntity event : events) {
+    // Turn a Slack weekly-plan message into events (see CalendarImportMsg) and save them
+    public void parseSlackMessage(Map<String, String> jsonMap, LocalDate today) {
+        for (CalendarEventEntity event : CalendarImportMsg.toEvents(jsonMap.get("text"), jsonMap.get("channel"), today)) {
             saveEvent(event);
         }
-    }
-
-    private final String CSP_CHANNEL_ID = "CUS8E3M6Z";
-    private final String CSA_CHANNEL_ID = "CRRJL1F1D";
-    private final String CSSE_CHANNEL_ID = "C05MNRWC2A1";
-
-    private List<CalendarEventEntity> extractEventsFromText(Map<String, String> jsonMap, LocalDate weekStartDate) {
-        String text = jsonMap.get("text");
-        // Use SlackService to determine the correct week start date from the message
-        LocalDate parsedWeekStartDate = null;
-        try {
-            java.lang.reflect.Method method = SlackService.class.getDeclaredMethod("getWeekStartDateFromMessage", String.class);
-            method.setAccessible(true);
-            parsedWeekStartDate = (LocalDate) method.invoke(slackService, text);
-        } catch (Exception e) {
-            // Handle exception or log as needed
-        }
-        if (parsedWeekStartDate != null) {
-            weekStartDate = parsedWeekStartDate;
-        }
-        List<CalendarEventEntity> events = new ArrayList<>();
-        Pattern dayPattern = Pattern.compile("\\[(Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?: - (Mon|Tue|Wed|Thu|Fri|Sat|Sun))?\\]:\\s*(\\*\\*|\\*)?\\s*(.+)");
-        Pattern descriptionPattern = Pattern.compile("(\\*\\*|\\*)?\\s*\\u2022\\s*(.+)");
-        String[] lines = text.split("\\n");
-        CalendarEventEntity lastEvent = null;
-        List<CalendarEventEntity> lastEventRange = new ArrayList<>();
-
-        for (String line : lines) {
-            Matcher dayMatcher = dayPattern.matcher(line);
-
-            if (dayMatcher.find()) {
-                String startDay = dayMatcher.group(1);
-                String endDay = dayMatcher.group(2) != null ? dayMatcher.group(2) : startDay;
-                String asterisks = dayMatcher.group(3);
-                String currentTitle = dayMatcher.group(4).trim();
-                String period = "0";
-                switch(jsonMap.get("channel")) {
-                    case CSP_CHANNEL_ID:
-                        period = "CSP";
-                        break;
-                    case CSA_CHANNEL_ID:
-                        period = "CSA";
-                        break;
-                    case CSSE_CHANNEL_ID:
-                        period = "CSSE";
-                        break;
-                }
-
-                String type = "daily plan";
-                if ("*".equals(asterisks)) {
-                    type = "check-in";
-                } else if ("**".equals(asterisks)) {
-                    type = "grade";
-                }
-
-                // Find description for this line (if any)
-                Matcher descMatcher = descriptionPattern.matcher(line);
-                String description = "";
-                if (descMatcher.find()) {
-                    description = descMatcher.group(2).trim();
-                }
-
-                lastEventRange.clear(); // Clear previous range
-                for (LocalDate date : getDatesInRange(startDay, endDay, weekStartDate)) {
-                    CalendarEventEntity event = new CalendarEventEntity(date, currentTitle, description, type, period);
-                    events.add(event);
-                    lastEvent = event; // Update lastEvent to the current event
-                    lastEventRange.add(event); // Add to current range
-                }
-            } else {
-                Matcher descMatcher = descriptionPattern.matcher(line);
-                if (descMatcher.find() && !lastEventRange.isEmpty()) {
-                    String description = descMatcher.group(2).trim();
-                    String asterisks = descMatcher.group(1);
-
-                    String type = lastEvent.getType();
-                    if ("*".equals(asterisks)) {
-                        type = "check-in";
-                    } else if ("**".equals(asterisks)) {
-                        type = "grade";
-                    }
-
-                    for (CalendarEventEntity event : lastEventRange) {
-                        event.setDescription(event.getDescription() +
-                                (event.getDescription().isEmpty() ? "" : ", ") +
-                                description);
-                        event.setType(type);
-                    }
-                }
-            }
-        }
-
-        // Log the events and their descriptions
-        for (CalendarEventEntity event : events) {
-            System.out.println("Event: " + event.getDate() + ", Title: " + event.getTitle() + ", Description: " + event.getDescription());
-        }
-
-        return events;
-    }
-
-    private List<LocalDate> getDatesInRange(String startDay, String endDay, LocalDate weekStartDate) {
-        List<String> days = List.of("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun");
-        int startIndex = days.indexOf(startDay);
-        int endIndex = days.indexOf(endDay);
-
-        List<LocalDate> dateRange = new ArrayList<>();
-        if (startIndex != -1 && endIndex != -1) {
-            for (int i = startIndex; i <= endIndex; i++) {
-                dateRange.add(weekStartDate.plusDays(i - weekStartDate.getDayOfWeek().getValue() + 1));
-            }
-        }
-        return dateRange;
     }
 
     // ==================== BREAK-RELATED METHODS ====================

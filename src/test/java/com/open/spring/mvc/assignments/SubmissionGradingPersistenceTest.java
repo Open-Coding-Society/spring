@@ -50,6 +50,7 @@ import com.open.spring.mvc.synergy.SynergyGradeJpaRepository;
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Import({SubmissionGradingService.class, SubmissionAiGrader.class, AssignmentAuthorizationService.class,
         AssignmentClosureService.class, GradeReviewService.class, FinalGradeTransfer.class,
+        AssignmentSubmissionHistoryService.class,
         SubmissionGradingPersistenceTest.Json.class})
 @Transactional(propagation = Propagation.NOT_SUPPORTED)
 class SubmissionGradingPersistenceTest {
@@ -86,6 +87,7 @@ class SubmissionGradingPersistenceTest {
     @Autowired private SubmissionAiGrader aiGrader;
     @Autowired private AssignmentClosureService closureService;
     @Autowired private GradeReviewService reviewService;
+    @Autowired private AssignmentSubmissionHistoryService historyService;
     @Autowired private GradeReviewJpaRepository reviewRepo;
     @Autowired private SynergyGradeJpaRepository gradebookRepo;
     @Autowired private PersonJpaRepository personRepo;
@@ -350,6 +352,28 @@ class SubmissionGradingPersistenceTest {
         assertEquals(GradingOutcome.MANUAL_OVERRIDE_CLEARED,
                 gradingService.clearManualOverride(submission.getId(), niko, 2).outcome());
         assertEquals(0.4, stored().effectiveGrade(), "the teacher can still switch to the new revision's AI grade");
+    }
+
+    @Test
+    void resubmittingFromTheSubmitPageKeepsTheManualGradeOnTheSameSubmission() {
+        gradingService.applyManualGrade(submission.getId(), niko, 1, 0.5, "Missing part 2");
+        AssignmentSubmission draft = new AssignmentSubmission(assignment, hop, content("https://example.com/v2"),
+                "Added part 2", false);
+
+        AssignmentSubmissionHistoryService.SubmitResult resubmitted = historyService.submit(draft, hop);
+
+        assertTrue(resubmitted.replaced());
+        assertEquals(submission.getId(), resubmitted.submission().getId());
+        assertEquals(GradingOutcome.REVISION_CREATED, resubmitted.result().outcome());
+        SubmissionGradingState state = stored();
+        assertEquals(2, state.revision());
+        assertEquals(GradeSource.MANUAL, state.source());
+        assertEquals(0.5, state.effectiveGrade());
+        List<AssignmentSubmissionHistoryService.Version> versions =
+                historyService.historyOf(fresh()).versions();
+        assertEquals("https://example.com/v2", versions.get(0).content().get("url"));
+        assertEquals("https://example.com/v1", versions.get(1).content().get("url"));
+        assertEquals(0.5, versions.get(1).grade());
     }
 
     @Test

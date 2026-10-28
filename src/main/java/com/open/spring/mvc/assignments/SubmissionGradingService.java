@@ -92,6 +92,16 @@ public class SubmissionGradingService {
         if (submissionRepo.startRevision(submission.getId(), revision, newContent) == 0) {
             return GradingResult.of(GradingOutcome.STALE_REVISION, before);
         }
+        // A submission from before the grading history has no record of what it held; save that before
+        // the new revision's entries, or it is lost. No actor: who submitted it wasn't recorded.
+        if (eventRepo.findBySubmissionIdOrderByIdAsc(submission.getId()).isEmpty()) {
+            recordContent(submission.getId(), revision, SubmissionGradeEventEntity.Type.SUBMITTED, null, submission.getContent());
+            if (before.effectiveGrade() != null) {
+                recordGrade(submission.getId(), revision, before.manualOverride()
+                        ? SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET : SubmissionGradeEventEntity.Type.AI_GRADED,
+                        null, before.effectiveGrade(), before.effectiveFeedback(), true, null);
+            }
+        }
         recordContent(submission.getId(), revision + 1, SubmissionGradeEventEntity.Type.REVISED, editor, newContent);
         if (before.manualOverride()) {
             recordGrade(submission.getId(), revision + 1, SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_KEPT_BY_REVISION,

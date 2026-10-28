@@ -10,6 +10,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Table;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -17,8 +18,9 @@ import lombok.NoArgsConstructor;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@Entity
-public class Announcement {
+@Entity(name = "Announcement")
+@Table(name = "announcement")
+public class AnnouncementEntity {
     @Id
     @GeneratedValue(strategy = GenerationType.AUTO)
     private Long id;
@@ -34,7 +36,7 @@ public class Announcement {
     private static DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     // Constructor with necessary fields
-    public Announcement(String author, String title, String body, String tags) {
+    public AnnouncementEntity(String author, String title, String body, String tags) {
         this.author = author;
         this.title = title;
         this.body = body;
@@ -43,17 +45,17 @@ public class Announcement {
     }
 
     // Static method to create initial data
-    public static List<Announcement> createInitialData() {
-        List<Announcement> announcements = new ArrayList<>();
+    public static List<AnnouncementEntity> createInitialData() {
+        List<AnnouncementEntity> announcements = new ArrayList<>();
 
         // Create announcements with formatted timestamp
-        announcements.add(new Announcement("Finn", "Test of innit", "Don't mind this message", "welcome"));
+        announcements.add(new AnnouncementEntity("Finn", "Test of innit", "Don't mind this message", "welcome"));
 
         return announcements;
     }
 
     // Static method to initialize the data
-    public static List<Announcement> init() {
+    public static List<AnnouncementEntity> init() {
         return createInitialData();
     }
 }
