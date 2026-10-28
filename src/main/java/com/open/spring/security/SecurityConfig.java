@@ -89,11 +89,10 @@ public class SecurityConfig {
                 .requestCache(cache -> cache.disable())
                 .authorizeHttpRequests(auth -> auth
 
-                        // ========== AUTHENTICATION & USER MANAGEMENT ==========
-                        // Public endpoint - no authentication required, supports user login
-                        .requestMatchers(HttpMethod.OPTIONS, "/api/**", "/authenticate", "/run/**").permitAll()  // Allow only relevant CORS preflight requests
-                        .requestMatchers("/authenticate").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/authenticate").permitAll() // allow POST on auth
+                        // Login, signup and CORS preflight do not require a JWT.
+                        // Device pairing routes below validate their own scoped credentials.
+                        .requestMatchers(HttpMethod.OPTIONS, "/api/**", "/authenticate").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/authenticate").permitAll()
                         // Logout only expires the caller's own cookies. It must work with an expired
                         // or invalid token, or a stale jwt cookie can never be cleared.
                         .requestMatchers(HttpMethod.POST, "/api/logout").permitAll()
@@ -110,17 +109,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/ai-connections", "/api/ai-connections/**").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/grades/create-gist").authenticated()
                         .requestMatchers(HttpMethod.POST, "/api/grades/create-gist/").authenticated()
-                        // Gist reading stays public; an unlisted URL is
-                        //    already shareable, so reading one adds no exposure)
-                        .requestMatchers(HttpMethod.GET, "/api/grades/read-gist/**").permitAll()
-                        // ← MAKE DEBUGGER - PUBLIC (NO AUTH)
-                        .requestMatchers("/api/make/**").permitAll()
                         // (DELETE/PUT /api/person/** are declared above, ahead of the create permit.)
-                        .requestMatchers(HttpMethod.GET, "/api/person/uid/**").permitAll()
                         // Face biometric data:
                         //   GET /faces  - teacher/admin only (scanner feed)
                         //   POST /register - any authenticated user (self-service face enrollment)
-                        .requestMatchers(HttpMethod.POST, "/api/face/register/public", "/api/face/register/public/").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/face/faces").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
                         .requestMatchers(HttpMethod.POST, "/api/face/register").hasAnyAuthority("ROLE_USER", "ROLE_STUDENT", "ROLE_TEACHER", "ROLE_ADMIN")
                         .requestMatchers("/api/face/**").hasAnyAuthority("ROLE_TEACHER", "ROLE_ADMIN")
@@ -131,12 +123,8 @@ public class SecurityConfig {
                         // ========== API ENDPOINTS (REQUIRE AT LEAST USER) ==========
                         // Previously public endpoints now require authenticated roles
                         .requestMatchers("/api/jokes/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
-                        // Pause Menu APIs should be public, except deleting a score
+                        // Deleting a pause menu score remains admin-only
                         .requestMatchers(HttpMethod.DELETE, "/api/pausemenu/**").hasAuthority("ROLE_ADMIN")
-                        .requestMatchers("/api/pausemenu/**").permitAll()
-                        // Leaderboard should be public - displays scores without authentication
-                        .requestMatchers("/api/leaderboard/**").permitAll()
-                        // Frontend calls gamer score endpoint; make it public
                         .requestMatchers("/api/gamer/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // ==========================================
                         .requestMatchers("/api/exports/**").hasAuthority("ROLE_ADMIN")
@@ -210,8 +198,6 @@ public class SecurityConfig {
                         // ========== ASSIGNMENT SUBMISSION ==========
                         // Submission authors must be authenticated before their personal AI keys can be used.
                         .requestMatchers(HttpMethod.POST, "/api/submissions/**").authenticated()
-                        // Assignment file uploads - public (student identity passed in multipart fields)
-                        .requestMatchers(HttpMethod.POST, "/api/assignment-submissions/upload").permitAll()
                         // ==========================================
 
                         // ========== CS PATHWAY SETUP REPORT ==========
@@ -240,7 +226,7 @@ public class SecurityConfig {
 
                         // ========== DEFAULT: ALL OTHER API ENDPOINTS ==========
                         // Secure by default - any endpoint not explicitly listed above requires authentication
-                        .requestMatchers("/api/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
+                        .anyRequest().hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // ======================================================
                        
                 )
@@ -266,20 +252,16 @@ public class SecurityConfig {
     @Bean(name = "apiEndpointRolePolicy")
     public Map<String, String> apiEndpointRolePolicy() {
         Map<String, String> policy = new LinkedHashMap<>();
-        policy.put("/authenticate", "permitAll");
+        policy.put("OPTIONS /api/**, /authenticate", "permitAll");
         policy.put("POST /authenticate", "permitAll");
-        policy.put("/api/person/create", "permitAll");
-        policy.put("/api/person/create/", "permitAll");
+        policy.put("POST /api/logout", "permitAll");
         policy.put("POST /api/person/create", "permitAll");
         policy.put("DELETE /api/person/**", "ROLE_ADMIN");
         policy.put("PUT /api/person/**", "ROLE_ADMIN");
-        policy.put("GET /api/person/uid/**", "permitAll");
         // Face biometric endpoints
-        policy.put("POST /api/face/register/public", "permitAll");
         policy.put("GET /api/face/faces", "ROLE_TEACHER|ROLE_ADMIN");
         policy.put("POST /api/face/register", "ROLE_USER|ROLE_STUDENT|ROLE_TEACHER|ROLE_ADMIN");
         policy.put("/api/face/**", "ROLE_TEACHER|ROLE_ADMIN");
-        policy.put("POST /api/assignment-submissions/upload", "permitAll");
         policy.put("POST /api/assignments/auto-create", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT|ROLE_ASSIGNMENT_SYNC");
         policy.put("/api/gist-connection", "authenticated");
         policy.put("/api/ai-connections", "authenticated");
@@ -293,8 +275,6 @@ public class SecurityConfig {
         policy.put("GET /api/toolchain/sessions/*/next", "permitAll");
         policy.put("POST /api/toolchain/sessions/*/results", "permitAll");
         policy.put("DELETE /api/pausemenu/**", "ROLE_ADMIN");
-        policy.put("/api/pausemenu/**", "permitAll");
-        policy.put("/api/leaderboard/**", "permitAll");
         policy.put("/api/exports/**", "ROLE_ADMIN");
         policy.put("/api/imports/**", "ROLE_ADMIN");
         policy.put("/api/**", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT");
