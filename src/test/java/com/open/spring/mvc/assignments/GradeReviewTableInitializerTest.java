@@ -40,12 +40,15 @@ class GradeReviewTableInitializerTest {
     }
 
     @Test
-    void createsTheWholeTableAndItsIndexOnAnEmptyDatabase() {
+    void createsTheWholeTableAndItsIndexesOnAnEmptyDatabase() {
         initializer.initialize();
 
         assertEquals(ALL_COLUMNS, columns());
-        assertEquals(1, jdbc.queryForObject("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' "
-                + "AND name = 'idx_grade_review_submission'", Integer.class));
+        assertEquals(List.of("idx_grade_review_assignment", "idx_grade_review_submission"),
+                jdbc.queryForList("SELECT name FROM sqlite_master WHERE type = 'index' "
+                        + "AND tbl_name = 'assignment_grade_review' ORDER BY name", String.class));
+        assertEquals(List.of("assignment_id", "status"), jdbc.queryForList(
+                "SELECT name FROM pragma_index_info('idx_grade_review_assignment')", String.class));
     }
 
     @Test

@@ -26,7 +26,10 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @Entity
 @Table(name = "assignment_grade_review",
-        indexes = @Index(name = "idx_grade_review_submission", columnList = "submission_id"))
+        indexes = {
+            @Index(name = "idx_grade_review_submission", columnList = "submission_id"),
+            @Index(name = "idx_grade_review_assignment", columnList = "assignment_id, status")
+        })
 public class GradeReviewEntity {
 
     public enum Reason { REGRADE_REQUEST, SIMILARITY_CHECK, PETITION }

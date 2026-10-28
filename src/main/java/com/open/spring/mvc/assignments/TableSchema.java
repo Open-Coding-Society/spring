@@ -50,9 +50,9 @@ record TableSchema(JdbcTemplate jdbc, boolean mySql) {
     }
 
     /** MySQL has no CREATE INDEX IF NOT EXISTS, so an existing index is an expected failure. */
-    void createIndex(String name, String table, String column) {
+    void createIndex(String name, String table, String columns) {
         try {
-            jdbc.execute("CREATE INDEX " + name + " ON " + table + " (" + column + ")");
+            jdbc.execute("CREATE INDEX " + name + " ON " + table + " (" + columns + ")");
         } catch (DataAccessException e) {
             // Already there.
         }

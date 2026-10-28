@@ -49,5 +49,6 @@ public class GradeReviewTableInitializer {
         // Tables created before students could petition lack this column.
         schema.addColumns(TABLE, "petition_message TEXT");
         schema.createIndex("idx_grade_review_submission", TABLE, "submission_id");
+        schema.createIndex("idx_grade_review_assignment", TABLE, "assignment_id, status");
     }
 }

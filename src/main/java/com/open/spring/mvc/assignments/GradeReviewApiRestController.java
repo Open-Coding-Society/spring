@@ -10,7 +10,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
@@ -151,11 +150,7 @@ public class GradeReviewApiRestController {
     }
 
     private ResponseEntity<?> signedIn(UserDetails userDetails, Function<Person, ResponseEntity<?>> action) {
-        Person person = userDetails == null ? null : personRepo.findByUid(userDetails.getUsername());
-        if (person == null) {
-            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required"));
-        }
-        return action.apply(person);
+        return GradingResponse.signedIn(personRepo, userDetails, action);
     }
 
     private ResponseEntity<?> list(Optional<List<GradeReviewEntity>> reviews) {
