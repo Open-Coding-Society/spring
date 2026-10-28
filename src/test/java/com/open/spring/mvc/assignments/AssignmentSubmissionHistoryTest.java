@@ -73,9 +73,9 @@ class AssignmentSubmissionHistoryTest {
         return submission;
     }
 
-    private static SubmissionGradeEvent event(int revision, SubmissionGradeEvent.Type type, String url, Double grade,
+    private static SubmissionGradeEventEntity event(int revision, SubmissionGradeEventEntity.Type type, String url, Double grade,
             int minute) {
-        SubmissionGradeEvent event = SubmissionGradeEvent.of(7L, revision, type, LocalDateTime.of(2026, 10, 27, 9, minute));
+        SubmissionGradeEventEntity event = SubmissionGradeEventEntity.of(7L, revision, type, LocalDateTime.of(2026, 10, 27, 9, minute));
         event.setContent(url == null ? null : Map.of("type", "link", "url", url));
         event.setGrade(grade);
         event.setEffective(grade != null);
@@ -127,13 +127,13 @@ class AssignmentSubmissionHistoryTest {
     /** The first revision of a submission from before the grading history records what it replaces. */
     @Nested
     class PreHistoryRevision {
-        private SubmissionGradeEventJPA eventRepo;
+        private SubmissionGradeEventJpaRepository eventRepo;
         private SubmissionGradingService realGrading;
         private AssignmentSubmission legacy;
 
         @BeforeEach
         void setUpGrading() {
-            eventRepo = mock(SubmissionGradeEventJPA.class);
+            eventRepo = mock(SubmissionGradeEventJpaRepository.class);
             realGrading = new SubmissionGradingService(submissionRepo, mock(AssignmentJpaRepository.class), eventRepo,
                     new AssignmentAuthorizationService());
             legacy = stored(5L, "https://legacy", 0.6);
@@ -149,30 +149,30 @@ class AssignmentSubmissionHistoryTest {
 
             realGrading.revise(legacy, Map.of("type", "link", "url", "https://new"), alice);
 
-            ArgumentCaptor<SubmissionGradeEvent> saved = ArgumentCaptor.forClass(SubmissionGradeEvent.class);
+            ArgumentCaptor<SubmissionGradeEventEntity> saved = ArgumentCaptor.forClass(SubmissionGradeEventEntity.class);
             verify(eventRepo, times(3)).save(saved.capture());
-            SubmissionGradeEvent submitted = saved.getAllValues().get(0);
-            assertEquals(SubmissionGradeEvent.Type.SUBMITTED, submitted.getType());
+            SubmissionGradeEventEntity submitted = saved.getAllValues().get(0);
+            assertEquals(SubmissionGradeEventEntity.Type.SUBMITTED, submitted.getType());
             assertEquals(1, submitted.getRevision());
             assertEquals("https://legacy", submitted.getContent().get("url"));
             assertNull(submitted.getActorId());
-            SubmissionGradeEvent graded = saved.getAllValues().get(1);
-            assertEquals(SubmissionGradeEvent.Type.AI_GRADED, graded.getType());
+            SubmissionGradeEventEntity graded = saved.getAllValues().get(1);
+            assertEquals(SubmissionGradeEventEntity.Type.AI_GRADED, graded.getType());
             assertEquals(0.6, graded.getGrade());
             assertTrue(graded.getEffective());
-            assertEquals(SubmissionGradeEvent.Type.REVISED, saved.getAllValues().get(2).getType());
+            assertEquals(SubmissionGradeEventEntity.Type.REVISED, saved.getAllValues().get(2).getType());
         }
 
         @Test
         void aSubmissionWithHistoryIsNotRecordedAgain() {
             when(eventRepo.findBySubmissionIdOrderByIdAsc(5L))
-                    .thenReturn(List.of(event(1, SubmissionGradeEvent.Type.SUBMITTED, "https://legacy", null, 0)));
+                    .thenReturn(List.of(event(1, SubmissionGradeEventEntity.Type.SUBMITTED, "https://legacy", null, 0)));
 
             realGrading.revise(legacy, Map.of("type", "link", "url", "https://new"), alice);
 
-            ArgumentCaptor<SubmissionGradeEvent> saved = ArgumentCaptor.forClass(SubmissionGradeEvent.class);
+            ArgumentCaptor<SubmissionGradeEventEntity> saved = ArgumentCaptor.forClass(SubmissionGradeEventEntity.class);
             verify(eventRepo).save(saved.capture());
-            assertEquals(SubmissionGradeEvent.Type.REVISED, saved.getValue().getType());
+            assertEquals(SubmissionGradeEventEntity.Type.REVISED, saved.getValue().getType());
         }
     }
 
@@ -196,11 +196,11 @@ class AssignmentSubmissionHistoryTest {
             current.setRevision(3);
             when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(current, legacy));
             when(gradingService.history(7L)).thenReturn(List.of(
-                    event(1, SubmissionGradeEvent.Type.SUBMITTED, "https://first", null, 0),
-                    event(1, SubmissionGradeEvent.Type.AI_GRADED, null, 0.6, 1),
-                    event(2, SubmissionGradeEvent.Type.REVISED, "https://second", null, 2),
-                    event(2, SubmissionGradeEvent.Type.MANUAL_OVERRIDE_SET, null, 0.8, 3),
-                    event(3, SubmissionGradeEvent.Type.REVISED, "https://now", null, 4)));
+                    event(1, SubmissionGradeEventEntity.Type.SUBMITTED, "https://first", null, 0),
+                    event(1, SubmissionGradeEventEntity.Type.AI_GRADED, null, 0.6, 1),
+                    event(2, SubmissionGradeEventEntity.Type.REVISED, "https://second", null, 2),
+                    event(2, SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET, null, 0.8, 3),
+                    event(3, SubmissionGradeEventEntity.Type.REVISED, "https://now", null, 4)));
 
             assertSame(current, service.currentOf(legacy));
             List<AssignmentSubmissionHistoryService.Version> versions = service.historyOf(current).versions();
@@ -217,6 +217,27 @@ class AssignmentSubmissionHistoryTest {
             assertEquals(0.6, versions.get(2).grade());
             assertEquals(3L, versions.get(3).submissionId());
             assertEquals(0.4, versions.get(3).grade());
+        }
+
+        @Test
+        void aKeptManualGradeLeavesEachRevisionWithTheGradeItHad() {
+            AssignmentSubmission current = stored(7L, "https://v2", 0.9);
+            current.setRevision(2);
+            when(submissionRepo.findBySubmitterId(1L)).thenReturn(List.of(current));
+            when(gradingService.history(7L)).thenReturn(List.of(
+                    event(1, SubmissionGradeEventEntity.Type.SUBMITTED, "https://v1", null, 0),
+                    event(1, SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET, null, 0.5, 1),
+                    event(2, SubmissionGradeEventEntity.Type.REVISED, "https://v2", null, 2),
+                    event(2, SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_KEPT_BY_REVISION, null, 0.5, 2),
+                    event(2, SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET, null, 0.9, 3)));
+
+            List<AssignmentSubmissionHistoryService.Version> versions = service.historyOf(current).versions();
+
+            assertEquals(2, versions.size());
+            assertEquals(0.9, versions.get(0).grade(), "the petition's new grade is on revision 2");
+            assertEquals(1, versions.get(1).revision());
+            assertEquals(0.5, versions.get(1).grade());
+            assertEquals(LocalDateTime.of(2026, 10, 27, 9, 2), versions.get(1).replacedAt());
         }
 
         @Test

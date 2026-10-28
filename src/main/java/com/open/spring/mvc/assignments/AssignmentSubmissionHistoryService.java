@@ -137,7 +137,7 @@ public class AssignmentSubmissionHistoryService {
      * revision, earlier revisions from the grading history, then older rows for the same assignment.
      */
     public SubmissionHistory historyOf(AssignmentSubmission current) {
-        List<SubmissionGradeEvent> events = gradingService.history(current.getId());
+        List<SubmissionGradeEventEntity> events = gradingService.history(current.getId());
         List<Version> versions = new ArrayList<>();
         versions.add(versionOf(current, true, submittedAt(events, current.currentRevision())));
         for (int revision = current.currentRevision() - 1; revision >= AssignmentSubmission.FIRST_REVISION; revision--) {
@@ -162,10 +162,10 @@ public class AssignmentSubmissionHistoryService {
      * An earlier revision from the grading history: the content it was submitted with and the last
      * grade that was effective for it. Null if the history has no content for that revision.
      */
-    private static Version revisionOf(Long submissionId, int revision, List<SubmissionGradeEvent> events) {
-        SubmissionGradeEvent submitted = null;
-        SubmissionGradeEvent graded = null;
-        for (SubmissionGradeEvent event : events) {
+    private static Version revisionOf(Long submissionId, int revision, List<SubmissionGradeEventEntity> events) {
+        SubmissionGradeEventEntity submitted = null;
+        SubmissionGradeEventEntity graded = null;
+        for (SubmissionGradeEventEntity event : events) {
             if (event.getRevision() == revision && startsRevision(event)) {
                 submitted = event;
             } else if (event.getRevision() == revision && Boolean.TRUE.equals(event.getEffective())) {
@@ -181,19 +181,19 @@ public class AssignmentSubmissionHistoryService {
                 graded == null ? null : graded.getCreatedAt());
     }
 
-    private static boolean startsRevision(SubmissionGradeEvent event) {
-        return event.getType() == SubmissionGradeEvent.Type.SUBMITTED || event.getType() == SubmissionGradeEvent.Type.REVISED;
+    private static boolean startsRevision(SubmissionGradeEventEntity event) {
+        return event.getType() == SubmissionGradeEventEntity.Type.SUBMITTED || event.getType() == SubmissionGradeEventEntity.Type.REVISED;
     }
 
     /**
      * When the revision was submitted, or null if unknown. A first submission with no actor was
      * recorded later, by its first revision (see SubmissionGradingService.revise), so its time isn't known.
      */
-    private static LocalDateTime submittedAt(List<SubmissionGradeEvent> events, int revision) {
+    private static LocalDateTime submittedAt(List<SubmissionGradeEventEntity> events, int revision) {
         return events.stream()
                 .filter(event -> event.getRevision() == revision && startsRevision(event))
-                .filter(event -> !(event.getType() == SubmissionGradeEvent.Type.SUBMITTED && event.getActorId() == null))
-                .map(SubmissionGradeEvent::getCreatedAt)
+                .filter(event -> !(event.getType() == SubmissionGradeEventEntity.Type.SUBMITTED && event.getActorId() == null))
+                .map(SubmissionGradeEventEntity::getCreatedAt)
                 .reduce((first, last) -> last)
                 .orElse(null);
     }

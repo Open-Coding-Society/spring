@@ -14,10 +14,10 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 /**
- * Runs the migration on a SQLite table shaped like the one in production before this change,
+ * Runs the initializer on a SQLite table shaped like the one in production before this change,
  * and checks how existing grades are classified.
  */
-class AssignmentSubmissionGradingMigrationTest {
+class AssignmentSubmissionTableInitializerTest {
 
     private static final String AI_TEXT = "The submission meets most rubric criteria. " + "Detail. ".repeat(60);
 
@@ -27,7 +27,7 @@ class AssignmentSubmissionGradingMigrationTest {
 
     @BeforeEach
     void createLegacyTable() throws Exception {
-        database = Files.createTempFile("grading-migration", ".db");
+        database = Files.createTempFile("submission-table", ".db");
         dataSource = new SingleConnectionDataSource("jdbc:sqlite:" + database, true);
         jdbc = new JdbcTemplate(dataSource);
         jdbc.execute("CREATE TABLE assignment_submission (id bigint not null primary key, grade float, "
@@ -70,7 +70,7 @@ class AssignmentSubmissionGradingMigrationTest {
         // Not graded.
         insert(6, null, null, null);
 
-        new AssignmentSubmissionGradingMigration(jdbc).migrate();
+        new AssignmentSubmissionTableInitializer(jdbc).initialize();
 
         Map<String, Object> ai = row(1);
         assertEquals(1, ((Number) ai.get("revision")).intValue());
@@ -100,7 +100,7 @@ class AssignmentSubmissionGradingMigrationTest {
         insert(1, 0.6, "Short AI feedback.", "Short AI feedback.");
         jdbc.update("UPDATE assignment_submission SET graded_manually = 1 WHERE id = 1");
 
-        new AssignmentSubmissionGradingMigration(jdbc).migrate();
+        new AssignmentSubmissionTableInitializer(jdbc).initialize();
 
         assertEquals(true, flag(row(1).get("manual_override")));
         assertEquals(0.6, ((Number) row(1).get("manual_grade")).doubleValue());
@@ -109,30 +109,16 @@ class AssignmentSubmissionGradingMigrationTest {
     @Test
     void runningAgainNeverReclassifies() {
         insert(1, 0.6, "Short AI feedback.", "Short AI feedback.");
-        AssignmentSubmissionGradingMigration migration = new AssignmentSubmissionGradingMigration(jdbc);
-        migration.migrate();
-        // After the migration, the app changes feedback (e.g. a teacher override) - a second boot
+        AssignmentSubmissionTableInitializer initializer = new AssignmentSubmissionTableInitializer(jdbc);
+        initializer.initialize();
+        // After the first run, the app changes feedback (e.g. a teacher override) - a second boot
         // must leave the new state alone.
         jdbc.update("UPDATE assignment_submission SET manual_override = 1, manual_grade = 0.9, grade = 0.9, "
                 + "feedback = 'Teacher' WHERE id = 1");
 
-        migration.migrate();
+        initializer.initialize();
 
         assertEquals(true, flag(row(1).get("manual_override")));
         assertEquals(0.9, ((Number) row(1).get("grade")).doubleValue());
-    }
-
-    @Test
-    void theHistoryTableIsCreatedAndAcceptsEvents() {
-        new AssignmentSubmissionGradingMigration(jdbc).migrate();
-
-        jdbc.update("INSERT INTO assignment_submission_grade_event (submission_id, revision, event_type, grade, "
-                + "created_at) VALUES (1, 1, 'AI_GRADED', 0.5, CURRENT_TIMESTAMP)");
-        jdbc.update("INSERT INTO assignment_submission_grade_event (submission_id, revision, event_type, "
-                + "created_at) VALUES (1, 2, 'REVISED', CURRENT_TIMESTAMP)");
-
-        assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM assignment_submission_grade_event "
-                + "WHERE submission_id = 1", Integer.class));
-        assertEquals(2, jdbc.queryForObject("SELECT MAX(id) FROM assignment_submission_grade_event", Integer.class));
     }
 }

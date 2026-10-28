@@ -304,11 +304,11 @@ class AssignmentSubmissionManualGradeTest {
 
     @Test
     void historyNamesWhoActedAndShowsTheCurrentState() {
-        SubmissionGradeEvent override = SubmissionGradeEvent.of(100L, 1, SubmissionGradeEvent.Type.MANUAL_OVERRIDE_SET,
+        SubmissionGradeEventEntity override = SubmissionGradeEventEntity.of(100L, 1, SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET,
                 LocalDateTime.of(2026, 10, 24, 9, 0));
         override.setActorId(3L);
         override.setGrade(0.8);
-        SubmissionGradeEvent ai = SubmissionGradeEvent.of(100L, 1, SubmissionGradeEvent.Type.AI_GRADED,
+        SubmissionGradeEventEntity ai = SubmissionGradeEventEntity.of(100L, 1, SubmissionGradeEventEntity.Type.AI_GRADED,
                 LocalDateTime.of(2026, 10, 24, 9, 1));
         ai.setGrade(0.5);
         when(gradingService.history(100L)).thenReturn(List.of(override, ai));
