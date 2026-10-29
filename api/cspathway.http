@@ -35,20 +35,7 @@ Content-Type: application/json
 
 {}
 
-### 3. Help Requests
-
-# Send a help request (Requires Authentication)
-# Use the cookie from the authentication request above
-POST {{baseUrl}}/api/cs-pathway/help-requests
-Content-Type: application/json
-
-{
-  "levelKey": "toolchain-trail",
-  "station": "Git Village Hall",
-  "message": "I am stuck on the git commit step!"
-}
-
-### 3b. Station Helper chat
+### 3. Station Helper chat
 
 # Ask the Gemini Station Helper a question (Requires Authentication)
 POST {{baseUrl}}/api/cs-pathway/chat

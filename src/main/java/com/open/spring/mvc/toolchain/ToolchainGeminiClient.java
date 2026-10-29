@@ -124,7 +124,7 @@ public class ToolchainGeminiClient {
         return switch (status) {
             case 429, 503 -> "The AI helper is busy right now. Try again in a minute.";
             default -> "The AI helper is not working right now (Gemini returned HTTP " + status
-                    + "). Use the red flag to ask your teacher.";
+                    + "). Ask your teacher for help.";
         };
     }
 

@@ -16,7 +16,7 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * The game's Station Helper: a signed-in student asks for help at any station
  * and Gemini answers using their progress. Nothing is saved; the page keeps the
- * conversation. This is an AI helper, separate from the teacher help-request queue.
+ * conversation.
  */
 @RestController
 @RequestMapping("/api/cs-pathway/chat")

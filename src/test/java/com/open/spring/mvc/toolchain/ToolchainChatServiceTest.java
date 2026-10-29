@@ -160,7 +160,7 @@ class ToolchainChatServiceTest {
         failuresBeforeSuccess.add(403);
         IllegalStateException refused = assertThrows(IllegalStateException.class,
                 () -> chatService("test-key").ask("toby", body("help", List.of())));
-        assertTrue(refused.getMessage().contains("red flag"));
+        assertTrue(refused.getMessage().contains("Ask your teacher"));
         assertFalse(refused.getMessage().contains("GEMINI_API_KEY"));
     }
 

@@ -24,8 +24,6 @@
         .review-status.complete { color: #198754; }
         .review-status.incomplete { color: #dc3545; }
         .review-status.review-needed { color: #b58100; }
-        .help-flag-icon { color: #dc3545; }
-        .help-message { max-width: 420px; white-space: pre-wrap; }
     </style>
 </th:block>
 
@@ -35,36 +33,6 @@
 <th:block layout:fragment="body" th:remove="tag">
     <div sec:authorize="hasAnyRole('ROLE_ADMIN', 'ROLE_TEACHER')">
         <div class="container">
-
-            <h3><span class="help-flag-icon" aria-hidden="true">&#9873;</span> Help requests</h3>
-            <p class="text-muted">Sent with the red flag button in the game, newest first.</p>
-            <div class="row align-items-md-stretch table-responsive">
-            <table id="csPathwayHelpTable" class="table table-sm table-striped">
-                <thead>
-                    <tr>
-                        <th>Sent</th>
-                        <th>Student</th>
-                        <th>UID</th>
-                        <th>Level</th>
-                        <th>Station</th>
-                        <th>Message</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr th:each="help : ${helpRequests}">
-                        <td class="small-cell" th:text="${#dates.format(help.createdAt, 'yyyy-MM-dd HH:mm')}">date</td>
-                        <td class="small-cell" th:text="${help.name}">Name</td>
-                        <td class="small-cell" th:text="${help.uid}">UID</td>
-                        <td class="small-cell" th:text="${help.levelName}">Level</td>
-                        <td class="small-cell" th:text="${help.station ?: '-'}">Station</td>
-                        <td class="help-message" th:text="${help.message}">Message</td>
-                    </tr>
-                    <tr th:if="${#lists.isEmpty(helpRequests)}">
-                        <td colspan="6" class="text-center text-muted">No help requests yet.</td>
-                    </tr>
-                </tbody>
-            </table>
-            </div>
 
             <h3>CS Pathway Scores</h3>
             <p class="text-muted">Each level's score is its percent complete. Students appear here once they make progress in the game.
