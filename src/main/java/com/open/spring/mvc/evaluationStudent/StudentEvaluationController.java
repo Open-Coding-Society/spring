@@ -5,6 +5,7 @@ import java.util.Optional;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,6 +21,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+/** A student reaches only their own evaluation; a teacher or admin reaches any. */
 @RestController
 @RequestMapping("/api/student-evaluation")
 public class StudentEvaluationController {
@@ -57,6 +59,7 @@ public class StudentEvaluationController {
     }
 
     @PostMapping("/post")
+    @PreAuthorize("hasAnyAuthority('ROLE_TEACHER','ROLE_ADMIN') or @personAccess.isSelf(authentication, #req.userId)")
     public ResponseEntity<?> createEvaluation(@RequestBody StudentEvaluationRequest req) {
         if (req.getUserId() == null) {
             return ResponseEntity.badRequest().body(Map.of("error", "userId is required"));
@@ -88,6 +91,7 @@ public class StudentEvaluationController {
     }
 
     @GetMapping("/get/{user_id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_TEACHER','ROLE_ADMIN') or @personAccess.isSelf(authentication, #userId)")
     public ResponseEntity<?> getEvaluationByUserId(@PathVariable("user_id") Integer userId) {
         Optional<StudentEvaluation> optionalEval = studentEvaluationRepository.findByUserId(userId);
         if (optionalEval.isEmpty()) {
@@ -99,6 +103,8 @@ public class StudentEvaluationController {
     }
 
     @PutMapping("/update/{user_id}")
+    // A student may not move their evaluation to another user.
+    @PreAuthorize("hasAnyAuthority('ROLE_TEACHER','ROLE_ADMIN') or (@personAccess.isSelf(authentication, #userId) and (#req.userId == null or #req.userId == #userId))")
     public ResponseEntity<?> updateEvaluation(@PathVariable("user_id") Integer userId, @RequestBody StudentEvaluationRequest req) {
         Optional<StudentEvaluation> optionalEval = studentEvaluationRepository.findByUserId(userId);
         if (optionalEval.isEmpty()) {
@@ -127,6 +133,7 @@ public class StudentEvaluationController {
     }
 
     @DeleteMapping("/delete/{user_id}")
+    @PreAuthorize("hasAnyAuthority('ROLE_TEACHER','ROLE_ADMIN') or @personAccess.isSelf(authentication, #userId)")
     public ResponseEntity<?> deleteEvaluation(@PathVariable("user_id") Integer userId) {
         Optional<StudentEvaluation> optionalEval = studentEvaluationRepository.findByUserId(userId);
         if (optionalEval.isEmpty()) {
