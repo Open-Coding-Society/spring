@@ -238,6 +238,14 @@ public class SecurityConfig {
                         .requestMatchers("/api/ocs-analytics/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
                         // ===================================
 
+                        // ========== UI BUILDER PUBLISHED PAGES ==========
+                        // The gallery and a published page are readable without a login. Anonymous
+                        // visitors get only pages a teacher approved for everyone, with no person's name
+                        // (UiBuilderPublishedApiRestController). "*" is one path segment, so
+                        // /published/{slug}/members/* and every other /api/ui-builder route stay below.
+                        .requestMatchers(HttpMethod.GET, "/api/ui-builder/published", "/api/ui-builder/published/*").permitAll()
+                        // ================================================
+
                         // ========== DEFAULT: ALL OTHER API ENDPOINTS ==========
                         // Secure by default - any endpoint not explicitly listed above requires authentication
                         .requestMatchers("/api/**").hasAnyAuthority("ROLE_USER", "ROLE_ADMIN", "ROLE_TEACHER", "ROLE_STUDENT")
@@ -297,6 +305,8 @@ public class SecurityConfig {
         policy.put("/api/leaderboard/**", "permitAll");
         policy.put("/api/exports/**", "ROLE_ADMIN");
         policy.put("/api/imports/**", "ROLE_ADMIN");
+        policy.put("GET /api/ui-builder/published", "permitAll");
+        policy.put("GET /api/ui-builder/published/*", "permitAll");
         policy.put("/api/**", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT");
         return Map.copyOf(policy);
     }
