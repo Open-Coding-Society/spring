@@ -65,8 +65,8 @@ public class AssignmentSubmission {
     // conditional UPDATEs in AssignmentSubmissionJPA.
     //
     // grade is the effective grade: manualGrade while manualOverride is true, otherwise aiGrade.
-    // manualOverride is set by a manual grade or an authorized correction after close, and cleared
-    // when the grader removes it or the student submits new content. AI grading never changes it.
+    // manualOverride is set by a manual grade or a review decision, carries over to new revisions,
+    // and is cleared only when a grader removes it. AI grading never changes it.
 
     @Convert(converter = SubmissionContentConverter.class)
     @Column(columnDefinition = "text", updatable = false)

@@ -15,15 +15,22 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * A teacher's review of a closed assignment's grade: reason, evidence, and a decision with its
- * rationale. Changed only through {@link GradeReviewService}.
+ * One row of the assignment_grade_review table: a review of a submission's grade with its reason,
+ * evidence, and a decision with its rationale. A teacher opens one after close; a student opens a
+ * PETITION, before close only against a manual grade. Changed only through {@link GradeReviewService}.
+ *
+ * The API sends GradeReviewApiRestController's ReviewView and PetitionView records, not this class.
+ * The table is initialized by GradeReviewTableInitializer (ddl-auto is none).
  */
 @Data
 @NoArgsConstructor
 @Entity
 @Table(name = "assignment_grade_review",
-        indexes = @Index(name = "idx_grade_review_submission", columnList = "submission_id"))
-public class GradeReview {
+        indexes = {
+            @Index(name = "idx_grade_review_submission", columnList = "submission_id"),
+            @Index(name = "idx_grade_review_assignment", columnList = "assignment_id, status")
+        })
+public class GradeReviewEntity {
 
     public enum Reason { REGRADE_REQUEST, SIMILARITY_CHECK, PETITION }
 
@@ -51,6 +58,10 @@ public class GradeReview {
 
     // Effective grade when the review was opened.
     private Double gradeAtOpen;
+
+    // The student's own words; set only on a petition the student filed.
+    @Column(columnDefinition = "text")
+    private String petitionMessage;
 
     // ========== Evidence ==========
 

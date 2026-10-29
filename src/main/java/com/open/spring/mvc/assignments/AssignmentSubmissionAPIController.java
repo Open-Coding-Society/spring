@@ -482,25 +482,25 @@ public class AssignmentSubmissionAPIController {
                     .body(Map.of("error", MANAGE_DENIED_MESSAGE));
         }
 
-        List<SubmissionGradeEvent> events = gradingService.history(submissionId);
-        Set<Long> actorIds = events.stream().map(SubmissionGradeEvent::getActorId)
+        List<SubmissionGradeEventEntity> events = gradingService.history(submissionId);
+        Set<Long> actorIds = events.stream().map(SubmissionGradeEventEntity::getActorId)
                 .filter(Objects::nonNull).collect(Collectors.toSet());
         Map<Long, String> actorNames = personRepo.findAllById(actorIds).stream()
                 .collect(Collectors.toMap(Person::getId, Person::getName, (first, second) -> first));
         return ResponseEntity.ok(new GradingHistoryResponse(
                 SubmissionGradingState.of(submission),
-                events.stream().map(event -> GradeEventDto.of(event, actorNames.get(event.getActorId()))).toList()));
+                events.stream().map(event -> GradeEventView.of(event, actorNames.get(event.getActorId()))).toList()));
     }
 
-    public record GradingHistoryResponse(SubmissionGradingState current, List<GradeEventDto> events) {
+    public record GradingHistoryResponse(SubmissionGradingState current, List<GradeEventView> events) {
     }
 
     /** actorName is null for the AI or a deleted account. */
-    public record GradeEventDto(Long id, Integer revision, SubmissionGradeEvent.Type type, Double grade,
+    public record GradeEventView(Long id, Integer revision, SubmissionGradeEventEntity.Type type, Double grade,
             String feedback, Boolean effective, Long actorId, String actorName, Map<String, Object> content,
             LocalDateTime createdAt) {
-        static GradeEventDto of(SubmissionGradeEvent event, String actorName) {
-            return new GradeEventDto(event.getId(), event.getRevision(), event.getType(), event.getGrade(),
+        static GradeEventView of(SubmissionGradeEventEntity event, String actorName) {
+            return new GradeEventView(event.getId(), event.getRevision(), event.getType(), event.getGrade(),
                     event.getFeedback(), event.getEffective(), event.getActorId(), actorName, event.getContent(),
                     event.getCreatedAt());
         }

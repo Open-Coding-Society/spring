@@ -1,7 +1,14 @@
 package com.open.spring.mvc.assignments;
 
+import java.util.Map;
+import java.util.function.Function;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.userdetails.UserDetails;
+
+import com.open.spring.mvc.person.Person;
+import com.open.spring.mvc.person.PersonJpaRepository;
 
 /** Response body for the grading endpoints. */
 public record GradingResponse(GradingOutcome outcome, SubmissionGradingState grading, String detail) {
@@ -9,6 +16,16 @@ public record GradingResponse(GradingOutcome outcome, SubmissionGradingState gra
     public static ResponseEntity<GradingResponse> from(GradingResult result) {
         return ResponseEntity.status(statusOf(result.outcome()))
                 .body(new GradingResponse(result.outcome(), result.state(), result.detail()));
+    }
+
+    /** Runs the action as the signed-in person, or answers 401 without calling it. */
+    public static ResponseEntity<?> signedIn(PersonJpaRepository personRepo, UserDetails userDetails,
+            Function<Person, ResponseEntity<?>> action) {
+        Person person = userDetails == null ? null : personRepo.findByUid(userDetails.getUsername());
+        if (person == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required"));
+        }
+        return action.apply(person);
     }
 
     /** HTTP status for each outcome, shared by the grading, review and closure endpoints. */

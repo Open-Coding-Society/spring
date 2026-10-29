@@ -9,10 +9,10 @@ window.Grading = (function () {
   const GRADING_OUTCOME_TEXT = {
     MANUAL_GRADE_APPLIED: 'Grade saved. It replaces the AI grade.',
     MANUAL_OVERRIDE_CLEARED: 'Instructor grade removed; the AI grade applies again.',
-    NO_MANUAL_OVERRIDE: 'There is no instructor grade to remove.',
+    NO_MANUAL_OVERRIDE: 'There is no instructor grade to remove or petition.',
     AI_GRADE_APPLIED: 'AI graded the submission.',
     MANUAL_OVERRIDE_KEPT: 'AI grade saved for reference; the instructor grade still applies.',
-    REVISION_CREATED: 'Saved as a new revision.',
+    REVISION_CREATED: 'Saved as a new revision. An instructor grade stays until a teacher changes it.',
     CONTENT_UNCHANGED: 'Saved.',
     STALE_REVISION: 'The student changed this submission since it was loaded. Reload and review the new version.',
     INVALID_GRADE: "Enter a grade from 0 to the assignment's points.",
@@ -36,7 +36,7 @@ window.Grading = (function () {
     REVIEW_NOT_FOUND: 'This review no longer exists.',
   };
 
-  // Labels for teacher reviews (GradeReview on the server).
+  // Labels for grade reviews (GradeReviewEntity on the server).
   const REVIEW_REASONS = {
     REGRADE_REQUEST: 'Re-grade request',
     SIMILARITY_CHECK: 'Similarity / copying check',
@@ -104,6 +104,7 @@ window.Grading = (function () {
 
   const reviews = {
     list: submissionId => api(`/api/grade-reviews/submission/${submissionId}`),
+    openForAssignment: assignmentId => api(`/api/grade-reviews/assignment/${assignmentId}/open`),
     open: (submissionId, reason, evidence) => postJson(`/api/grade-reviews/submission/${submissionId}`, { reason, evidence }),
     saveEvidence: (reviewId, evidence) => api(`/api/grade-reviews/${reviewId}/evidence`, {
       method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ evidence }),

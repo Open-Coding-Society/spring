@@ -50,6 +50,7 @@ The site is build on Springboot.  The project is primarly used to store and retr
 - [Group chat architecture guide](docs/group-chat-architecture.md) — explains groups and group chat: the REST routes, the STOMP WebSocket on port 8589, S3 message storage, a diagram, known issues, and `api/groups.http`.
 - [Toolchain architecture guide](docs/toolchain-architecture.md) — explains Setup, Scoring, Help, the interactive local agent, report-upload versus station-check flows, API routes, and persistence.
 - [Announcement architecture guide](docs/announcement-architecture.md) — a small example of the five standard parts (REST controller, entity, JPA repository, service, table initializer), with its routes, a diagram, and `api/announcement.http`.
+- [Grading architecture guide](docs/grading-architecture.md) — AI and manual grades, revisions, student petitions, closing an assignment, and teacher reviews. Try the routes with [api/grading.http](api/grading.http).
 
 The Java implementation for CS Pathway is now together in `src/main/java/com/open/spring/mvc/toolchain/`. The interactive Toolchain Trail agent/session flow is the current integrated station-check implementation. A separate text-report upload and AI-review flow is still present in the code; confirm whether students still use it before removing it. Existing `/api/cs-pathway` and `/api/toolchain` routes are preserved even though the Java package and class names are now unified.
 
@@ -179,9 +180,9 @@ GIST_TOKEN=your-github-gist-token-here
 # spring.mail.password=your-app-password
 
 # S3 Bucket Defaults
-AWS_BUCKET_NAME=your-bucket-name
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_BUCKET_NAME=my-bucket
+AWS_ACCESS_KEY_ID=local-access-key
+AWS_SECRET_ACCESS_KEY=local-secret-key-change-me
 AWS_REGION=us-east-2
 # if developing locally, set the endoint heree
 # AWS_S3_ENDPOINT=http://localhost:9000

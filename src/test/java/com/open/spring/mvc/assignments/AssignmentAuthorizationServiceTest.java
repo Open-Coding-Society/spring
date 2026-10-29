@@ -15,6 +15,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
 
+import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.person.Person;
 
 class AssignmentAuthorizationServiceTest {
@@ -147,5 +148,21 @@ class AssignmentAuthorizationServiceTest {
         assertFalse(service.canSynchronizeCreators(teacher(3L, "mort")));
         assertFalse(service.canSynchronizeCreators(admin(4L, "toby")));
         assertFalse(service.canSynchronizeCreators(null));
+    }
+
+    @Test
+    void theSubmitterIsTheStudentOrAMemberOfTheSubmittingGroup() {
+        AssignmentSubmission solo = submission(100L, assignmentA);
+        solo.setSubmitter(student(2L, "someone-else"));
+        AssignmentSubmission group = submission(101L, assignmentA);
+        group.setSubmitter(new Groups("Team", "3", "CSA", List.of(student(7L, "teammate"), otherStudent)));
+
+        assertTrue(service.isSubmitter(otherStudent, solo), "matched by id, not instance");
+        assertTrue(service.isSubmitter(otherStudent, group));
+        assertFalse(service.isSubmitter(creator, solo), "owning the assignment doesn't make you the submitter");
+        assertFalse(service.isSubmitter(teacher(3L, "mort"), group));
+        assertFalse(service.isSubmitter(otherStudent, submission(102L, assignmentA)));
+        assertFalse(service.isSubmitter(null, solo));
+        assertFalse(service.isSubmitter(otherStudent, null));
     }
 }
