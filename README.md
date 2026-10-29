@@ -372,15 +372,23 @@ first migration; this section is the summary.
 
 ## Local S3 Development
 
+If you are developing a component of Spring that requires AWS S3 bucket connections, you can emulate the bucket locally with RustFS. You will need to install [Docker](docs.docker.com/engine/install/) (or a similar containerization software).
+
 1. Start the local instance of RustFS:
 ```
 docker-compose -f rustfs.yml up -d
 ```
 2. Uncomment this line in `.env`:
-```
+```env
 AWS_S3_ENDPOINT=http://localhost:9000
 ```
-
+3. Log into `http://localhost:9001` with these keys:
+```env
+RUSTFS_ACCESS_KEY=local-access-key # ID
+RUSTFS_SECRET_KEY=local-secret-key-change-me # password
+```
+4. Create a bucket in RustFS called `my-bucket` (or whatever you set `AWS_BUCKET_NAME` to).
+5. Run `spring` and check if messages are written to the bucket via the Group Chat service.
 
 # Testing Grade FRQs API with Postman
 
