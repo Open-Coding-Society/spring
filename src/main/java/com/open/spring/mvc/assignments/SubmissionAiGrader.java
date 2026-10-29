@@ -59,7 +59,7 @@ public class SubmissionAiGrader {
         return result;
     }
 
-    /** Re-evaluates a closed submission as review evidence; the grade itself is not changed. */
+    /** Re-evaluates a submission under review as evidence; the grade itself is not changed. */
     public GradeReviewService.ReviewResult evaluateForReview(Long reviewId, Person teacher) {
         GradeReviewService.AiEvaluationTarget target = reviewService.aiEvaluationTarget(reviewId, teacher);
         if (target.refusal() != null) {

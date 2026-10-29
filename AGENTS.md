@@ -41,12 +41,13 @@ Entity-removal helpers (run before any large cleanup):
 
 ## Assignment grading
 
-The grading policy lives in one place, [SubmissionGradingService.java](src/main/java/com/open/spring/mvc/assignments/SubmissionGradingService.java), with closing in `AssignmentClosureService` and teacher reviews in `GradeReviewService`; read their class comments before changing grading.
-- A submission keeps the AI grade, a manual override and the effective grade apart. New content is a new `revision` that releases the override; every grading write names its revision.
-- Before close, teachers and student teachers (assignment creators, assigned graders) override and request AI re-grades. `POST /api/assignments/{id}/close` (teacher-only, no reopen) finalizes every grade and copies it to `SynergyGrade`. After close only a teacher's `GradeReview` (`/api/grade-reviews/**`: reason, evidence, decision with rationale) can change a grade.
+Read [docs/grading-architecture.md](docs/grading-architecture.md) first; [api/grading.http](api/grading.http) walks the whole lifecycle. The grading policy lives in one place, [SubmissionGradingService.java](src/main/java/com/open/spring/mvc/assignments/SubmissionGradingService.java), with closing in `AssignmentClosureService` and reviews and petitions in `GradeReviewService`.
+- A submission keeps the AI grade, a manual override and the effective grade apart. New content is a new `revision`; a manual override carries over to it, and the student petitions to have it reconsidered. Every grading write names its revision.
+- Before close, teachers and student teachers (assignment creators, assigned graders) override and request AI re-grades, and a student can petition a manual grade. `POST /api/assignments/{id}/close` (teacher-only, no reopen) finalizes every grade and copies it to `SynergyGrade`. After close only a review (`/api/grade-reviews/**`: reason, evidence, a teacher's decision with rationale) can change a grade.
+- New grading types follow the toolchain names: `*Entity`, `*JpaRepository`, `*ApiRestController`, `*Service`, and one `*TableInitializer` per table (sharing `TableSchema`). Add an entity field's column to its table's initializer.
 - Grading and content columns are mapped `updatable = false`: never set them on an entity and `save()`; use the service, whose conditional UPDATEs take the row lock first (`lockForGrading`, a no-op UPDATE, because SQLite has no `SELECT ... FOR UPDATE` and a read-then-write transaction fails with `SQLITE_BUSY`). Don't save a new `GenerationType.AUTO` entity after taking a lock: its id comes from a sequence table on another connection, which on SQLite waits on that lock.
 - Services return a typed `GradingOutcome`; `GradingResponse.statusOf` is the only outcome-to-status mapping, and the pages hold the text (`static/js/grading/common.js` here, `assets/js/submissions/grading.js` in Pages). Tests check both cover every outcome.
-- Tests: `./mvnw test -Dtest='Submission*Test,Grad*Test,AssignmentSubmission*Test'`. `SubmissionGradingPersistenceTest` runs the rules and races on a real SQLite file with the `.env` test accounts hop (student) and niko (teacher).
+- Tests: `./mvnw test -Dtest='Submission*Test,Grad*Test,Assignment*Test,TableSchemaTest'`. `SubmissionGradingPersistenceTest` runs the rules and races on a real SQLite file with the `.env` test accounts hop (student) and niko (teacher).
 
 ## Architecture
 

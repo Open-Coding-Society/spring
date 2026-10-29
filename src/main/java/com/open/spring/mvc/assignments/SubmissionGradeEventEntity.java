@@ -18,8 +18,12 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * An append-only entry in a submission's grading history, written in the same transaction as the
- * change it records. submissionId is not a foreign key, so history outlives a deleted submission.
+ * One row of the assignment_submission_grade_event table: an append-only entry in a submission's
+ * grading history, written in the same transaction as the change it records. submissionId is not
+ * a foreign key, so history outlives a deleted submission.
+ *
+ * The API sends AssignmentSubmissionAPIController's GradeEventView, not this class. The table is
+ * initialized by SubmissionGradeEventTableInitializer (ddl-auto is none).
  */
 @Data
 @NoArgsConstructor
@@ -27,7 +31,7 @@ import lombok.NoArgsConstructor;
 @Entity
 @Table(name = "assignment_submission_grade_event",
         indexes = @Index(name = "idx_grade_event_submission", columnList = "submission_id"))
-public class SubmissionGradeEvent {
+public class SubmissionGradeEventEntity {
 
     public enum Type {
         SUBMITTED,
@@ -35,6 +39,8 @@ public class SubmissionGradeEvent {
         AI_GRADED,
         MANUAL_OVERRIDE_SET,
         MANUAL_OVERRIDE_CLEARED,
+        MANUAL_OVERRIDE_KEPT_BY_REVISION,
+        // Older rows only: revisions released the override before it carried over.
         MANUAL_OVERRIDE_RELEASED_BY_REVISION,
         FINALIZED,
         REVIEW_NO_CHANGE,
@@ -76,8 +82,8 @@ public class SubmissionGradeEvent {
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
-    static SubmissionGradeEvent of(Long submissionId, int revision, Type type, LocalDateTime at) {
-        SubmissionGradeEvent event = new SubmissionGradeEvent();
+    static SubmissionGradeEventEntity of(Long submissionId, int revision, Type type, LocalDateTime at) {
+        SubmissionGradeEventEntity event = new SubmissionGradeEventEntity();
         event.setSubmissionId(submissionId);
         event.setRevision(revision);
         event.setType(type);

@@ -81,7 +81,7 @@ final class AssignmentCreatorFixtures {
                 .thenAnswer(invocation -> Optional.of(SubmissionGradingState.of(submission)));
         }
         when(submissionRepo.applyManualOverride(anyLong(), anyInt(), any(), any(), any())).thenReturn(1);
-        return new SubmissionGradingService(submissionRepo, mock(AssignmentJpaRepository.class), mock(SubmissionGradeEventJPA.class),
+        return new SubmissionGradingService(submissionRepo, mock(AssignmentJpaRepository.class), mock(SubmissionGradeEventJpaRepository.class),
             new AssignmentAuthorizationService());
     }
 }
