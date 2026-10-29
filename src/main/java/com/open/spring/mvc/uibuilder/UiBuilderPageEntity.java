@@ -22,7 +22,7 @@ import lombok.NoArgsConstructor;
  * There is no JPA @Version. Ids are plain numbers (no @ManyToOne): owner and lease holder are person
  * ids, groupId a group id. Times are epoch milliseconds. The table is created by
  * UiBuilderPageTableInitializer (ddl-auto is none). @DynamicUpdate writes only changed columns, so
- * renewing a lease doesn't rewrite three specs.
+ * renewing a lease doesn't rewrite three specs. public_version is set exactly when public_spec is.
  */
 @Entity
 @Table(name = "ui_builder_page")
@@ -118,4 +118,15 @@ public class UiBuilderPageEntity {
     private Long leaseExpiresAt;
 
     private Long deletedAt;
+
+    /**
+     * The gallery cards of the published and the approved copy: their title, description, byline
+     * and picture as a small JSON object, written with the copy, so the gallery never reads specs.
+     * Null for a page published before cards were kept (the gallery then reads that copy once).
+     */
+    @Column(columnDefinition = "text")
+    private String publishedCard;
+
+    @Column(columnDefinition = "text")
+    private String publicCard;
 }

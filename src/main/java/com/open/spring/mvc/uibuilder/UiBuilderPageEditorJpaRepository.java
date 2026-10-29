@@ -14,7 +14,10 @@ public interface UiBuilderPageEditorJpaRepository extends JpaRepository<UiBuilde
 
     List<UiBuilderPageEditorEntity> findByPersonId(Long personId);
 
-    /** One DELETE statement; the page being written stays attached to the session. */
+    /** A plain read (no lock), which copying a group's members diffs against. */
+    List<UiBuilderPageEditorEntity> findByPageId(Long pageId);
+
+    /** One DELETE statement for a page being deleted; the page stays attached to the session. */
     @Modifying(flushAutomatically = true)
     @Query("DELETE FROM UiBuilderPageEditorEntity e WHERE e.pageId = :pageId")
     int deleteByPageId(@Param("pageId") Long pageId);

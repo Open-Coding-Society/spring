@@ -2,7 +2,9 @@ package com.open.spring.mvc.uibuilder;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Pattern;
 
+import org.hibernate.exception.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.Ordered;
@@ -30,6 +32,10 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 public class UiBuilderExceptionHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(UiBuilderExceptionHandler.class);
+    // The slug column's unique key: "slug" (MySQL names it after the column), table-qualified on MySQL 8.
+    private static final Pattern SLUG_CONSTRAINT = Pattern.compile("(?i)(?:ui_builder_page\\.)?slug");
+    private static final Pattern SLUG_MESSAGE = Pattern.compile(
+            "(?i)for key '(?:ui_builder_page\\.)?slug'|ui_builder_page\\.slug\\b|constraint \\[(?:ui_builder_page\\.)?slug\\]");
 
     @ExceptionHandler(UiBuilderException.class)
     public ResponseEntity<Map<String, Object>> refused(UiBuilderException exception) {
@@ -39,11 +45,39 @@ public class UiBuilderExceptionHandler {
         return ResponseEntity.status(exception.getStatus()).cacheControl(CacheControl.noStore()).body(body);
     }
 
-    /** The only unique column a request can collide on is the slug (two pages publishing one address at once). */
+    /**
+     * 409 slug_taken when two pages published one address at once (on MySQL both can pass the check
+     * inside their own row locks, and the UNIQUE slug column stops the second). Any other integrity
+     * error (a value too long for its column, say) is a page Spring couldn't store: 400 invalid_spec.
+     */
     @ExceptionHandler(DataIntegrityViolationException.class)
-    public ResponseEntity<Map<String, Object>> slugTaken(DataIntegrityViolationException exception) {
-        logger.warn("UI Builder write hit a unique constraint: {}", exception.getMostSpecificCause().getMessage());
-        return error(HttpStatus.CONFLICT, "slug_taken");
+    public ResponseEntity<Map<String, Object>> integrityViolation(DataIntegrityViolationException exception) {
+        String cause = exception.getMostSpecificCause().getMessage();
+        if (isSlugConflict(exception)) {
+            logger.warn("UI Builder publish hit the unique slug: {}", cause);
+            return error(HttpStatus.CONFLICT, "slug_taken");
+        }
+        logger.warn("UI Builder write broke a database constraint: {}", cause);
+        return error(HttpStatus.BAD_REQUEST, "invalid_spec");
+    }
+
+    /**
+     * Whether the violated constraint is ui_builder_page's UNIQUE slug: by the constraint name
+     * Hibernate read from the error, or by the database's own message (MySQL "for key
+     * 'ui_builder_page.slug'", SQLite "UNIQUE constraint failed: ui_builder_page.slug").
+     */
+    static boolean isSlugConflict(Throwable exception) {
+        Throwable cause = exception;
+        for (int depth = 0; cause != null && depth < 20; depth++, cause = cause.getCause()) {
+            if (cause instanceof ConstraintViolationException violation && violation.getConstraintName() != null
+                    && SLUG_CONSTRAINT.matcher(violation.getConstraintName()).matches()) {
+                return true;
+            }
+            if (cause.getMessage() != null && SLUG_MESSAGE.matcher(cause.getMessage()).find()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     @ExceptionHandler({HttpMessageNotReadableException.class, JsonProcessingException.class})

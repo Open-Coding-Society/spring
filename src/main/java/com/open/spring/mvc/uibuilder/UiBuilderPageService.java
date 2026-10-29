@@ -86,7 +86,8 @@ import com.open.spring.mvc.uibuilder.UiBuilderSpecRules.PageFields;
  *
  * Publishing copies the draft without its hidden nodes to the published copy, which signed-in
  * members see. A teacher's approval copies the published copy to the public copy, which anonymous
- * visitors see; later publishes don't reach them until a teacher approves again.
+ * visitors see, and only when it is the published version the teacher reviewed; later publishes
+ * don't reach them until a teacher approves again. Each copy also keeps a small gallery card.
  */
 @Service
 public class UiBuilderPageService {
@@ -109,7 +110,7 @@ public class UiBuilderPageService {
         NOT_FOUND, FORBIDDEN, VERSION_CONFLICT,
         INVALID_SPEC, INVALID_GROUP, INVALID_VISIBILITY, INVALID_UNTIL, INVALID_COURSE, INVALID_SCOPE,
         SLUG_REQUIRED, INVALID_SLUG, SLUG_RESERVED, SLUG_TAKEN, SLUG_LOCKED,
-        LOOPBACK_SOURCE, NOT_PUBLISHED, OWN_PAGE
+        LOOPBACK_SOURCE, NOT_PUBLISHED, PUBLISHED_CHANGED, OWN_PAGE, TOO_MANY_PAGES
     }
 
     /**
@@ -253,8 +254,9 @@ public class UiBuilderPageService {
     }
 
     /**
-     * A new draft at version 0, owned by the caller. The row is inserted before any group is looked
-     * up, so the transaction's first statement is a write (see the class comment).
+     * A new draft at version 0, owned by the caller, who may own at most limits.ownerPagesMax pages.
+     * The row is inserted before anything is read (the page count, any group), so the transaction's
+     * first statement is a write (see the class comment).
      */
     @Transactional
     public Result<PageDetail> create(Caller caller, CreateRequest request) {
@@ -285,6 +287,10 @@ public class UiBuilderPageService {
         page.setUpdatedAt(now);
         page.setUpdatedByName(caller.name());
         page = pages.save(page);
+        // Counted after the insert, so the count includes this page.
+        if (pages.countByOwnerPersonIdAndDeletedAtIsNull(caller.personId()) > limits.getOwnerPagesMax()) {
+            return refuse(Outcome.TOO_MANY_PAGES, Map.of("max", limits.getOwnerPagesMax()));
+        }
 
         List<Long> members = List.of();
         if (group.groupId() != null) {
@@ -304,11 +310,14 @@ public class UiBuilderPageService {
         if (page.getGroupId() != null) {
             copyEditors(page, members);
         }
-        recordSave(page, caller, now);
+        recordSave(page, caller, now, false);
         return Result.created(detail(page, caller));
     }
 
-    /** Saves the draft the editor changed from version request.version. */
+    /**
+     * Saves the draft the editor changed from version request.version. request.newRevision keeps
+     * the save in a revision of its own (see recordSave).
+     */
     @Transactional
     public Result<PageDetail> save(Caller caller, long id, SaveRequest request) {
         Optional<UiBuilderPageEntity> found = lockedPage(id, caller);
@@ -370,7 +379,7 @@ public class UiBuilderPageService {
         if (groupChanges) {
             copyEditors(page, members);
         }
-        recordSave(page, caller, now);
+        recordSave(page, caller, now, Boolean.TRUE.equals(request.newRevision()));
         return Result.ok(detail(page, caller));
     }
 
@@ -435,6 +444,7 @@ public class UiBuilderPageService {
         page.setSlug(slug);
         page.setStatus(UiBuilderPageEntity.PUBLISHED);
         page.setPublishedSpec(write(published));
+        page.setPublishedCard(card(rules.pageFieldsOf(published)));
         page.setPublishedVersion(page.getDraftVersion());
         page.setPublishedAt(now);
         page = pages.save(page);
@@ -454,6 +464,7 @@ public class UiBuilderPageService {
         boolean wasPublic = UiBuilderPageEntity.PUBLIC.equals(page.getVisibility());
         page.setStatus(UiBuilderPageEntity.DRAFT);
         page.setPublishedSpec(null);
+        page.setPublishedCard(null);
         page.setPublishedVersion(null);
         page.setPublishedAt(null);
         clearPublic(page);
@@ -466,9 +477,11 @@ public class UiBuilderPageService {
     }
 
     /**
-     * PUBLIC from a teacher approves the current published copy for everyone (until request.until,
-     * if given). PUBLIC from any other editor only asks for it. SIGNED_IN clears the approval and
-     * the request.
+     * PUBLIC from a teacher approves the published copy for everyone (until request.until, if given),
+     * but only the version the teacher reviewed: request.publishedVersion must be the published
+     * version, else PUBLISHED_CHANGED with the current one. A page that isn't published, never or not
+     * since the review, is NOT_PUBLISHED whatever version is named.
+     * PUBLIC from any other editor only asks for it. SIGNED_IN clears the approval and the request.
      */
     @Transactional
     public Result<PageDetail> setVisibility(Caller caller, long id, VisibilityRequest request) {
@@ -489,11 +502,21 @@ public class UiBuilderPageService {
             clearPublic(page);
             logger.warn("UI Builder page {} made members-only by {}", page.getId(), caller.uid());
         } else if (caller.teacher()) {
+            // Before the versions: a page unpublished since the review has no version to compare, and
+            // published_changed would tell the teacher it was published again.
             if (!UiBuilderPageEntity.PUBLISHED.equals(page.getStatus()) || page.getPublishedSpec() == null) {
                 return refuse(Outcome.NOT_PUBLISHED);
             }
+            // A publish between the teacher's review and this click must not reach visitors unseen.
+            if (!Objects.equals(request.publishedVersion(), page.getPublishedVersion())) {
+                Map<String, Object> details = new LinkedHashMap<>();
+                details.put("publishedVersion", page.getPublishedVersion());
+                return refuse(Outcome.PUBLISHED_CHANGED, details);
+            }
             page.setVisibility(UiBuilderPageEntity.PUBLIC);
             page.setPublicSpec(page.getPublishedSpec());
+            page.setPublicCard(page.getPublishedCard() != null ? page.getPublishedCard()
+                    : card(rules.pageFieldsOf(page.getPublishedSpec())));
             page.setPublicVersion(page.getPublishedVersion());
             page.setPublicRequested(false);
             page.setPublicUntil(request.until());
@@ -546,6 +569,7 @@ public class UiBuilderPageService {
         page.setDeletedAt(clock.millis());
         page.setDraftSpec("{}");
         page.setPublishedSpec(null);
+        page.setPublishedCard(null);
         page.setPublishedVersion(null);
         clearPublic(page);
         clearLease(page);
@@ -723,7 +747,9 @@ public class UiBuilderPageService {
     /**
      * Published pages, newest first, at most limits.galleryMax. Signed-in members see every one;
      * anonymous visitors see pages approved for everyone, as approved. The cards' title, description,
-     * byline and picture come from the copy the viewer may open, not from the newer draft.
+     * byline and picture come from the copy the viewer may open, not from the newer draft: from that
+     * copy's card column, so a gallery load never reads specs. visibility is PUBLIC while visitors
+     * can open the page (an approval that ran out is SIGNED_IN).
      */
     @Transactional(readOnly = true)
     public Result<List<GalleryItem>> gallery(Caller viewer, String course) {
@@ -735,18 +761,22 @@ public class UiBuilderPageService {
                     : pages.findByStatusAndCourseAndDeletedAtIsNullOrderByPublishedAtDescIdDesc(
                             UiBuilderPageEntity.PUBLISHED, filter, max);
             return Result.ok(rows.stream()
-                    .map(row -> galleryItem(row.getSlug(), row.getCourse(), row.getPublishedAt(), row.getVisibility(),
-                            row.getPublishedSpec()))
+                    .map(row -> galleryItem(row.getSlug(), row.getCourse(), row.getPublishedAt(),
+                            liveApproval(row.getVisibility(), row.getPublicVersion(), row.getPublicUntil())
+                                    ? UiBuilderPageEntity.PUBLIC : UiBuilderPageEntity.SIGNED_IN,
+                            row.getPublishedCard() != null ? cardFields(row.getPublishedCard())
+                                    : rules.pageFieldsOf(pages.findPublishedSpecById(row.getId()))))
                     .toList());
         }
         return Result.ok(pages.findPublicGallery(filter, clock.millis(), max).stream()
                 .map(row -> galleryItem(row.getSlug(), row.getCourse(), row.getPublishedAt(), UiBuilderPageEntity.PUBLIC,
-                        row.getPublicSpec()))
+                        row.getPublicCard() != null ? cardFields(row.getPublicCard())
+                                : rules.pageFieldsOf(pages.findPublicSpecById(row.getId()))))
                 .toList());
     }
 
-    private GalleryItem galleryItem(String slug, String course, Long publishedAt, String visibility, String spec) {
-        PageFields fields = rules.pageFieldsOf(spec);
+    private static GalleryItem galleryItem(String slug, String course, Long publishedAt, String visibility,
+            PageFields fields) {
         return new GalleryItem(slug, fields.title(), fields.description(), fields.byline(), course, fields.image(),
                 publishedAt, visibility);
     }
@@ -754,7 +784,8 @@ public class UiBuilderPageService {
     /**
      * One published page. Signed-in viewers get the published copy with the owner's and groups'
      * names; anonymous viewers only a page approved for everyone and not expired, as approved, with
-     * group names but no person's name. Anything else is NOT_FOUND.
+     * group names but no person's name. Anything else is NOT_FOUND. visibility is PUBLIC only while
+     * the page is approved for everyone, so a signed-in viewer of an expired approval sees SIGNED_IN.
      */
     @Transactional(readOnly = true)
     public Result<PublishedView> published(Caller viewer, String slug) {
@@ -797,7 +828,7 @@ public class UiBuilderPageService {
         PageFields fields = rules.pageFieldsOf(spec);
         return Result.ok(new PublishedView(page.getSlug(), fields.title(), fields.description(), fields.byline(),
                 page.getCourse(), fields.image(), page.getPublishedAt(), version,
-                viewer == null ? UiBuilderPageEntity.PUBLIC : page.getVisibility(), spec, canEdit,
+                approvedForEveryone(page) ? UiBuilderPageEntity.PUBLIC : UiBuilderPageEntity.SIGNED_IN, spec, canEdit,
                 canEdit ? page.getId() : null, new MadeBy(owner, group), blockGroups,
                 viewer == null ? new Viewer(false, null) : new Viewer(true, viewer.name())));
     }
@@ -855,8 +886,13 @@ public class UiBuilderPageService {
     }
 
     private boolean approvedForEveryone(UiBuilderPageEntity page) {
-        return UiBuilderPageEntity.PUBLIC.equals(page.getVisibility()) && page.getPublicSpec() != null
-                && (page.getPublicUntil() == null || page.getPublicUntil() > clock.millis());
+        return page.getPublicSpec() != null && liveApproval(page.getVisibility(), page.getPublicVersion(), page.getPublicUntil());
+    }
+
+    /** A teacher's approval visitors get now: PUBLIC with an approved version (set with public_spec), not run out. */
+    private boolean liveApproval(String visibility, Long publicVersion, Long publicUntil) {
+        return UiBuilderPageEntity.PUBLIC.equals(visibility) && publicVersion != null
+                && (publicUntil == null || publicUntil > clock.millis());
     }
 
     // ---- access ----
@@ -956,16 +992,31 @@ public class UiBuilderPageService {
                 .toList();
     }
 
-    /** Replaces the page's editors with these people (the owner needs no row). */
+    /**
+     * Makes these people the page's editors (the owner needs no row), deleting and inserting only
+     * the rows that differ. Not delete-then-insert: on MySQL a DELETE ... WHERE page_id that finds
+     * no rows takes a gap lock, and two pages next to each other in the index (two new team pages,
+     * say) would then deadlock on their INSERTs. Deleting by id locks only those rows.
+     */
     private void copyEditors(UiBuilderPageEntity page, List<Long> personIds) {
-        editors.deleteByPageId(page.getId());
-        List<UiBuilderPageEditorEntity> rows = personIds.stream()
-                .distinct()
+        Set<Long> wanted = personIds.stream()
                 .filter(personId -> !personId.equals(page.getOwnerPersonId()))
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        List<UiBuilderPageEditorEntity> current = editors.findByPageId(page.getId());
+        Set<Long> present = current.stream().map(UiBuilderPageEditorEntity::getPersonId).collect(Collectors.toSet());
+        List<Long> removed = current.stream()
+                .filter(row -> !wanted.contains(row.getPersonId()))
+                .map(UiBuilderPageEditorEntity::getId)
+                .toList();
+        List<UiBuilderPageEditorEntity> added = wanted.stream()
+                .filter(personId -> !present.contains(personId))
                 .map(personId -> new UiBuilderPageEditorEntity(null, page.getId(), personId))
                 .toList();
-        if (!rows.isEmpty()) {
-            editors.saveAll(rows);
+        if (!removed.isEmpty()) {
+            editors.deleteAllByIdInBatch(removed);
+        }
+        if (!added.isEmpty()) {
+            editors.saveAll(added);
         }
     }
 
@@ -974,10 +1025,13 @@ public class UiBuilderPageService {
     /**
      * A save goes into the newest revision when that is a SAVE by the same person started less than
      * ten minutes ago; otherwise it starts a new one. So a long session keeps one copy per ten
-     * minutes, and another person's save (or a publish) always starts a new revision.
+     * minutes, and another person's save (or a publish) always starts a new revision. newRevision
+     * always starts one: the editor's "Keep mine" replaces a copy that may be the same person's,
+     * saved from another tab or device into the newest revision, and that copy must stay there.
      */
-    private void recordSave(UiBuilderPageEntity page, Caller caller, long now) {
-        Optional<UiBuilderPageRevisionEntity> newest = revisions.findFirstByPageIdOrderByIdDesc(page.getId());
+    private void recordSave(UiBuilderPageEntity page, Caller caller, long now, boolean newRevision) {
+        Optional<UiBuilderPageRevisionEntity> newest = newRevision ? Optional.empty()
+                : revisions.findFirstByPageIdOrderByIdDesc(page.getId());
         boolean sameRun = newest.isPresent()
                 && UiBuilderPageRevisionEntity.SAVE.equals(newest.get().getKind())
                 && Objects.equals(newest.get().getSavedByPersonId(), caller.personId())
@@ -1087,6 +1141,22 @@ public class UiBuilderPageService {
         }
     }
 
+    /** A stored copy's gallery card: its title, description, byline and picture as a small JSON object. */
+    private String card(PageFields fields) {
+        ObjectNode card = objectMapper.createObjectNode();
+        card.put("title", fields.title());
+        card.put("description", fields.description());
+        card.put("byline", fields.byline());
+        card.put("image", fields.image());
+        return write(card);
+    }
+
+    private PageFields cardFields(String card) {
+        JsonNode node = read(card);
+        return new PageFields(UiBuilderSpecRules.textOf(node.get("title")), UiBuilderSpecRules.textOf(node.get("description")),
+                UiBuilderSpecRules.textOf(node.get("byline")), null, UiBuilderSpecRules.textOf(node.get("image")));
+    }
+
     private Set<String> courseCodes() {
         return courseGroups.getGroupNames().stream()
                 .map(name -> name.toLowerCase(Locale.ROOT))
@@ -1125,13 +1195,14 @@ public class UiBuilderPageService {
                 ? new LeaseView(row.getLeaseName(), row.getLeaseExpiresAt(), Objects.equals(row.getLeasePersonId(), caller.personId()))
                 : null;
         boolean published = UiBuilderPageEntity.PUBLISHED.equals(row.getStatus());
-        boolean publicPending = published && UiBuilderPageEntity.PUBLIC.equals(row.getVisibility())
-                && !Objects.equals(row.getPublicVersion(), row.getPublishedVersion());
+        boolean isPublic = UiBuilderPageEntity.PUBLIC.equals(row.getVisibility());
+        boolean publicPending = published && isPublic && !Objects.equals(row.getPublicVersion(), row.getPublishedVersion());
+        boolean publicExpired = isPublic && row.getPublicUntil() != null && row.getPublicUntil() <= now;
         String groupName = row.getGroupId() == null ? null : groupNames.get(row.getGroupId());
         return new PageSummary(row.getId(), row.getSlug(), row.getTitle(), row.getDescription(), row.getByline(),
                 row.getCourse(), row.getImage(), row.getStatus(), row.getVisibility(),
-                Boolean.TRUE.equals(row.getPublicRequested()), row.getPublicUntil(), publicPending,
-                row.getGroupId(), groupName, ownerNames.get(row.getOwnerPersonId()),
+                Boolean.TRUE.equals(row.getPublicRequested()), row.getPublicUntil(), publicPending, publicExpired,
+                row.getPublicVersion(), row.getGroupId(), groupName, ownerNames.get(row.getOwnerPersonId()),
                 Objects.equals(row.getOwnerPersonId(), caller.personId()),
                 row.getDraftVersion() == null ? 0 : row.getDraftVersion(), row.getUpdatedAt(), row.getUpdatedByName(),
                 row.getPublishedAt(), row.getPublishedVersion(),
@@ -1159,6 +1230,7 @@ public class UiBuilderPageService {
     private static void clearPublic(UiBuilderPageEntity page) {
         page.setVisibility(UiBuilderPageEntity.SIGNED_IN);
         page.setPublicSpec(null);
+        page.setPublicCard(null);
         page.setPublicVersion(null);
         page.setPublicUntil(null);
         page.setPublicRequested(false);

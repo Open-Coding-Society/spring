@@ -21,7 +21,8 @@ class UiBuilderPageTableInitializerTest {
             "id", "slug", "title", "description", "byline", "course", "image", "owner_person_id", "group_id",
             "status", "visibility", "public_requested", "public_until", "draft_version", "draft_spec",
             "published_version", "published_spec", "public_version", "public_spec", "published_at", "created_at",
-            "updated_at", "updated_by_name", "lease_person_id", "lease_name", "lease_expires_at", "deleted_at");
+            "updated_at", "updated_by_name", "lease_person_id", "lease_name", "lease_expires_at", "deleted_at",
+            "published_card", "public_card");
     private static final List<String> REVISION_COLUMNS = List.of(
             "id", "page_id", "page_version", "kind", "spec", "saved_by_person_id", "saved_by_name", "saved_at");
     private static final List<String> EDITOR_COLUMNS = List.of("id", "page_id", "person_id");
@@ -94,6 +95,23 @@ class UiBuilderPageTableInitializerTest {
         DataAccessException editor = assertThrows(DataAccessException.class,
                 () -> jdbcTemplate.update("INSERT INTO ui_builder_page_editor (page_id, person_id) VALUES (1, 8)"));
         assertTrue(editor.getMessage().contains("UNIQUE"), editor.getMessage());
+    }
+
+    @Test
+    void aTableFromBeforeTheGalleryCardsGetsThemAndKeepsItsRows() {
+        String older = String.join(", ", PAGE_COLUMNS.subList(0, PAGE_COLUMNS.indexOf("published_card")).stream()
+                .map(column -> column.equals("id") ? "id INTEGER PRIMARY KEY AUTOINCREMENT" : column)
+                .toList());
+        jdbcTemplate.execute("CREATE TABLE ui_builder_page (" + older + ")");
+        jdbcTemplate.update("INSERT INTO ui_builder_page (title, owner_person_id, draft_spec, created_at, updated_at)"
+                + " VALUES ('Old page', 7, '{}', 1, 1)");
+
+        initializer.initialize();
+        initializer.initialize();
+
+        assertEquals(PAGE_COLUMNS, columns("ui_builder_page"));
+        assertEquals(List.of(Map.of("title", "Old page")), jdbcTemplate.queryForList(
+                "SELECT title FROM ui_builder_page WHERE published_card IS NULL AND public_card IS NULL"));
     }
 
     @Test

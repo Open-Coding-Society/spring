@@ -118,7 +118,8 @@ Content-Type: application/json
   "spec": { "schemaVersion": 1, "kind": "ocs-ui-page", "page": { "title": "Stale tab" }, "sections": [] }
 }
 
-### 8. A spec with a script: 400 invalid_spec with details [{"nodeId": "b-bad2099", "field": "body", "key": "bad_body"}]
+### 7b. "Keep mine" from that tab: save over version 1 with newRevision, so the answer has "version": 2
+# and request 12 lists two SAVE revisions (the copy it replaced stays in Revisions).
 
 PUT {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}
 Origin: {{pagesOrigin}}
@@ -127,12 +128,36 @@ Content-Type: application/json
 
 {
   "version": 1,
+  "newRevision": true,
+  "title": "HTTP test 2099 (kept)",
+  "spec": {
+    "schemaVersion": 1,
+    "kind": "ocs-ui-page",
+    "page": { "title": "HTTP test 2099 (kept)", "description": "Created by api/ui-builder.http", "byline": "", "course": "csp", "width": "contained", "image": "" },
+    "sections": [
+      { "id": "s-http2099", "type": "stack", "settings": {}, "hidden": false,
+        "cells": [ { "blocks": [
+          { "id": "b-http2099", "type": "hero", "settings": { "title": "HTTP test 2099 (kept)" }, "hidden": false }
+        ] } ] }
+    ]
+  }
+}
+
+### 8. A spec with a script: 400 invalid_spec with details [{"nodeId": "b-bad2099", "field": "body", "key": "bad_body"}]
+
+PUT {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "version": 2,
   "spec": { "schemaVersion": 1, "kind": "ocs-ui-page", "page": { "title": "Bad" },
     "sections": [ { "id": "s-bad2099", "type": "stack", "settings": {}, "hidden": false,
       "cells": [ { "blocks": [ { "id": "b-bad2099", "type": "text", "settings": { "body": "<script>alert(1)</script>" }, "hidden": false } ] } ] } ] }
 }
 
-### 9. Publish version 1 with a new slug (each run gets its own): status PUBLISHED
+### 9. Publish version 2 with a new slug (each run gets its own): status PUBLISHED, publishedVersion 2
 
 # @name publishPage
 POST {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/publish
@@ -141,7 +166,7 @@ X-Origin: client
 Content-Type: application/json
 
 {
-  "version": 1,
+  "version": 2,
   "slug": "http-test-2099-{{$timestamp}}"
 }
 
@@ -179,7 +204,8 @@ GET {{baseUrl}}/api/ui-builder/slug-available?slug={{publishPage.response.body.$
 Origin: {{pagesOrigin}}
 X-Origin: client
 
-### 13. Make it public. A teacher or admin approves the published copy for everyone; anyone else only asks.
+### 13. Make it public. A teacher or admin approves the published version they reviewed for everyone,
+# so they send its publishedVersion; anyone else only asks (and publishedVersion is ignored).
 
 POST {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/visibility
 Origin: {{pagesOrigin}}
@@ -187,7 +213,21 @@ X-Origin: client
 Content-Type: application/json
 
 {
-  "visibility": "PUBLIC"
+  "visibility": "PUBLIC",
+  "publishedVersion": {{publishPage.response.body.$.publishedVersion}}
+}
+
+### 13b. A teacher approving a version that isn't the published one (say a publish landed after their
+# review): 409 {"error": "published_changed", "publishedVersion": 2}, and nothing changes for visitors
+
+POST {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/visibility
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "visibility": "PUBLIC",
+  "publishedVersion": 0
 }
 
 ### 14. Back to members only, then unpublish

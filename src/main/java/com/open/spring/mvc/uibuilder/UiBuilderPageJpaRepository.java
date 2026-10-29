@@ -13,7 +13,7 @@ import org.springframework.data.repository.query.Param;
 /**
  * Reads and writes ui_builder_page. Lists use the projections below, so a list of pages never
  * loads their specs (up to three 200 000-character documents per row); the gallery reads only
- * the one copy it shows.
+ * the small card of the copy it shows.
  */
 public interface UiBuilderPageJpaRepository extends JpaRepository<UiBuilderPageEntity, Long> {
 
@@ -43,21 +43,25 @@ public interface UiBuilderPageJpaRepository extends JpaRepository<UiBuilderPageE
         Long getLeaseExpiresAt();
     }
 
-    /** A published page as signed-in members see it in the gallery. */
+    /** A published page as signed-in members see it in the gallery: its card, and whether its approval is live. */
     interface PublishedRow {
+        Long getId();
         String getSlug();
         String getCourse();
         String getVisibility();
+        Long getPublicVersion();
+        Long getPublicUntil();
         Long getPublishedAt();
-        String getPublishedSpec();
+        String getPublishedCard();
     }
 
     /** A page's approved copy, as anonymous visitors see it in the gallery. */
     interface PublicRow {
+        Long getId();
         String getSlug();
         String getCourse();
         Long getPublishedAt();
-        String getPublicSpec();
+        String getPublicCard();
     }
 
     /** A person's or group's id and display name. */
@@ -95,6 +99,8 @@ public interface UiBuilderPageJpaRepository extends JpaRepository<UiBuilderPageE
 
     List<PageRow> findByOwnerPersonIdAndDeletedAtIsNull(Long ownerPersonId);
 
+    long countByOwnerPersonIdAndDeletedAtIsNull(Long ownerPersonId);
+
     List<PageRow> findByIdInAndDeletedAtIsNull(Collection<Long> ids);
 
     List<PageRow> findByCourseAndDeletedAtIsNullOrderByUpdatedAtDescIdDesc(String course, Limit limit);
@@ -106,7 +112,7 @@ public interface UiBuilderPageJpaRepository extends JpaRepository<UiBuilderPageE
     List<PublishedRow> findByStatusAndCourseAndDeletedAtIsNullOrderByPublishedAtDescIdDesc(String status, String course, Limit limit);
 
     /** Pages approved for everyone whose approval hasn't run out, newest first. */
-    @Query("SELECT p.slug AS slug, p.course AS course, p.publishedAt AS publishedAt, p.publicSpec AS publicSpec"
+    @Query("SELECT p.id AS id, p.slug AS slug, p.course AS course, p.publishedAt AS publishedAt, p.publicCard AS publicCard"
             + " FROM UiBuilderPageEntity p WHERE p.status = 'PUBLISHED' AND p.deletedAt IS NULL"
             + " AND p.visibility = 'PUBLIC' AND p.publicSpec IS NOT NULL"
             + " AND (p.publicUntil IS NULL OR p.publicUntil > :now)"
@@ -114,13 +120,21 @@ public interface UiBuilderPageJpaRepository extends JpaRepository<UiBuilderPageE
             + " ORDER BY p.publishedAt DESC, p.id DESC")
     List<PublicRow> findPublicGallery(@Param("course") String course, @Param("now") long now, Limit limit);
 
+    /** One page's published copy, for a gallery card the page doesn't have yet (published before cards were kept). */
+    @Query("SELECT p.publishedSpec FROM UiBuilderPageEntity p WHERE p.id = :id")
+    String findPublishedSpecById(@Param("id") long id);
+
+    /** One page's approved copy, for the same reason. */
+    @Query("SELECT p.publicSpec FROM UiBuilderPageEntity p WHERE p.id = :id")
+    String findPublicSpecById(@Param("id") long id);
+
     /**
      * Approves the current published copy of every published page of a course for everyone, in one
      * statement (the teacher's "make every published page public until ..." before showcase night).
      */
     @Modifying(flushAutomatically = true, clearAutomatically = true)
     @Query("UPDATE UiBuilderPageEntity p SET p.visibility = 'PUBLIC', p.publicSpec = p.publishedSpec,"
-            + " p.publicVersion = p.publishedVersion, p.publicRequested = false, p.publicUntil = :until"
-            + " WHERE p.status = 'PUBLISHED' AND p.course = :course AND p.deletedAt IS NULL")
+            + " p.publicVersion = p.publishedVersion, p.publicCard = p.publishedCard, p.publicRequested = false,"
+            + " p.publicUntil = :until WHERE p.status = 'PUBLISHED' AND p.course = :course AND p.deletedAt IS NULL")
     int approveCourse(@Param("course") String course, @Param("until") Long until);
 }

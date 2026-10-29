@@ -1,5 +1,6 @@
 package com.open.spring.mvc.uibuilder;
 
+import java.sql.ResultSet;
 import java.util.Arrays;
 import java.util.List;
 
@@ -16,8 +17,9 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * Creates the three UI Builder tables and their indexes at startup, because Hibernate runs with
- * ddl-auto=none. Every statement is safe to run again: CREATE TABLE IF NOT EXISTS, and each index
- * in its own try, since MySQL has no CREATE INDEX IF NOT EXISTS. There are no foreign keys (the
+ * ddl-auto=none. Every statement is safe to run again: CREATE TABLE IF NOT EXISTS, each index in
+ * its own try, since MySQL has no CREATE INDEX IF NOT EXISTS, and ALTER TABLE ... ADD COLUMN only
+ * for a column an older table lacks. There are no foreign keys (the
  * entities hold plain ids, like the rest of this app's newer tables). Column names are the ones
  * Hibernate maps the entities' fields to.
  */
@@ -72,7 +74,13 @@ public class UiBuilderPageTableInitializer {
                 dialect.quote("lease_person_id") + " bigint",
                 dialect.quote("lease_name") + " varchar(255)",
                 dialect.quote("lease_expires_at") + " bigint",
-                dialect.quote("deleted_at") + " bigint"));
+                dialect.quote("deleted_at") + " bigint",
+                dialect.quote("published_card") + " text",
+                dialect.quote("public_card") + " text"));
+        // Tables created before the gallery cards were kept get them added (new columns go last,
+        // so a table created now has the same column order as one brought up to date).
+        addColumn(dialect, "ui_builder_page", "published_card", "text");
+        addColumn(dialect, "ui_builder_page", "public_card", "text");
 
         create(dialect, "ui_builder_page_revision", List.of(
                 dialect.idColumn(),
@@ -102,6 +110,26 @@ public class UiBuilderPageTableInitializer {
             jdbcTemplate.execute("CREATE TABLE IF NOT EXISTS " + dialect.quote(table) + " (" + String.join(", ", columns) + ")");
         } catch (DataAccessException e) {
             logger.warn("Could not create the {} table: {}", table, e.getMessage());
+        }
+    }
+
+    /**
+     * ALTER TABLE ... ADD COLUMN, only when the table lacks the column (neither database has ADD
+     * COLUMN IF NOT EXISTS). Asked through JDBC metadata: SQLite reads a double-quoted name that
+     * isn't a column as a string, so selecting it would not fail.
+     */
+    private void addColumn(Dialect dialect, String table, String column, String type) {
+        try {
+            Boolean present = jdbcTemplate.execute((ConnectionCallback<Boolean>) connection -> {
+                try (ResultSet columns = connection.getMetaData().getColumns(connection.getCatalog(), null, table, column)) {
+                    return columns.next();
+                }
+            });
+            if (!Boolean.TRUE.equals(present)) {
+                jdbcTemplate.execute("ALTER TABLE " + dialect.quote(table) + " ADD COLUMN " + dialect.quote(column) + " " + type);
+            }
+        } catch (DataAccessException e) {
+            logger.warn("Could not add the {} column to {}: {}", column, table, e.getMessage());
         }
     }
 

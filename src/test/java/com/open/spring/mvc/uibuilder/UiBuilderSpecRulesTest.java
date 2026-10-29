@@ -44,6 +44,10 @@ class UiBuilderSpecRulesTest {
             Map.entry("javascript-link.json", "bad_url"),
             Map.entry("backslash-site-path.json", "bad_url"),
             Map.entry("userinfo-url.json", "bad_url"),
+            Map.entry("userinfo-empty-host-link.json", "bad_url"),
+            Map.entry("dot-segment-link.json", "bad_url"),
+            Map.entry("dot-segment-encoded-link.json", "bad_url"),
+            Map.entry("https-typo-image.json", "bad_url"),
             Map.entry("on-key.json", "bad_key"),
             Map.entry("html-key.json", "bad_key"),
             Map.entry("depth-13.json", "too_deep"),
@@ -53,7 +57,23 @@ class UiBuilderSpecRulesTest {
             Map.entry("too-many-sections.json", "too_many_sections"),
             Map.entry("snapshot-extra-key.json", "bad_snapshot"),
             Map.entry("body-script.json", "bad_body"),
-            Map.entry("loopback-url-on-publish.json", "loopback_url"));
+            Map.entry("rich-text-quoted-gt.json", "bad_body"),
+            Map.entry("rich-text-tel-link.json", "bad_body"),
+            Map.entry("rich-text-noscript.json", "bad_body"),
+            Map.entry("rich-text-unknown-attribute.json", "bad_body"),
+            Map.entry("rich-text-padded-reference.json", "bad_body"),
+            Map.entry("long-gallery-image.json", "too_long"),
+            Map.entry("blank-long-gallery-image.json", "too_long"),
+            Map.entry("loopback-url-on-publish.json", "loopback_url"),
+            Map.entry("https-loopback-link-on-publish.json", "loopback_url"),
+            Map.entry("https-loopback-image-on-publish.json", "loopback_url"),
+            Map.entry("rich-text-loopback-link-on-publish.json", "loopback_url"),
+            Map.entry("rich-text-padded-loopback-on-publish.json", "loopback_url"),
+            Map.entry("ipv6-mapped-loopback-link-on-publish.json", "loopback_url"));
+
+    /** The shared valid fixtures, beside invalid/ (Pages keeps them in specs/valid/). */
+    private static final Set<String> VALID = Set.of(
+            "all-blocks.json", "rich-text-composer-output.json", "snapshot-mailto-link.json");
 
     private final ObjectMapper json = new ObjectMapper();
     private final UiBuilderLimits limits = new UiBuilderLimits();
@@ -66,6 +86,32 @@ class UiBuilderSpecRulesTest {
 
     private ObjectNode parse(String text) throws IOException {
         return (ObjectNode) json.readTree(text);
+    }
+
+    /** A page whose one section holds these blocks, written as JSON (the shape of the shared fixtures). */
+    private ObjectNode pageWith(String blocksJson) throws IOException {
+        return parse("""
+                {"schemaVersion": 1, "kind": "ocs-ui-page",
+                 "page": {"title": "Inline", "description": "", "byline": "", "course": "csp", "width": "contained", "image": ""},
+                 "sections": [{"id": "s-inline01", "type": "stack", "settings": {}, "hidden": false,
+                   "cells": [{"blocks": [BLOCKS]}]}]}
+                """.replace("BLOCKS", blocksJson));
+    }
+
+    private ObjectNode pageWithButton(String url) throws IOException {
+        return pageWith("""
+                {"id": "b-button01", "type": "buttons", "hidden": false,
+                 "settings": {"links": [{"label": "Sign in", "url": "URL"}], "emphasize_first": true}}
+                """.replace("URL", url));
+    }
+
+    /** A page whose one block is a text block holding this rich text (set as a value, so it needs no JSON escaping). */
+    private ObjectNode pageWithText(String body) throws IOException {
+        ObjectNode page = pageWith("""
+                {"id": "b-text0001", "type": "text", "hidden": false, "settings": {"body": ""}}
+                """);
+        ((ObjectNode) page.at("/sections/0/cells/0/blocks/0/settings")).put("body", body);
+        return page;
     }
 
     // ---- shared fixtures ----
@@ -103,9 +149,23 @@ class UiBuilderSpecRulesTest {
     }
 
     @Test
+    void everyValidFixturePassesAsADraftAndWhenPublished() throws IOException, URISyntaxException {
+        List<String> checked = new ArrayList<>();
+        for (Path file : fixtures("/ui-builder")) {
+            String name = file.getFileName().toString();
+            JsonNode spec = json.readTree(file.toFile());
+
+            assertEquals(List.of(), rules.validate(spec, Mode.DRAFT), name);
+            assertEquals(List.of(), rules.validate(spec, Mode.PUBLISH), name + " published");
+            checked.add(name);
+        }
+        assertEquals(new TreeSet<>(VALID), new TreeSet<>(checked), "every shared valid fixture is here");
+    }
+
+    @Test
     void everyInvalidFixtureFailsForItsOwnRule() throws IOException, URISyntaxException {
         List<String> checked = new ArrayList<>();
-        for (Path file : invalidFixtures()) {
+        for (Path file : fixtures("/ui-builder/invalid")) {
             String name = file.getFileName().toString();
             JsonNode spec = json.readTree(file.toFile());
             String rule = BROKEN_RULE.get(name);
@@ -122,8 +182,9 @@ class UiBuilderSpecRulesTest {
         assertEquals(new TreeSet<>(BROKEN_RULE.keySet()), new TreeSet<>(checked), "one fixture per rule");
     }
 
-    private static List<Path> invalidFixtures() throws IOException, URISyntaxException {
-        URL folder = UiBuilderSpecRulesTest.class.getResource("/ui-builder/invalid");
+    /** The .json files directly in a classpath folder (not those in its subfolders). */
+    private static List<Path> fixtures(String classpathFolder) throws IOException, URISyntaxException {
+        URL folder = UiBuilderSpecRulesTest.class.getResource(classpathFolder);
         try (Stream<Path> files = Files.list(Path.of(folder.toURI()))) {
             return files.filter(file -> file.toString().endsWith(".json")).sorted().toList();
         }
@@ -246,7 +307,7 @@ class UiBuilderSpecRulesTest {
         List<String> refused = List.of("javascript:alert(1)", " JavaScript:alert(1)", "data:text/html,x",
                 "vbscript:x", "file:///etc/passwd", "//evil.example.com", "/\\evil.example.com", "\\\\evil",
                 "https://user:pass@example.com", "https://example.com@evil.example.com", "https:///path",
-                "https://exa mple.com", "https://example.com/‮", "https://example.com/​", "http://example.com",
+                "https://exa mple.com", "https://example.com/\u202e", "https://example.com/\u200b", "http://example.com",
                 "http://localhost.evil.example.com", "http://localhost@evil.example.com", "ftp://example.com",
                 "example.com", "mailto:a@example.com");
         for (String value : refused) {
@@ -254,6 +315,61 @@ class UiBuilderSpecRulesTest {
         }
         assertEquals("bad_url", UiBuilderSpecRules.urlIssue(json.getNodeFactory().numberNode(5), false, Mode.DRAFT));
         assertNull(UiBuilderSpecRules.urlIssue(null, false, Mode.DRAFT));
+    }
+
+    @Test
+    void aSitePathWithADotSegmentIsRefusedEvenEncoded() throws IOException {
+        for (String url : List.of("/..//evil.com/x", "/.%2e//evil.com/x")) {
+            assertEquals(List.of(new Issue("b-button01", "links", "bad_url")), rules.validate(pageWithButton(url), Mode.DRAFT), url);
+        }
+        for (String value : List.of("/%2E%2E//evil.com", "/a/../..//evil.com/x", "/.//evil.com", "/a/.", "/a/%2e?x=1",
+                "/a/..#top")) {
+            assertEquals("bad_url", UiBuilderSpecRules.urlIssue(TextNode.valueOf(value), false, Mode.DRAFT), value);
+        }
+        for (String value : List.of("/search?q=/../x", "/a.b/c", "/.well-known/x", "/...", "/a/b#/../c")) {
+            assertNull(UiBuilderSpecRules.urlIssue(TextNode.valueOf(value), false, Mode.DRAFT), value);
+        }
+        assertEquals(List.of(new Issue("page", "image", "bad_image")), rules.pageFieldIssues(
+                new PageFields("Title", null, null, "", "/..//evil.com/logo.png"), Set.of()));
+    }
+
+    @Test
+    void addressesABrowserWouldRepairAreRefusedAsSpringReadsThem() throws IOException {
+        ObjectNode image = pageWith("""
+                {"id": "b-image01", "type": "image", "hidden": false,
+                 "settings": {"src": "https:/team.github.io/logo.png", "alt": "Our logo"}}
+                """);
+        assertEquals(List.of(new Issue("b-image01", "src", "bad_url")), rules.validate(image, Mode.DRAFT));
+        assertEquals(List.of(new Issue("b-button01", "links", "bad_url")),
+                rules.validate(pageWithButton("https://@example.com/"), Mode.DRAFT));
+        for (String value : List.of("https:team.github.io", "https:///example.com", "http:/localhost:5000/api",
+                "http://127.1:5000/api", "http://localhost./api")) {
+            assertEquals("bad_url", UiBuilderSpecRules.urlIssue(TextNode.valueOf(value), false, Mode.DRAFT), value);
+        }
+    }
+
+    @Test
+    void anApiSavedCopyMayLinkAnItemToAMailtoAddress() throws IOException {
+        String block = """
+                {"id": "b-apidata02", "type": "api_data", "hidden": false,
+                 "settings": {"title": "Our team", "view": "cards", "limit": 12,
+                   "source": {"url": "https://flood-watch.opencodingsociety.com/api/team", "list_path": "people",
+                     "title_path": "name", "link_path": "contact",
+                     "snapshot": {"items": [{"title": "Ada", "link": "LINK", "image": "IMAGE"}],
+                       "fetched_at": 1793206800000, "from_loopback": false}}}}
+                """;
+        ObjectNode mailto = pageWith(block.replace("LINK", "mailto:ada@example.com").replace("IMAGE", ""));
+        assertEquals(List.of(), rules.validate(mailto, Mode.DRAFT));
+        assertEquals(List.of(), rules.validate(mailto, Mode.PUBLISH));
+
+        ObjectNode mailtoImage = pageWith(block.replace("LINK", "").replace("IMAGE", "mailto:ada@example.com"));
+        assertEquals(List.of(new Issue("b-apidata02", "source", "bad_url")), rules.validate(mailtoImage, Mode.DRAFT));
+        ObjectNode notACopy = pageWith("""
+                {"id": "b-card0001", "type": "card", "hidden": false,
+                 "settings": {"title": "Mail", "items": [{"title": "Ada", "link": "mailto:ada@example.com"}]}}
+                """);
+        assertEquals(List.of(new Issue("b-card0001", "items", "bad_url")), rules.validate(notACopy, Mode.DRAFT),
+                "only a saved copy's items");
     }
 
     @Test
@@ -281,6 +397,44 @@ class UiBuilderSpecRulesTest {
     }
 
     @Test
+    void theUnspecifiedAddressAndLoopbackMappedIntoIpv6AreTheComputersOwnToo() throws IOException {
+        // Read as typed, in any case: [::], and 127.x.x.x mapped into IPv6, with its four numbers or in
+        // hex as the URL parser writes it (https://[::ffff:127.0.0.1]/ goes to [::ffff:7f00:1]).
+        String onComputer = UiBuilderSpecRules.LOOPBACK_URL;
+        for (String address : List.of("https://[::]/", "https://[::]:8443/demo", "https://[::ffff:127.0.0.1]:8443/",
+                "https://[::ffff:127.10.20.30]/x", "https://[::ffff:7f00:1]/", "HTTPS://[::FFFF:7F0A:141E]/x")) {
+            ObjectNode page = pageWith("""
+                    {"id": "b-button01", "type": "buttons", "hidden": false,
+                     "settings": {"links": [{"label": "Try our app", "url": "ADDRESS"}], "emphasize_first": true}},
+                    {"id": "b-image01", "type": "image", "hidden": false, "settings": {"src": "ADDRESS", "alt": "Our app"}},
+                    {"id": "b-apidata02", "type": "api_data", "hidden": false,
+                     "settings": {"title": "Our team", "view": "cards", "limit": 12,
+                       "source": {"url": "https://flood-watch.opencodingsociety.com/api/team", "list_path": "people",
+                         "title_path": "name", "link_path": "contact",
+                         "snapshot": {"items": [{"title": "Ada", "link": "ADDRESS", "image": "ADDRESS"}],
+                           "fetched_at": 1793206800000, "from_loopback": false}}}},
+                    {"id": "b-text0001", "type": "text", "hidden": false,
+                     "settings": {"body": "Try <a href=\\"ADDRESS\\">our app</a> before class."}},
+                    {"id": "b-text0002", "type": "text", "hidden": false,
+                     "settings": {"body": "<img src=\\"ADDRESS\\" alt=\\"Our app\\">"}}
+                    """.replace("ADDRESS", address));
+
+            assertEquals(List.of(), rules.validate(page, Mode.DRAFT), address);
+            assertEquals(List.of(new Issue("b-button01", "links", onComputer), new Issue("b-image01", "src", onComputer),
+                    new Issue("b-apidata02", "source", onComputer), new Issue("b-apidata02", "source", onComputer),
+                    new Issue("b-text0001", "body", onComputer), new Issue("b-text0002", "body", onComputer)),
+                    rules.validate(page, Mode.PUBLISH), address + " published");
+            assertEquals(List.of(new Issue("page", "image", "bad_image")),
+                    rules.pageFieldIssues(new PageFields("Our app", null, null, "", address), Set.of()), "gallery picture " + address);
+        }
+        // Other IPv6 addresses are not the student's computer, so a published page may link to them.
+        for (String value : List.of("https://[::2]/", "https://[::ffff:128.0.0.1]/", "https://[::ffff:8f00:1]/",
+                "https://[::fffe:7f00:1]/", "https://[::ffff:7f00:1:2]/", "https://[2001:db8::7f00:1]/")) {
+            assertNull(UiBuilderSpecRules.urlIssue(TextNode.valueOf(value), false, Mode.PUBLISH), value);
+        }
+    }
+
+    @Test
     void richTextThatRunsCodeIsRejected() {
         List<String> unsafe = List.of("<script>alert(1)</script>", "<SCRIPT src=x>", "< script>", "<scr\nipt>",
                 "<iframe src=x>", "<object data=x>", "<embed src=x>", "<a href=\"javascript:alert(1)\">x</a>",
@@ -298,6 +452,140 @@ class UiBuilderSpecRulesTest {
         for (String body : safe) {
             assertFalse(UiBuilderSpecRules.unsafeBody(body), body);
         }
+    }
+
+    @Test
+    void aGreaterThanInsideAQuotedAttributeCantHideTheRestOfATag() throws IOException {
+        ObjectNode page = pageWith("""
+                {"id": "b-text0001", "type": "text", "hidden": false,
+                 "settings": {"body": "<a title=\\">\\" href=\\"javascript:alert(1)\\" onclick=\\"alert(1)\\">x</a>"}}
+                """);
+        assertEquals(List.of(new Issue("b-text0001", "body", "bad_body")), rules.validate(page, Mode.DRAFT));
+
+        List<String> unsafe = List.of("<a x\"y=1 onclick=alert(1)>hi</a>", "<a title='>' href='data:text/html,x'>x</a>",
+                "<a title=\">\" href=\"vbscript:msgbox(1)\">x</a>", "<a title=\">\" href=\" JaVa&#x0A;Script:x\">x</a>",
+                "<math><mi title='>' xlink:href=\"javascript:alert(1)\">x</mi></math>",
+                "<svg><style><img title='>' src=x onerror=alert(1)>",
+                "<noscript><p title=\"</noscript><img title='>' src=x onerror=alert(1)>\"></noscript>",
+                "<b title=\">\"><script>alert(1)</script></b>");
+        for (String body : unsafe) {
+            assertTrue(UiBuilderSpecRules.unsafeBody(body), body);
+        }
+        // What the rich-text editor writes: http links too, with target and rel.
+        List<String> safe = List.of("<a href=\"http://example.com\" target=\"_blank\" rel=\"noopener noreferrer\">x</a>",
+                "<a href=\"mailto:ada@example.com\">Mail Ada</a>", "<a title=\"2 > 1\" href=\"https://example.com\">x</a>",
+                "<span class=\"rt-font-mono\">code</span> and <s>old</s>");
+        for (String body : safe) {
+            assertFalse(UiBuilderSpecRules.unsafeBody(body), body);
+        }
+    }
+
+    @Test
+    void zerosInACharacterReferenceCantHideCodeFromTheCheckOfEachTag() {
+        // Browsers and jsoup read every digit, so "&#0000000115;" is "s" like "&#115;". The check of each
+        // run from < to > reads it so too, also where jsoup keeps a reference as typed: after a "<" that
+        // starts no tag, or in an attribute's name. The editor's page-rules.js makes the same check.
+        for (String s : List.of("&#115;", "&#0000000115;", "&#x73;", "&#x0000073;")) {
+            String body = "<p>Use <" + s + "cript> tags</p>";
+            assertTrue(UiBuilderSpecRules.unsafeBody(body), body);
+        }
+        for (String o : List.of("&#111;", "&#00000000111;", "&#x6f;", "&#x000006F;")) {
+            String body = "<img src=\"/a.png\" alt=\"\" " + o + "nerror=alert(1)>";
+            assertTrue(UiBuilderSpecRules.unsafeBody(body), body);
+        }
+    }
+
+    @Test
+    void richTextMayLinkToTheTeamsComputerInADraftButNotWhenPublished() throws IOException {
+        for (String address : List.of("https://localhost:8443/", "https://127.0.0.1:4100/", "http://localhost:4000/")) {
+            ObjectNode page = pageWithText("Try <a href=\"" + address + "\">our app</a> before class.");
+
+            assertEquals(List.of(), rules.validate(page, Mode.DRAFT), address);
+            assertEquals(List.of(new Issue("b-text0001", "body", UiBuilderSpecRules.LOOPBACK_URL)),
+                    rules.validate(page, Mode.PUBLISH), address);
+        }
+    }
+
+    @Test
+    void aRichTextLinkOrPictureIsOnTheComputerWhenTheSameUrlValueWouldBe() throws IOException {
+        Issue onComputer = new Issue("b-text0001", "body", UiBuilderSpecRules.LOOPBACK_URL);
+        // Each value decoded, then read as typed like a url value.
+        for (String address : List.of("HTTPS://LOCALHOST./x", "https://app.localhost:3000/", "https://[::1]:8443/",
+                "https://0.0.0.0/", " https://127.0.0.2/x ", "HTTP://127.0.0.1:4100/api", "https://localhost&#47;x")) {
+            for (String body : List.of("<a href=\"" + address + "\">x</a>", "<img src=\"" + address + "\" alt=\"x\">")) {
+                assertEquals(List.of(onComputer), rules.validate(pageWithText(body), Mode.PUBLISH), body);
+            }
+        }
+        // Another host, a site path, mail, any other http, and addresses in attributes that aren't links or pictures.
+        for (String body : List.of("<a href=\"https://localhost.example.com/\">x</a>", "<a href=\"/about\">x</a>",
+                "<a href=\"mailto:ada@example.com\">x</a>", "<a href=\"http://example.com/\">x</a>",
+                "<a title=\"https://localhost/\" href=\"https://example.com/\">x</a>",
+                "<a title='href=\"https://localhost/\"' href=\"https://example.com/\">x</a>")) {
+            assertEquals(List.of(), rules.validate(pageWithText(body), Mode.PUBLISH), body);
+        }
+        // One problem per body, as for a url value: code to run comes first.
+        assertEquals(List.of(new Issue("b-text0001", "body", "bad_body")),
+                rules.validate(pageWithText("<a href=\"https://localhost/\" onclick=\"go()\">x</a>"), Mode.PUBLISH));
+    }
+
+    @Test
+    void aLinkToTheComputerCantHideFromEitherReadingOfRichText() throws IOException {
+        // The parsed body finds this href; the run from "<" to the next ">" stops at the quoted one.
+        String quotedGreaterThan = "<a title=\">\" href=\"https://localhost:8443/\">our app</a>";
+        // jsoup drops an <a> inside <select>, but Chrome keeps it and rich-text.js shows it as a link;
+        // parsed on its own, the run from "<" to ">" is a link again.
+        String insideSelect = "<select><a href=\"https://localhost:8443/\">our app</a></select>";
+        for (String body : List.of(quotedGreaterThan, insideSelect)) {
+            ObjectNode page = pageWithText(body);
+
+            assertEquals(List.of(), rules.validate(page, Mode.DRAFT), body);
+            assertEquals(List.of(new Issue("b-text0001", "body", UiBuilderSpecRules.LOOPBACK_URL)),
+                    rules.validate(page, Mode.PUBLISH), body);
+        }
+    }
+
+    @Test
+    void anAddressKeepsTheSeparatorsThatJavaScriptsTrimKeeps() throws IOException {
+        // Java counts U+001C to U+001F as whitespace; JavaScript's trim, which the editor reads addresses
+        // with, keeps them. Kept, one makes a url value bad_url and an href no link at all (the page
+        // renderer shows it as text), so the href isn't a link to the student's computer either.
+        for (char separator = 0x1c; separator <= 0x1f; separator++) {
+            String reference = String.format("&#x%x;", (int) separator);
+            for (String value : List.of(separator + "https://example.com/", "https://example.com/" + separator,
+                    separator + "https://localhost/", "https://localhost/" + separator)) {
+                assertEquals("bad_url", UiBuilderSpecRules.urlIssue(TextNode.valueOf(value), false, Mode.DRAFT), value);
+                assertEquals("bad_url", UiBuilderSpecRules.urlIssue(TextNode.valueOf(value), false, Mode.PUBLISH), value);
+            }
+            for (String href : List.of(separator + "https://localhost/", "https://localhost/" + separator,
+                    reference + "https://localhost/", "https://localhost/" + reference)) {
+                ObjectNode page = pageWithText("Try <a href=\"" + href + "\">our app</a>.");
+                assertEquals(List.of(), rules.validate(page, Mode.PUBLISH), href);
+            }
+        }
+        // A tab or a no-break space at either end is trimmed on both sides, so the link is to the computer.
+        for (String href : List.of("\thttps://localhost/", "https://localhost/&#xa0;")) {
+            ObjectNode page = pageWithText("Try <a href=\"" + href + "\">our app</a>.");
+            assertEquals(List.of(new Issue("b-text0001", "body", UiBuilderSpecRules.LOOPBACK_URL)),
+                    rules.validate(page, Mode.PUBLISH), href);
+        }
+    }
+
+    @Test
+    void aGalleryPictureOverFiveHundredCharactersIsTooLong() throws IOException {
+        String tooLong = "https://cdn.example.com/" + "a".repeat(477);
+        assertEquals(501, tooLong.length());
+        ObjectNode page = pageWith("""
+                {"id": "b-hero0001", "type": "hero", "hidden": false, "settings": {"title": "Long picture"}}
+                """);
+        ((ObjectNode) page.get("page")).put("image", tooLong);
+
+        assertEquals(List.of(new Issue("page", "image", "too_long")), rules.validate(page, Mode.DRAFT));
+        assertEquals(List.of(new Issue("page", "image", "too_long")),
+                rules.pageFieldIssues(rules.pageFieldsOf(page), Set.of("csp")));
+
+        ((ObjectNode) page.get("page")).put("image", tooLong.substring(0, 500));
+        assertEquals(List.of(), rules.validate(page, Mode.DRAFT));
+        assertEquals(List.of(), rules.pageFieldIssues(rules.pageFieldsOf(page), Set.of("csp")));
     }
 
     @Test

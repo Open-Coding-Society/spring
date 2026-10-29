@@ -12,6 +12,10 @@ import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import org.jsoup.Jsoup;
+import org.jsoup.nodes.Attribute;
+import org.jsoup.nodes.Document;
+import org.jsoup.nodes.Element;
 import org.springframework.stereotype.Component;
 
 import com.fasterxml.jackson.core.JsonParser;
@@ -57,6 +61,8 @@ public class UiBuilderSpecRules {
     static final int TITLE_MAX = 120;
     static final int DESCRIPTION_MAX = 300;
     static final int BYLINE_MAX = 120;
+    /** The gallery picture's column is varchar(500): a longer address is refused, never cut. */
+    static final int IMAGE_MAX = 500;
 
     private static final Pattern ID = Pattern.compile("^[sb]-[a-z0-9]{6,12}$");
     private static final Pattern TYPE = Pattern.compile("^[a-z][a-z0-9_]{1,31}$");
@@ -75,14 +81,36 @@ public class UiBuilderSpecRules {
     private static final Pattern HTTP_LOOPBACK = Pattern.compile(
             "^http://(?:localhost|127\\.0\\.0\\.1)(?::\\d{1,5})?(?:[/?#].*)?$", Pattern.CASE_INSENSITIVE);
     private static final Pattern IPV4 = Pattern.compile("^\\d{1,3}(?:\\.\\d{1,3}){3}$");
+    // 127.x.x.x mapped into IPv6, typed with its four numbers or in hex, as the URL parser writes it
+    // (https://[::ffff:127.0.0.1]/ goes to [::ffff:7f00:1]): the student's own computer too.
+    private static final Pattern MAPPED_LOOPBACK = Pattern.compile(
+            "^\\[::ffff:(?:127(?:\\.\\d{1,3}){3}|7f[0-9a-f]{2}:[0-9a-f]{1,4})\\]$");
+    // A "." or ".." path segment, also written with %2e: browsers resolve it away, so "/..//evil.com"
+    // becomes the protocol-relative "//evil.com". Checked in the path only, so "/search?q=/../x" is fine.
+    private static final Pattern DOT_SEGMENT = Pattern.compile("(?:^|/)(?:\\.|%2e){1,2}(?=/|$)", Pattern.CASE_INSENSITIVE);
 
     // A tag runs from < to the next > (or the end of the text, for an unclosed one).
     private static final Pattern TAG = Pattern.compile("<[^>]*>?");
-    private static final Pattern CHAR_REFERENCE = Pattern.compile("&#(?:[xX]([0-9a-fA-F]{1,6})|([0-9]{1,7}));?");
+    // Every digit, as browsers and jsoup read a reference: "&#0000000115;" is "s", not a NUL and the
+    // text "115;". The editor's page-rules.js reads tags with the same pattern.
+    private static final Pattern CHAR_REFERENCE = Pattern.compile("&#(?:[xX]([0-9a-fA-F]+)|([0-9]+));?");
     private static final Pattern NOT_PRINTED = Pattern.compile(
             "[\\s\\u0000-\\u001f\\u007f-\\u009f\\u00a0\\u00ad\\u200b-\\u200f\\u2028-\\u202f\\u2060-\\u2064\\ufeff]+");
     private static final Pattern EVENT_HANDLER = Pattern.compile("[\\s/\"'`]on\\w+\\s*=", Pattern.CASE_INSENSITIVE);
     private static final List<String> FORBIDDEN_IN_TAG = List.of("<script", "<iframe", "<object", "<embed", "javascript:");
+    // Rich text parsed as a browser does (jsoup), so a ">" inside a quoted attribute can't end a tag early.
+    // The last four are parsed differently by browsers than by jsoup (scripting on, SVG and MathML
+    // content), so what is inside them can't be checked; rich text never needs them.
+    private static final Set<String> CODE_ELEMENTS = Set.of("script", "iframe", "object", "embed",
+            "noscript", "template", "svg", "math");
+    private static final Set<String> URL_ATTRIBUTES = Set.of("href", "src", "srcset", "action", "formaction",
+            "xlink:href", "data", "poster", "background", "cite", "codebase");
+    // The schemes the rich-text editor (assets/js/chat/rich-text.js) writes into links.
+    private static final Set<String> RICH_LINK_SCHEMES = Set.of("http", "https", "mailto");
+    // The rich-text attributes that link to (href) or show (src) an address: a published page
+    // can't point them at the student's own computer, the same rule as a url or src value.
+    private static final Set<String> LINK_ATTRIBUTES = Set.of("href", "src");
+    private static final Pattern SCHEME = Pattern.compile("^([a-z][a-z0-9+.-]*):");
 
     private final UiBuilderLimits limits;
     private final ObjectMapper objectMapper;
@@ -129,15 +157,25 @@ public class UiBuilderSpecRules {
             JsonNode value = entry.getValue();
             if ("page".equals(key) && value.isObject()) {
                 walkFields(value, "page", mode, issues);
+                checkPageImageLength(value, issues);
             } else if ("sections".equals(key) && value.isArray()) {
                 for (JsonNode section : value) {
                     walkNode(section, mode, issues);
                 }
             } else {
-                walk(value, key, false, new Where(null, key), mode, issues);
+                walk(value, key, Place.ANYWHERE, new Where(null, key), mode, issues);
             }
         }
         return issues;
+    }
+
+    /** The page's gallery picture is stored in a column of IMAGE_MAX characters (see pageFieldIssues). */
+    private void checkPageImageLength(JsonNode page, List<Issue> issues) {
+        JsonNode image = page.get("image");
+        Issue tooLong = new Issue("page", "image", "too_long");
+        if (image != null && image.isTextual() && image.textValue().length() > IMAGE_MAX && !issues.contains(tooLong)) {
+            issues.add(tooLong);
+        }
     }
 
     /** Sections, cells and blocks: their shape, ids, types and counts. */
@@ -255,7 +293,7 @@ public class UiBuilderSpecRules {
                     walkCell(cell, nodeId, mode, issues);
                 }
             } else {
-                walk(value, key, false, new Where(nodeId, key), mode, issues);
+                walk(value, key, Place.ANYWHERE, new Where(nodeId, key), mode, issues);
             }
         }
     }
@@ -272,7 +310,7 @@ public class UiBuilderSpecRules {
                     walkNode(block, mode, issues);
                 }
             } else {
-                walk(entry.getValue(), entry.getKey(), false, new Where(sectionId, entry.getKey()), mode, issues);
+                walk(entry.getValue(), entry.getKey(), Place.ANYWHERE, new Where(sectionId, entry.getKey()), mode, issues);
             }
         }
     }
@@ -282,7 +320,7 @@ public class UiBuilderSpecRules {
         Iterator<Map.Entry<String, JsonNode>> fields = object.fields();
         while (fields.hasNext()) {
             Map.Entry<String, JsonNode> entry = fields.next();
-            walk(entry.getValue(), entry.getKey(), false, new Where(nodeId, entry.getKey()), mode, issues);
+            walk(entry.getValue(), entry.getKey(), Place.ANYWHERE, new Where(nodeId, entry.getKey()), mode, issues);
         }
     }
 
@@ -294,12 +332,23 @@ public class UiBuilderSpecRules {
     }
 
     /**
+     * What a value sits directly in, for the one rule that depends on it: a mailto: link is allowed
+     * only as the url of a links-list element and as the link of an item in an API block's saved copy
+     * (the editor maps an API's mailto: values to links, as the live block draws them).
+     */
+    private enum Place { ANYWHERE, LINK_ITEM, SNAPSHOT, SNAPSHOT_ITEM }
+
+    private static boolean mailtoAllowed(String key, Place place) {
+        return ("url".equals(key) && place == Place.LINK_ITEM) || ("link".equals(key) && place == Place.SNAPSHOT_ITEM);
+    }
+
+    /**
      * Checks one value by the key that holds it, then everything inside it.
      *
-     * @param key        the property name holding the value; null for an array element
-     * @param inLinkItem the value sits directly in an element of a links list, the one place a mailto: link is allowed
+     * @param key   the property name holding the value; null for an array element
+     * @param place what the value sits directly in (see Place)
      */
-    private void walk(JsonNode value, String key, boolean inLinkItem, Where where, Mode mode, List<Issue> issues) {
+    private void walk(JsonNode value, String key, Place place, Where where, Mode mode, List<Issue> issues) {
         if (key != null) {
             String lower = key.toLowerCase(Locale.ROOT);
             // Event-handler and markup keys, and the one key that rewrites a JavaScript object's prototype.
@@ -307,13 +356,16 @@ public class UiBuilderSpecRules {
                 issues.add(where.issue("bad_key"));
             }
             if (URL_KEYS.contains(key)) {
-                String problem = urlIssue(value, "url".equals(key) && inLinkItem, mode);
+                String problem = urlIssue(value, mailtoAllowed(key, place), mode);
                 if (problem != null) {
                     issues.add(where.issue(problem));
                 }
             }
-            if ("body".equals(key) && !(value.isNull() || (value.isTextual() && !unsafeBody(value.textValue())))) {
-                issues.add(where.issue("bad_body"));
+            if ("body".equals(key)) {
+                String problem = bodyIssue(value, mode);
+                if (problem != null) {
+                    issues.add(where.issue(problem));
+                }
             }
             if (key.endsWith("_path") && !(value.isNull() || (value.isTextual() && PATH.matcher(value.textValue()).matches()))) {
                 issues.add(where.issue("bad_path"));
@@ -326,22 +378,24 @@ public class UiBuilderSpecRules {
             issues.add(where.issue("too_long"));
         }
         if (value.isObject()) {
+            Place inside = "snapshot".equals(key) ? Place.SNAPSHOT : Place.ANYWHERE;
             Iterator<Map.Entry<String, JsonNode>> fields = value.fields();
             while (fields.hasNext()) {
                 Map.Entry<String, JsonNode> entry = fields.next();
-                walk(entry.getValue(), entry.getKey(), false, where, mode, issues);
+                walk(entry.getValue(), entry.getKey(), inside, where, mode, issues);
             }
         } else if (value.isArray()) {
-            boolean linksList = "links".equals(key);
+            Place inElement = "links".equals(key) ? Place.LINK_ITEM
+                    : "items".equals(key) && place == Place.SNAPSHOT ? Place.SNAPSHOT_ITEM : null;
             for (JsonNode element : value) {
-                if (linksList && element.isObject()) {
+                if (inElement != null && element.isObject()) {
                     Iterator<Map.Entry<String, JsonNode>> fields = element.fields();
                     while (fields.hasNext()) {
                         Map.Entry<String, JsonNode> entry = fields.next();
-                        walk(entry.getValue(), entry.getKey(), true, where, mode, issues);
+                        walk(entry.getValue(), entry.getKey(), inElement, where, mode, issues);
                     }
                 } else {
-                    walk(element, null, false, where, mode, issues);
+                    walk(element, null, Place.ANYWHERE, where, mode, issues);
                 }
             }
         }
@@ -351,9 +405,10 @@ public class UiBuilderSpecRules {
 
     /**
      * Why a value can't be a link or image address, or null when it can: "" or an https:// address
-     * without user:password@, a path on this site (one leading slash), mailto: only for a button,
-     * or http://localhost or http://127.0.0.1 while the page is a draft (a backend on the student's
-     * computer). A published page refuses every address on the student's own computer.
+     * without user:password@, a path on this site (one leading slash and no "." or ".." segment,
+     * %2e included), mailto: only where mailtoAllowed says, or http://localhost or http://127.0.0.1
+     * while the page is a draft (a backend on the student's computer). A published page refuses
+     * every address on the student's own computer.
      */
     static String urlIssue(JsonNode value, boolean mailtoAllowed, Mode mode) {
         if (value == null || value.isNull()) {
@@ -370,7 +425,8 @@ public class UiBuilderSpecRules {
             return "bad_url";
         }
         if (url.startsWith("/")) {
-            return url.startsWith("//") ? "bad_url" : null;
+            String path = url.split("[?#]", 2)[0];
+            return url.startsWith("//") || DOT_SEGMENT.matcher(path).find() ? "bad_url" : null;
         }
         String lower = url.toLowerCase(Locale.ROOT);
         if (lower.startsWith("https://")) {
@@ -413,20 +469,35 @@ public class UiBuilderSpecRules {
         return host == null || host.isEmpty() ? null : host.toLowerCase(Locale.ROOT);
     }
 
+    /**
+     * A name for the student's own computer, as typed (hostOf lowercases it) with at most one trailing
+     * dot: localhost, a *.localhost name, 127.x.x.x written as four numbers, 0.0.0.0, [::1], [::], or
+     * 127.x.x.x mapped into IPv6 as [::ffff:127.x.x.x] or in hex as [::ffff:7fxx:y] (x a hex digit, y
+     * one to four). The editor's url-rules.js isLoopbackHost reads the same list.
+     */
     private static boolean isLoopbackHost(String host) {
         String name = host.endsWith(".") ? host.substring(0, host.length() - 1) : host;
-        return name.equals("localhost") || name.endsWith(".localhost") || name.equals("[::1]") || name.equals("0.0.0.0")
-                || (IPV4.matcher(name).matches() && name.startsWith("127."));
+        return name.equals("localhost") || name.endsWith(".localhost") || name.equals("[::1]") || name.equals("[::]")
+                || name.equals("0.0.0.0") || (IPV4.matcher(name).matches() && name.startsWith("127."))
+                || MAPPED_LOOPBACK.matcher(name).matches();
     }
 
     /**
-     * Whether rich text holds something that runs code: a script, iframe, object or embed tag,
-     * a javascript: address, or an on...= event handler. Checked inside each tag after character
-     * references are decoded, and (for tags and addresses) after whitespace and control characters
-     * are removed, since browsers ignore them in "java&#9;script:" and "< script". Text outside tags
-     * is shown as text, so it is not checked.
+     * Whether rich text holds something that runs code, checked twice. First each run from < to the
+     * next >, after character references are decoded and (for tags and addresses) whitespace and
+     * control characters removed, as browsers ignore them in "java&#9;script:": a script, iframe,
+     * object or embed tag, a javascript: address or an on...= handler. Then the body parsed as a
+     * browser parses it (jsoup), so a ">" inside a quoted attribute can't hide the rest of a tag:
+     * see unsafeElements. Text outside tags is shown as text, so it is not checked.
      */
     static boolean unsafeBody(String body) {
+        if (body.indexOf('<') < 0) {
+            return false;
+        }
+        return unsafeTagText(body) || unsafeElements(body);
+    }
+
+    private static boolean unsafeTagText(String body) {
         Matcher tags = TAG.matcher(body);
         while (tags.find()) {
             String tag = decodeCharacterReferences(tags.group());
@@ -444,6 +515,83 @@ public class UiBuilderSpecRules {
         return false;
     }
 
+    /**
+     * The parsed body has a CODE_ELEMENTS element, an attribute named on..., a javascript: or
+     * vbscript: value, or an address attribute whose scheme isn't http, https or mailto (data:, say).
+     * Attribute values are checked as decoded, with the characters browsers drop removed.
+     */
+    private static boolean unsafeElements(String body) {
+        for (Element element : Jsoup.parseBodyFragment(body).getAllElements()) {
+            if (CODE_ELEMENTS.contains(element.normalName())) {
+                return true;
+            }
+            for (Attribute attribute : element.attributes()) {
+                String name = attribute.getKey().toLowerCase(Locale.ROOT);
+                String value = NOT_PRINTED.matcher(attribute.getValue()).replaceAll("").toLowerCase(Locale.ROOT);
+                if (name.startsWith("on") || value.contains("javascript:") || value.contains("vbscript:")) {
+                    return true;
+                }
+                Matcher scheme = SCHEME.matcher(value);
+                if (URL_ATTRIBUTES.contains(name) && scheme.find() && !RICH_LINK_SCHEMES.contains(scheme.group(1))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Why rich text can't be stored, or null: bad_body when it isn't text or runs code (unsafeBody),
+     * else, on publish, loopback_url when it links to or shows something on the student's own
+     * computer (linksToComputer). One problem per body, as urlIssue gives one per address.
+     */
+    private static String bodyIssue(JsonNode value, Mode mode) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isTextual() || unsafeBody(value.textValue())) {
+            return "bad_body";
+        }
+        return mode == Mode.PUBLISH && linksToComputer(value.textValue()) ? LOOPBACK_URL : null;
+    }
+
+    /**
+     * Whether rich text has an href or src that urlIssue would refuse on a published page as
+     * loopback_url: its value, decoded, read as typed like a url value. So a value holding a
+     * character browsers drop (a tab, a soft hyphen) doesn't count: urlIssue calls it bad_url, and
+     * the page renderer doesn't show it as a link either. The body is parsed as a browser parses
+     * it, so a ">" inside a quoted attribute can't hide an href; then each run from < to the next >
+     * is parsed on its own, because jsoup drops an a tag inside a select, which Chrome keeps (and
+     * rich-text.js then shows as a link).
+     */
+    private static boolean linksToComputer(String body) {
+        if (body.indexOf('<') < 0) {
+            return false;
+        }
+        if (hasAddressOnComputer(Jsoup.parseBodyFragment(body))) {
+            return true;
+        }
+        Matcher tags = TAG.matcher(body);
+        while (tags.find()) {
+            if (hasAddressOnComputer(Jsoup.parseBodyFragment(tags.group()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean hasAddressOnComputer(Document parsed) {
+        for (Element element : parsed.getAllElements()) {
+            for (Attribute attribute : element.attributes()) {
+                if (LINK_ATTRIBUTES.contains(attribute.getKey().toLowerCase(Locale.ROOT))
+                        && LOOPBACK_URL.equals(urlIssue(TextNode.valueOf(attribute.getValue()), false, Mode.PUBLISH))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     private static String decodeCharacterReferences(String text) {
         Matcher references = CHAR_REFERENCE.matcher(text);
         StringBuilder decoded = new StringBuilder();
@@ -454,7 +602,7 @@ public class UiBuilderSpecRules {
                         ? Integer.parseInt(references.group(1), 16)
                         : Integer.parseInt(references.group(2));
             } catch (NumberFormatException e) {
-                codePoint = -1;
+                codePoint = -1; // more digits than an int holds: dropped, like a value past U+10FFFF
             }
             String replacement = Character.isValidCodePoint(codePoint) ? Character.toString(codePoint) : "";
             references.appendReplacement(decoded, Matcher.quoteReplacement(replacement));
@@ -526,7 +674,8 @@ public class UiBuilderSpecRules {
     /**
      * Problems with the page settings kept in columns: a one-line title of at most 120 characters,
      * a description up to 300, a byline up to 120, a course that is "" or one of the class groups
-     * in lower case, and a gallery picture that is https:// or a path on this site.
+     * in lower case, and a gallery picture of at most 500 characters that is https:// or a path on
+     * this site.
      */
     public List<Issue> pageFieldIssues(PageFields fields, Set<String> courseCodes) {
         List<Issue> issues = new ArrayList<>();
@@ -548,7 +697,9 @@ public class UiBuilderSpecRules {
         if (!course.isEmpty() && !courseCodes.contains(course)) {
             issues.add(new Issue("page", "course", "bad_course"));
         }
-        if (!imageAllowed(fields.image())) {
+        if (fields.image() != null && fields.image().length() > IMAGE_MAX) {
+            issues.add(new Issue("page", "image", "too_long"));
+        } else if (!imageAllowed(fields.image())) {
             issues.add(new Issue("page", "image", "bad_image"));
         }
         return issues;
@@ -723,7 +874,11 @@ public class UiBuilderSpecRules {
         return node != null && node.isTextual() ? node.textValue() : null;
     }
 
-    /** String.trim as JavaScript does it: also Unicode spaces and the byte order mark. */
+    /**
+     * String.trim as JavaScript does it, so an address reads as in the editor's url-rules.js: spaces and
+     * line breaks (Unicode ones too) and the byte order mark, but not U+001C to U+001F, which Java's
+     * isWhitespace counts. Kept, one of them makes an address bad_url, as in the editor.
+     */
     private static String trimLikeJavaScript(String value) {
         int start = 0;
         int end = value.length();
@@ -737,6 +892,7 @@ public class UiBuilderSpecRules {
     }
 
     private static boolean isJavaScriptSpace(char c) {
-        return Character.isWhitespace(c) || Character.isSpaceChar(c) || c == '﻿';
+        boolean separator = c >= '\u001c' && c <= '\u001f';
+        return (Character.isWhitespace(c) && !separator) || Character.isSpaceChar(c) || c == '\ufeff';
     }
 }

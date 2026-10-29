@@ -29,7 +29,7 @@ import jakarta.servlet.http.HttpServletRequest;
 @RequestMapping("/api/ui-builder/published")
 public class UiBuilderPublishedApiRestController {
 
-    /** DTO for a gallery card. */
+    /** DTO for a gallery card; visibility is PUBLIC while visitors who aren't signed in can open the page, else SIGNED_IN. */
     public record GalleryItem(String slug, String title, String description, String byline, String course,
             String image, Long publishedAt, String visibility) {}
 
@@ -45,7 +45,8 @@ public class UiBuilderPublishedApiRestController {
 
     /**
      * DTO for a published page. spec is the copy this viewer may see; publishedVersion is its version.
-     * pageId is sent only to someone who can edit the page. groups is keyed by group id.
+     * visibility is PUBLIC while the page is approved for everyone (an approval that ran out is
+     * SIGNED_IN). pageId is sent only to someone who can edit the page. groups is keyed by group id.
      */
     public record PublishedView(
             String slug,

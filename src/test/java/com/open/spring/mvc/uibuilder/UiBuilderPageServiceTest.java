@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
@@ -23,6 +25,7 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.authority.AuthorityUtils;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.IntNode;
 import com.fasterxml.jackson.databind.node.NullNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -87,12 +90,12 @@ class UiBuilderPageServiceTest {
 
     private Result<PageDetail> save(Caller caller, PageDetail page, ObjectNode spec) {
         return service.save(caller, page.summary().id(),
-                new SaveRequest(page.summary().version(), spec, null, null, null, null, null, null));
+                new SaveRequest(page.summary().version(), spec, null, null, null, null, null, null, null));
     }
 
     private Result<PageDetail> saveWithGroup(Caller caller, PageDetail page, JsonNode groupId) {
         return service.save(caller, page.summary().id(), new SaveRequest(page.summary().version(),
-                (ObjectNode) page.spec(), null, null, null, null, null, groupId));
+                (ObjectNode) page.spec(), null, null, null, null, null, groupId, null));
     }
 
     private PageDetail publish(Caller caller, PageDetail page, String slug) {
@@ -179,6 +182,44 @@ class UiBuilderPageServiceTest {
     }
 
     @Test
+    void aGalleryPictureOverFiveHundredCharactersIsRefusedNotCut() {
+        String tooLong = "https://lh3.googleusercontent.com/" + "a".repeat(467);
+        String fits = tooLong.substring(0, 500);
+        List<Issue> tooLongIssue = List.of(new Issue("page", "image", "too_long"));
+
+        Result<PageDetail> created = service.create(hop, new CreateRequest(null, store.simplePage("Picture"), null, null,
+                null, tooLong, null));
+        assertEquals(Outcome.INVALID_SPEC, created.outcome());
+        assertEquals(tooLongIssue, created.details().get("details"));
+
+        PageDetail page = create(hop, "Picture");
+        ObjectNode spec = store.simplePage("Picture");
+        ((ObjectNode) spec.get("page")).put("image", tooLong);
+        assertEquals(tooLongIssue, save(hop, page, spec).details().get("details"), "in the spec's page settings too");
+        assertEquals("", store.stored(page.summary().id()).getImage());
+
+        PageDetail saved = service.save(hop, page.summary().id(), new SaveRequest(0L, store.simplePage("Picture"), null,
+                null, null, null, fits, null, null)).body();
+        assertEquals(fits, saved.summary().image());
+        assertEquals(fits, saved.spec().at("/page/image").asText());
+    }
+
+    @Test
+    void anOwnerMayHaveAtMostOwnerPagesMaxPages() {
+        store.limits.setOwnerPagesMax(2);
+        create(hop, "One");
+        create(hop, "Two");
+
+        Result<PageDetail> third = service.create(hop, new CreateRequest(null, store.simplePage("Three"), null, null,
+                null, null, null));
+        assertEquals(Outcome.TOO_MANY_PAGES, third.outcome());
+        assertEquals(Map.of("max", 2), third.details());
+        assertEquals(HttpStatus.CONFLICT, UiBuilderException.statusOf(Outcome.TOO_MANY_PAGES));
+        assertEquals(Outcome.CREATED, service.create(ada, new CreateRequest(null, store.simplePage("Ada's"), null, null,
+                null, null, null)).outcome(), "the limit is per owner");
+    }
+
+    @Test
     void someoneWhoCantEditGetsNotFoundEverywhere() {
         PageDetail page = create(hop, "Private");
         long id = page.summary().id();
@@ -189,7 +230,7 @@ class UiBuilderPageServiceTest {
         assertEquals(Outcome.NOT_FOUND, service.delete(mallory, id).outcome());
         assertEquals(Outcome.NOT_FOUND, service.revisions(mallory, id).outcome());
         assertEquals(Outcome.NOT_FOUND, service.lease(mallory, id, true).outcome());
-        assertEquals(Outcome.NOT_FOUND, service.setVisibility(mallory, id, new VisibilityRequest("SIGNED_IN", null)).outcome());
+        assertEquals(Outcome.NOT_FOUND, service.setVisibility(mallory, id, new VisibilityRequest("SIGNED_IN", null, null)).outcome());
         assertEquals(Outcome.NOT_FOUND, service.open(hop, 999).outcome(), "a page that doesn't exist looks the same");
         assertEquals("Private", store.stored(id).getTitle());
 
@@ -235,7 +276,7 @@ class UiBuilderPageServiceTest {
         assertEquals("Flood Watch v1", store.stored(page.summary().id()).getTitle());
 
         Result<PageDetail> missing = service.save(hop, page.summary().id(),
-                new SaveRequest(null, store.simplePage("x"), null, null, null, null, null, null));
+                new SaveRequest(null, store.simplePage("x"), null, null, null, null, null, null, null));
         assertEquals(Outcome.INVALID_SPEC, missing.outcome());
     }
 
@@ -299,9 +340,24 @@ class UiBuilderPageServiceTest {
     }
 
     @Test
+    void aDraftCanLinkToTheTeamsComputerInRichTextButCantBePublishedThatWay() {
+        ObjectNode spec = store.simplePage("Laptop links");
+        ObjectNode text = ((ArrayNode) spec.at("/sections/0/cells/0/blocks")).addObject();
+        text.put("id", "b-text0001").put("type", "text").put("hidden", false);
+        text.putObject("settings").put("body", "Try <a href=\"https://localhost:8443/\">our app</a> before class.");
+        PageDetail page = create(hop, spec);
+
+        Result<PageDetail> result = service.publish(hop, page.summary().id(), new PublishRequest(0L, "laptop-links"));
+
+        assertEquals(Outcome.LOOPBACK_SOURCE, result.outcome());
+        assertEquals(List.of(new Issue("b-text0001", "body", "loopback_url")), result.details().get("details"));
+        assertEquals("DRAFT", store.stored(page.summary().id()).getStatus());
+    }
+
+    @Test
     void unpublishingTakesThePageDownAndClearsItsPublicApproval() {
         PageDetail page = publish(hop, create(hop, "Flood Watch"), "flood-watch");
-        service.setVisibility(niko, page.summary().id(), new VisibilityRequest("PUBLIC", null));
+        service.setVisibility(niko, page.summary().id(), new VisibilityRequest("PUBLIC", null, 0L));
 
         PageDetail down = service.unpublish(niko, page.summary().id()).body();
 
@@ -322,12 +378,12 @@ class UiBuilderPageServiceTest {
         PageDetail published = publish(hop, page, "flood-watch");
         assertEquals(Outcome.NOT_FOUND, service.published(null, "flood-watch").outcome(), "SIGNED_IN by default");
 
-        PageDetail asked = service.setVisibility(hop, id, new VisibilityRequest("PUBLIC", null)).body();
+        PageDetail asked = service.setVisibility(hop, id, new VisibilityRequest("PUBLIC", null, null)).body();
         assertTrue(asked.summary().publicRequested());
         assertEquals("SIGNED_IN", asked.summary().visibility());
         assertEquals(Outcome.NOT_FOUND, service.published(null, "flood-watch").outcome(), "a request changes nothing for viewers");
 
-        PageDetail approved = service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null)).body();
+        PageDetail approved = service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, 0L)).body();
         assertEquals("PUBLIC", approved.summary().visibility());
         assertFalse(approved.summary().publicRequested());
         assertFalse(approved.summary().publicPending());
@@ -362,12 +418,12 @@ class UiBuilderPageServiceTest {
         long id = page.summary().id();
         long inAnHour = UiBuilderTestStore.NOW.plusSeconds(3600).toEpochMilli();
 
-        assertEquals(Outcome.NOT_PUBLISHED, service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", inAnHour)).outcome());
+        assertEquals(Outcome.NOT_PUBLISHED, service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", inAnHour, null)).outcome());
         publish(hop, page, "flood-watch");
         assertEquals(Outcome.INVALID_UNTIL, service.setVisibility(niko, id,
-                new VisibilityRequest("PUBLIC", UiBuilderTestStore.NOW.toEpochMilli())).outcome());
-        assertEquals(Outcome.INVALID_VISIBILITY, service.setVisibility(niko, id, new VisibilityRequest("EVERYONE", null)).outcome());
-        assertEquals(Outcome.OK, service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", inAnHour)).outcome());
+                new VisibilityRequest("PUBLIC", UiBuilderTestStore.NOW.toEpochMilli(), 0L)).outcome());
+        assertEquals(Outcome.INVALID_VISIBILITY, service.setVisibility(niko, id, new VisibilityRequest("EVERYONE", null, null)).outcome());
+        assertEquals(Outcome.OK, service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", inAnHour, 0L)).outcome());
         assertEquals(Outcome.OK, service.published(null, "flood-watch").outcome());
         assertEquals(1, service.gallery(null, "csp").body().size());
 
@@ -377,9 +433,121 @@ class UiBuilderPageServiceTest {
         assertTrue(service.gallery(null, null).body().isEmpty());
         assertEquals(Outcome.OK, service.published(ada, "flood-watch").outcome(), "members still see it");
 
-        PageDetail membersOnly = service.setVisibility(hop, id, new VisibilityRequest("SIGNED_IN", null)).body();
+        PageDetail membersOnly = service.setVisibility(hop, id, new VisibilityRequest("SIGNED_IN", null, null)).body();
         assertEquals("SIGNED_IN", membersOnly.summary().visibility());
         assertNull(membersOnly.summary().publicUntil());
+    }
+
+    @Test
+    void aTeacherApprovesOnlyThePublishedVersionTheyReviewed() {
+        PageDetail page = publish(hop, create(hop, "Reviewed"), "flood-watch");
+        long id = page.summary().id();
+        long reviewed = page.summary().publishedVersion();
+        PageDetail edited = save(hop, page, store.simplePage("Never reviewed")).body();
+        publish(hop, edited, null); // lands between the teacher's review and the click
+
+        Result<PageDetail> stale = service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, reviewed));
+        assertEquals(Outcome.PUBLISHED_CHANGED, stale.outcome());
+        assertEquals(Map.of("publishedVersion", 1L), stale.details());
+        assertNull(store.stored(id).getPublicSpec(), "nothing reaches visitors");
+        assertEquals(Outcome.NOT_FOUND, service.published(null, "flood-watch").outcome());
+        assertEquals(Outcome.PUBLISHED_CHANGED,
+                service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, null)).outcome(),
+                "a teacher's PUBLIC must name the version");
+        assertTrue(service.setVisibility(hop, id, new VisibilityRequest("PUBLIC", null, 99L)).body().summary()
+                .publicRequested(), "a student's PUBLIC only asks, whatever version it names");
+
+        PageDetail approved = service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, 1L)).body();
+        assertEquals("PUBLIC", approved.summary().visibility());
+        assertEquals(1L, approved.summary().publicVersion());
+        assertEquals("Never reviewed", service.published(null, "flood-watch").body().title());
+        assertEquals(HttpStatus.CONFLICT, UiBuilderException.statusOf(Outcome.PUBLISHED_CHANGED));
+    }
+
+    @Test
+    void approvingAPageUnpublishedSinceTheReviewIsNotPublishedLikeOneNeverPublished() {
+        PageDetail page = publish(hop, create(hop, "Reviewed"), "flood-watch");
+        long id = page.summary().id();
+        long reviewed = page.summary().publishedVersion();
+        assertEquals(Outcome.OK, service.unpublish(hop, id).outcome()); // lands between the teacher's review and the click
+
+        Result<PageDetail> gone = service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, reviewed));
+        assertEquals(Outcome.NOT_PUBLISHED, gone.outcome(), "not published_changed: nothing was published again");
+        assertEquals(Map.of(), gone.details());
+        assertNull(store.stored(id).getPublicSpec(), "nothing reaches visitors");
+        assertEquals(Outcome.NOT_FOUND, service.published(null, "flood-watch").outcome());
+        assertEquals(Outcome.NOT_PUBLISHED, service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, null)).outcome());
+
+        long never = create(hop, "Never published").summary().id();
+        assertEquals(gone, service.setVisibility(niko, never, new VisibilityRequest("PUBLIC", null, reviewed)),
+                "the answer a page never published gets");
+        assertEquals(HttpStatus.CONFLICT, UiBuilderException.statusOf(Outcome.NOT_PUBLISHED));
+    }
+
+    @Test
+    void anApprovalThatRanOutIsMembersOnlyAndTheSummarySaysWhy() {
+        PageDetail page = publish(hop, create(hop, "Flood Watch"), "flood-watch");
+        long id = page.summary().id();
+        long inAnHour = UiBuilderTestStore.NOW.plusSeconds(3600).toEpochMilli();
+        service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", inAnHour, 0L));
+        assertEquals("PUBLIC", service.published(ada, "flood-watch").body().visibility());
+        assertEquals("PUBLIC", service.gallery(ada, null).body().get(0).visibility());
+        PageSummary live = service.open(niko, id).body().summary();
+        assertFalse(live.publicExpired());
+        assertEquals(0L, live.publicVersion());
+
+        store.clock.advance(Duration.ofHours(2));
+
+        assertEquals("SIGNED_IN", service.published(ada, "flood-watch").body().visibility());
+        assertEquals("SIGNED_IN", service.gallery(ada, null).body().get(0).visibility());
+        PageSummary expired = service.list(niko, "class", "csp").body().get(0);
+        assertEquals("PUBLIC", expired.visibility(), "the approval is still on record");
+        assertTrue(expired.publicExpired());
+        assertFalse(expired.publicPending());
+        PageDetail again = service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, 0L)).body();
+        assertFalse(again.summary().publicExpired(), "approved again without taking it down first");
+        assertEquals(Outcome.OK, service.published(null, "flood-watch").outcome());
+    }
+
+    @Test
+    void aNewerPublishOfAnApprovedPageIsPendingWithTheApprovedVersionNamed() {
+        PageDetail page = publish(hop, create(hop, "Flood Watch"), "flood-watch");
+        long id = page.summary().id();
+        service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, 0L));
+        PageDetail republished = publish(hop, save(hop, page, store.simplePage("Flood Watch v2")).body(), null);
+
+        PageSummary summary = republished.summary();
+        assertTrue(summary.publicPending());
+        assertFalse(summary.publicExpired());
+        assertEquals(0L, summary.publicVersion());
+        assertEquals(1L, summary.publishedVersion());
+        assertEquals("PUBLIC", service.published(ada, "flood-watch").body().visibility(), "visitors still get version 0");
+        assertFalse(service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, 1L)).body().summary().publicPending());
+    }
+
+    @Test
+    void galleryCardsComeFromEachCopysCardNotItsSpec() throws Exception {
+        PageDetail page = publish(hop, create(hop, "Flood Watch"), "flood-watch");
+        long id = page.summary().id();
+        service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, 0L));
+        UiBuilderPageEntity row = store.stored(id);
+        assertEquals("Flood Watch", store.json.readTree(row.getPublishedCard()).get("title").asText());
+        assertEquals(row.getPublishedCard(), row.getPublicCard());
+
+        assertEquals("Flood Watch", service.gallery(ada, null).body().get(0).title());
+        assertEquals("Flood Watch", service.gallery(null, null).body().get(0).title());
+        verify(store.pages, never()).findPublishedSpecById(anyLong());
+        verify(store.pages, never()).findPublicSpecById(anyLong());
+
+        // A page published and approved before cards were kept: the gallery reads that copy instead.
+        row.setPublishedCard(null);
+        row.setPublicCard(null);
+        assertEquals("Flood Watch", service.gallery(ada, null).body().get(0).title());
+        assertEquals("Flood Watch", service.gallery(null, null).body().get(0).title());
+
+        service.unpublish(hop, id);
+        assertNull(store.stored(id).getPublishedCard());
+        assertNull(store.stored(id).getPublicCard());
     }
 
     @Test
@@ -455,6 +623,25 @@ class UiBuilderPageServiceTest {
         assertEquals(1, adaPages.size());
         assertFalse(adaPages.get(0).isOwner());
         assertEquals("Hop Student", adaPages.get(0).ownerName());
+    }
+
+    @Test
+    void copyingAGroupsMembersChangesOnlyTheEditorRowsThatDiffer() {
+        PageDetail page = create(hop, "Team page");
+        long id = page.summary().id();
+        saveWithGroup(hop, page, IntNode.valueOf(40));
+        Long adaRow = store.editorRowId(id, 2);
+        verify(store.editors, never()).deleteAllByIdInBatch(anyIterable()); // a page's first team deletes nothing
+
+        store.groupMembers.get(40L).add(3L);
+        service.refreshEditors(hop, id);
+        assertEquals(List.of(2L, 3L), store.editorsOf(id));
+        assertEquals(adaRow, store.editorRowId(id, 2), "ada's row is kept, not deleted and inserted again");
+
+        store.groupMembers.get(40L).remove(2L);
+        service.refreshEditors(hop, id);
+        assertEquals(List.of(3L), store.editorsOf(id));
+        verify(store.editors, never()).deleteByPageId(anyLong());
     }
 
     @Test
@@ -578,6 +765,29 @@ class UiBuilderPageServiceTest {
         assertEquals(List.of("Ada Student", "Hop Student", "Hop Student"),
                 store.revisionsOf(id).stream().map(UiBuilderPageRevisionEntity::getSavedByName).toList(),
                 "another person's save starts a revision, so theirs is kept");
+    }
+
+    @Test
+    void keepMineAfterASamePersonConflictKeepsBothCopiesInRevisions() {
+        PageDetail page = create(hop, "v0");
+        long id = page.summary().id();
+        store.clock.advance(Duration.ofMinutes(1));
+        save(hop, page, store.simplePage("Tab A")); // goes into the create's revision: same person, same run
+        Result<PageDetail> tabB = save(hop, page, store.simplePage("Tab B")); // the other tab, still at version 0
+        assertEquals(Outcome.VERSION_CONFLICT, tabB.outcome());
+
+        long current = (Long) tabB.details().get("currentVersion");
+        PageDetail kept = service.save(hop, id, new SaveRequest(current, store.simplePage("Tab B"), null, null, null,
+                null, null, null, true)).body();
+
+        List<UiBuilderPageRevisionEntity> rows = store.revisionsOf(id);
+        assertEquals(List.of(2L, 1L), rows.stream().map(UiBuilderPageRevisionEntity::getPageVersion).toList());
+        assertTrue(rows.get(0).getSpec().contains("\"Tab B\""), "keep mine is a revision of its own");
+        assertTrue(rows.get(1).getSpec().contains("\"Tab A\""), "theirs stays in Revisions");
+
+        save(hop, kept, store.simplePage("Tab B, later"));
+        assertEquals(2, store.revisionsOf(id).size(), "that tab's next saves go into its own revision");
+        assertTrue(store.revisionsOf(id).get(1).getSpec().contains("\"Tab A\""));
     }
 
     @Test

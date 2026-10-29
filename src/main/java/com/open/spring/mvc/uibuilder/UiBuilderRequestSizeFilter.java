@@ -11,6 +11,7 @@ import org.springframework.http.MediaType;
 import org.springframework.lang.NonNull;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
+import org.springframework.web.util.UrlPathHelper;
 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ReadListener;
@@ -33,9 +34,18 @@ public class UiBuilderRequestSizeFilter extends OncePerRequestFilter {
     static final int MAX_BODY_BYTES = 1_000_000;
     private static final String PREFIX = "/api/ui-builder";
 
+    /**
+     * Compares the decoded path, as Spring MVC matches it: "/api/ui%2Dbuilder/pages" reaches the same
+     * controller as "/api/ui-builder/pages", so it gets the same limit.
+     */
     @Override
     protected boolean shouldNotFilter(@NonNull HttpServletRequest request) {
-        String path = request.getRequestURI().substring(request.getContextPath().length());
+        String path;
+        try {
+            path = UrlPathHelper.defaultInstance.getPathWithinApplication(request);
+        } catch (IllegalArgumentException undecodable) {
+            return false; // a path that can't be decoded gets the limit too
+        }
         return !(path.equals(PREFIX) || path.startsWith(PREFIX + "/"));
     }
 

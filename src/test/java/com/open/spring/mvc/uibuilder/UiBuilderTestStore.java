@@ -185,6 +185,15 @@ class UiBuilderTestStore {
                 .toList();
     }
 
+    /** The id of a page's editor row for this person, so a test can tell a kept row from a new one. */
+    Long editorRowId(long pageId, long personId) {
+        return editorRows.values().stream()
+                .filter(row -> row.getPageId().equals(pageId) && row.getPersonId().equals(personId))
+                .map(UiBuilderPageEditorEntity::getId)
+                .findFirst()
+                .orElse(null);
+    }
+
     // ---- stubs ----
 
     private void stubPages() {
@@ -221,6 +230,13 @@ class UiBuilderTestStore {
                 .map(UiBuilderTestStore::copy));
         when(pages.findByOwnerPersonIdAndDeletedAtIsNull(anyLong())).thenAnswer(call -> pageRows(
                 row -> row.getOwnerPersonId().equals(call.getArgument(0)) && row.getDeletedAt() == null, null, PageRow.class));
+        when(pages.countByOwnerPersonIdAndDeletedAtIsNull(anyLong())).thenAnswer(call -> pageRows.values().stream()
+                .filter(row -> row.getOwnerPersonId().equals(call.getArgument(0)) && row.getDeletedAt() == null)
+                .count());
+        when(pages.findPublishedSpecById(anyLong())).thenAnswer(call -> Optional
+                .ofNullable(pageRows.get(call.<Long>getArgument(0))).map(UiBuilderPageEntity::getPublishedSpec).orElse(null));
+        when(pages.findPublicSpecById(anyLong())).thenAnswer(call -> Optional
+                .ofNullable(pageRows.get(call.<Long>getArgument(0))).map(UiBuilderPageEntity::getPublicSpec).orElse(null));
         when(pages.findByIdInAndDeletedAtIsNull(anyCollection())).thenAnswer(call -> pageRows(
                 row -> call.<Collection<Long>>getArgument(0).contains(row.getId()) && row.getDeletedAt() == null, null,
                 PageRow.class));
@@ -251,6 +267,7 @@ class UiBuilderTestStore {
                         && row.getDeletedAt() == null) {
                     row.setVisibility(UiBuilderPageEntity.PUBLIC);
                     row.setPublicSpec(row.getPublishedSpec());
+                    row.setPublicCard(row.getPublishedCard());
                     row.setPublicVersion(row.getPublishedVersion());
                     row.setPublicRequested(false);
                     row.setPublicUntil(call.getArgument(1));
@@ -302,6 +319,14 @@ class UiBuilderTestStore {
                 .filter(row -> row.getPersonId().equals(call.getArgument(0)))
                 .map(row -> new UiBuilderPageEditorEntity(row.getId(), row.getPageId(), row.getPersonId()))
                 .toList());
+        when(editors.findByPageId(anyLong())).thenAnswer(call -> editorRows.values().stream()
+                .filter(row -> row.getPageId().equals(call.getArgument(0)))
+                .map(row -> new UiBuilderPageEditorEntity(row.getId(), row.getPageId(), row.getPersonId()))
+                .toList());
+        doAnswer(call -> {
+            call.<Iterable<Long>>getArgument(0).forEach(editorRows::remove);
+            return null;
+        }).when(editors).deleteAllByIdInBatch(anyIterable());
         when(editors.deleteByPageId(anyLong())).thenAnswer(call -> {
             List<Long> ids = editorRows.values().stream()
                     .filter(row -> row.getPageId().equals(call.getArgument(0)))

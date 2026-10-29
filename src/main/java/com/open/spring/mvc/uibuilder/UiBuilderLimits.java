@@ -31,6 +31,8 @@ public class UiBuilderLimits {
     private int apiSnapshotChars = 64_000;
     private int galleryMax = 200;
     private int classPagesMax = 500;
+    /** Pages one person may own at once (deleted pages don't count); Spring's own limit, not the registry's. */
+    private int ownerPagesMax = 100;
     private String slugPattern = "^[a-z0-9](?:[a-z0-9-]{1,62}[a-z0-9])$";
     private List<String> reservedSlugs = new ArrayList<>(List.of(
             "admin", "login", "logout", "help", "teacher", "teachers", "staff", "official",

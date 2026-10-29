@@ -44,16 +44,21 @@ public class UiBuilderPageApiRestController {
 
     /**
      * DTO for PUT /pages/{id}. version is the draft version the editor started from. Page fields
-     * left out keep their values; "groupId": null removes the page's group.
+     * left out keep their values; "groupId": null removes the page's group. newRevision true (the
+     * editor's "Keep mine" after a conflict) keeps this save in a revision of its own, so the copy
+     * it replaces stays in Revisions even when the same person saved it minutes ago.
      */
     public record SaveRequest(Long version, JsonNode spec, String title, String description, String byline,
-            String course, String image, JsonNode groupId) {}
+            String course, String image, JsonNode groupId, Boolean newRevision) {}
 
     /** DTO for POST /pages/{id}/publish; slug is needed on the first publish only. */
     public record PublishRequest(Long version, String slug) {}
 
-    /** DTO for POST /pages/{id}/visibility: SIGNED_IN or PUBLIC, and when a teacher's approval runs out. */
-    public record VisibilityRequest(String visibility, Long until) {}
+    /**
+     * DTO for POST /pages/{id}/visibility: SIGNED_IN or PUBLIC, and when a teacher's approval runs out.
+     * A teacher's PUBLIC also sends publishedVersion, the published version they reviewed.
+     */
+    public record VisibilityRequest(String visibility, Long until, Long publishedVersion) {}
 
     /** DTO for POST /pages/visibility/bulk. */
     public record BulkVisibilityRequest(String course, Long until) {}
@@ -65,8 +70,11 @@ public class UiBuilderPageApiRestController {
     public record LeaseView(String holderName, long expiresAt, boolean mine) {}
 
     /**
-     * DTO for a page in a list. version is the draft version to send back when saving;
-     * publicPending means the page is public but its newest publish isn't the approved one yet.
+     * DTO for a page in a list. version is the draft version to send back when saving. visibility
+     * is PUBLIC from a teacher's approval until it is withdrawn; publicVersion is the published
+     * version approved. publicPending means a newer publish isn't the approved one (visitors still
+     * get the approved copy), and publicExpired that the approval's until has passed (visitors get
+     * nothing), so either way a teacher can approve again.
      */
     public record PageSummary(
             Long id,
@@ -81,6 +89,8 @@ public class UiBuilderPageApiRestController {
             boolean publicRequested,
             Long publicUntil,
             boolean publicPending,
+            boolean publicExpired,
+            Long publicVersion,
             Long groupId,
             String groupName,
             String ownerName,
@@ -129,7 +139,7 @@ public class UiBuilderPageApiRestController {
         return UiBuilderException.respond(service.list(caller, scope, course));
     }
 
-    /** POST /pages - a new draft; 201 with slug null (it is chosen on the first publish). */
+    /** POST /pages - a new draft; 201 with slug null (it is chosen on the first publish), or 409 too_many_pages. */
     @PostMapping("/pages")
     public ResponseEntity<PageDetail> create(@RequestBody CreateRequest body, Authentication authentication,
             HttpServletRequest request) {
@@ -173,6 +183,7 @@ public class UiBuilderPageApiRestController {
         return UiBuilderException.respond(service.unpublish(caller, id));
     }
 
+    /** POST /pages/{id}/visibility - 409 published_changed when a teacher's publishedVersion isn't the published one. */
     @PostMapping("/pages/{id:\\d+}/visibility")
     public ResponseEntity<PageDetail> visibility(@PathVariable long id, @RequestBody VisibilityRequest body,
             Authentication authentication, HttpServletRequest request) {

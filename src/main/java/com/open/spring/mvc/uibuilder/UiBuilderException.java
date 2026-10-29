@@ -57,7 +57,7 @@ public class UiBuilderException extends RuntimeException {
                     SLUG_REQUIRED, INVALID_SLUG, SLUG_RESERVED, LOOPBACK_SOURCE, OWN_PAGE -> HttpStatus.BAD_REQUEST;
             case FORBIDDEN -> HttpStatus.FORBIDDEN;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
-            case VERSION_CONFLICT, SLUG_TAKEN, SLUG_LOCKED, NOT_PUBLISHED -> HttpStatus.CONFLICT;
+            case VERSION_CONFLICT, SLUG_TAKEN, SLUG_LOCKED, NOT_PUBLISHED, PUBLISHED_CHANGED, TOO_MANY_PAGES -> HttpStatus.CONFLICT;
         };
     }
 

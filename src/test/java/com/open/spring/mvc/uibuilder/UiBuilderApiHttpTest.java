@@ -12,12 +12,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import java.sql.SQLException;
+import java.sql.SQLIntegrityConstraintViolationException;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
+import org.hibernate.exception.ConstraintViolationException;
+import org.hibernate.exception.DataException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.json.Jackson2ObjectMapperBuilder;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
 import org.springframework.mock.web.MockFilterChain;
@@ -134,9 +142,9 @@ class UiBuilderApiHttpTest {
         List<String> fields = new ArrayList<>();
         created.fieldNames().forEachRemaining(fields::add);
         assertEquals(List.of("id", "slug", "title", "description", "byline", "course", "image", "status", "visibility",
-                "publicRequested", "publicUntil", "publicPending", "groupId", "groupName", "ownerName", "isOwner",
-                "version", "updatedAt", "updatedByName", "publishedAt", "publishedVersion", "hasUnpublishedChanges",
-                "lease", "spec"), fields);
+                "publicRequested", "publicUntil", "publicPending", "publicExpired", "publicVersion", "groupId",
+                "groupName", "ownerName", "isOwner", "version", "updatedAt", "updatedByName", "publishedAt",
+                "publishedVersion", "hasUnpublishedChanges", "lease", "spec"), fields);
         assertTrue(created.get("slug").isNull());
         assertTrue(created.get("isOwner").asBoolean());
         assertTrue(created.get("spec").isObject());
@@ -220,9 +228,11 @@ class UiBuilderApiHttpTest {
         mvc.perform(fromPages(post("/api/ui-builder/pages/" + id + "/publish")).principal(hop)
                 .content("{\"version\": 0, \"slug\": \"flood-watch\"}")).andExpect(status().isOk());
         mvc.perform(fromPages(post("/api/ui-builder/pages/" + id + "/visibility")).principal(niko)
-                        .content("{\"visibility\": \"PUBLIC\"}"))
+                        .content("{\"visibility\": \"PUBLIC\", \"publishedVersion\": 0}"))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.visibility").value("PUBLIC"));
+                .andExpect(jsonPath("$.visibility").value("PUBLIC"))
+                .andExpect(jsonPath("$.publicVersion").value(0))
+                .andExpect(jsonPath("$.publicExpired").value(false));
 
         String body = mvc.perform(get("/api/ui-builder/published/flood-watch"))
                 .andExpect(status().isOk())
@@ -236,6 +246,97 @@ class UiBuilderApiHttpTest {
         mvc.perform(get("/api/ui-builder/published").param("course", "csp"))
                 .andExpect(jsonPath("$[0].title").value("Flood Watch"))
                 .andExpect(jsonPath("$[0].visibility").value("PUBLIC"));
+    }
+
+    @Test
+    void aTeachersApprovalOfAnotherPublishedVersionIsPublishedChanged() throws Exception {
+        long id = createPage(hop, "Flood Watch").get("id").asLong();
+        mvc.perform(fromPages(post("/api/ui-builder/pages/" + id + "/publish")).principal(hop)
+                .content("{\"version\": 0, \"slug\": \"flood-watch\"}")).andExpect(status().isOk());
+        ObjectNode save = json.createObjectNode();
+        save.put("version", 0);
+        save.set("spec", store.simplePage("Flood Watch v1"));
+        mvc.perform(fromPages(put("/api/ui-builder/pages/" + id)).principal(hop).content(json.writeValueAsString(save)))
+                .andExpect(status().isOk());
+        mvc.perform(fromPages(post("/api/ui-builder/pages/" + id + "/publish")).principal(hop).content("{\"version\": 1}"))
+                .andExpect(jsonPath("$.publishedVersion").value(1));
+
+        mvc.perform(fromPages(post("/api/ui-builder/pages/" + id + "/visibility")).principal(niko)
+                        .content("{\"visibility\": \"PUBLIC\", \"publishedVersion\": 0}"))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\": \"published_changed\", \"publishedVersion\": 1}", true));
+        mvc.perform(fromPages(post("/api/ui-builder/pages/" + id + "/unpublish")).principal(hop)).andExpect(status().isOk());
+        // Unpublished since the review: not published, as a page never published is, not published again.
+        mvc.perform(fromPages(post("/api/ui-builder/pages/" + id + "/visibility")).principal(niko)
+                        .content("{\"visibility\": \"PUBLIC\", \"publishedVersion\": 1}"))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\": \"not_published\"}", true));
+    }
+
+    @Test
+    void aSaveCanAskForARevisionOfItsOwn() throws Exception {
+        long id = createPage(hop, "Flood Watch").get("id").asLong();
+        ObjectNode save = json.createObjectNode();
+        save.put("version", 0);
+        save.set("spec", store.simplePage("Keep mine"));
+        save.put("newRevision", true);
+
+        mvc.perform(fromPages(put("/api/ui-builder/pages/" + id)).principal(hop).content(json.writeValueAsString(save)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.version").value(1));
+        assertEquals(2, store.revisionsOf(id).size(), "not merged into the create's revision");
+    }
+
+    @Test
+    void aLongGalleryPictureIsAnInvalidSpecOnItsField() throws Exception {
+        long id = createPage(hop, "Flood Watch").get("id").asLong();
+        ObjectNode save = json.createObjectNode();
+        save.put("version", 0);
+        save.set("spec", store.simplePage("Flood Watch"));
+        save.put("image", "https://cdn.example.com/" + "a".repeat(480));
+
+        mvc.perform(fromPages(put("/api/ui-builder/pages/" + id)).principal(hop).content(json.writeValueAsString(save)))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().json("{\"error\": \"invalid_spec\","
+                        + " \"details\": [{\"nodeId\": \"page\", \"field\": \"image\", \"key\": \"too_long\"}]}", true));
+    }
+
+    @Test
+    void aSecondPageOverTheOwnersLimitIsTooManyPages() throws Exception {
+        store.limits.setOwnerPagesMax(1);
+        createPage(hop, "One");
+
+        mvc.perform(fromPages(post("/api/ui-builder/pages")).principal(hop).content(createBody("Two")))
+                .andExpect(status().isConflict())
+                .andExpect(content().json("{\"error\": \"too_many_pages\", \"max\": 1}", true));
+    }
+
+    @Test
+    void onlyTheSlugsUniqueKeyIsSlugTaken() {
+        UiBuilderExceptionHandler handler = new UiBuilderExceptionHandler();
+        DataIntegrityViolationException mySqlSlug = new DataIntegrityViolationException("could not execute statement",
+                new ConstraintViolationException("Duplicate entry 'flood-watch' for key 'ui_builder_page.slug'",
+                        new SQLIntegrityConstraintViolationException("Duplicate entry 'flood-watch' for key 'ui_builder_page.slug'"),
+                        "slug"));
+        DataIntegrityViolationException sqliteSlug = new DataIntegrityViolationException(
+                "[SQLITE_CONSTRAINT_UNIQUE] A UNIQUE constraint failed (UNIQUE constraint failed: ui_builder_page.slug)");
+        DataIntegrityViolationException tooLong = new DataIntegrityViolationException("could not execute statement",
+                new DataException("Data too long for column 'image' at row 1",
+                        new SQLException("Data truncation: Data too long for column 'image' at row 1", "22001", 1406)));
+        DataIntegrityViolationException editor = new DataIntegrityViolationException("could not execute statement",
+                new ConstraintViolationException("Duplicate entry '7-2' for key 'ui_builder_page_editor.page_id'",
+                        new SQLIntegrityConstraintViolationException("Duplicate entry '7-2'"), "page_id"));
+
+        for (DataIntegrityViolationException slug : List.of(mySqlSlug, sqliteSlug)) {
+            ResponseEntity<Map<String, Object>> answer = handler.integrityViolation(slug);
+            assertEquals(HttpStatus.CONFLICT, answer.getStatusCode());
+            assertEquals(Map.of("error", "slug_taken"), answer.getBody());
+        }
+        for (DataIntegrityViolationException other : List.of(tooLong, editor)) {
+            ResponseEntity<Map<String, Object>> answer = handler.integrityViolation(other);
+            assertEquals(HttpStatus.BAD_REQUEST, answer.getStatusCode());
+            assertEquals(Map.of("error", "invalid_spec"), answer.getBody());
+        }
     }
 
     @Test
@@ -361,6 +462,17 @@ class UiBuilderApiHttpTest {
 
         MockHttpServletResponse elsewhere = run(filter, request("/api/files/upload", new byte[16], 2_000_000L));
         assertEquals(200, elsewhere.getStatus(), "other routes keep their own limits");
+    }
+
+    @Test
+    void aPercentEncodedPathToTheSameRoutesGetsTheSameLimit() throws Exception {
+        UiBuilderRequestSizeFilter filter = new UiBuilderRequestSizeFilter();
+
+        for (String uri : List.of("/api/ui%2Dbuilder/pages", "/api/%75i-builder/pages", "/api/ui-builder%2Fpages")) {
+            assertEquals(413, run(filter, request(uri, new byte[16], 1_000_001L)).getStatus(), uri);
+            assertEquals(413, run(filter, request(uri, new byte[1_000_001], -1)).getStatus(), uri + " chunked");
+        }
+        assertEquals(200, run(filter, request("/api/files%2Dupload", new byte[16], 2_000_000L)).getStatus());
     }
 
     private static MockHttpServletRequest request(String uri, byte[] body, long contentLength) {

@@ -119,6 +119,7 @@ class UiBuilderPersistenceTest {
     @Autowired private UiBuilderPageService service;
     @Autowired private UiBuilderPageTableInitializer initializer;
     @Autowired private UiBuilderPageJpaRepository pages;
+    @Autowired private UiBuilderLimits limits;
     @Autowired private JdbcTemplate jdbc;
 
     private final ObjectMapper json = new ObjectMapper();
@@ -191,7 +192,7 @@ class UiBuilderPersistenceTest {
                 .map(UiBuilderPageApiRestController.GroupOption::name).toList());
 
         PageDetail saved = service.save(ada, id, new SaveRequest(0L, spec("Flood Watch v1"), null, null, null, null,
-                null, null)).body();
+                null, null, null)).body();
         assertEquals(1, saved.summary().version());
         assertEquals(Outcome.OK, service.lease(ada, id, false).outcome());
         assertEquals("Ada Student", service.open(hop, id).body().summary().lease().holderName());
@@ -208,7 +209,7 @@ class UiBuilderPersistenceTest {
         assertEquals(1, service.approveCourse(niko, new BulkVisibilityRequest("csp", until)).body().updated());
         assertEquals(List.of("flood-watch"), service.gallery(null, "csp").body().stream().map(GalleryItem::slug).toList());
         assertEquals("Flood Watch v1", service.published(null, "flood-watch").body().title());
-        assertEquals(Outcome.OK, service.setVisibility(hop, id, new VisibilityRequest("SIGNED_IN", null)).outcome());
+        assertEquals(Outcome.OK, service.setVisibility(hop, id, new VisibilityRequest("SIGNED_IN", null, null)).outcome());
         assertTrue(service.gallery(null, null).body().isEmpty());
 
         long first = service.revisions(hop, id).body().get(service.revisions(hop, id).body().size() - 1).revisionId();
@@ -232,6 +233,68 @@ class UiBuilderPersistenceTest {
         assertEquals(Outcome.INVALID_GROUP, result.outcome());
         assertEquals(0, count("ui_builder_page"));
         assertEquals(0, count("ui_builder_page_revision"));
+    }
+
+    @Test
+    void aRefusedCreateOverTheOwnersLimitLeavesNoRowAndDeletedPagesDontCount() throws IOException {
+        int before = limits.getOwnerPagesMax();
+        limits.setOwnerPagesMax(2);
+        try {
+            create(hop, "One", null);
+            long two = create(hop, "Two", null).summary().id();
+
+            Result<PageDetail> third = service.create(hop, new CreateRequest(null, spec("Three"), null, null, null, null, null));
+            assertEquals(Outcome.TOO_MANY_PAGES, third.outcome());
+            assertEquals(2, count("ui_builder_page"));
+            assertEquals(2, count("ui_builder_page_revision"));
+
+            assertEquals(Outcome.NO_CONTENT, service.delete(hop, two).outcome());
+            create(hop, "Three", null);
+            assertEquals(3, count("ui_builder_page"), "the deleted page keeps its row");
+        } finally {
+            limits.setOwnerPagesMax(before);
+        }
+    }
+
+    @Test
+    void refreshingEditorsKeepsTheRowsThatStay() throws IOException {
+        long id = create(hop, "Team page", 40).summary().id();
+        Long adaRow = jdbc.queryForObject("SELECT id FROM ui_builder_page_editor WHERE page_id = ? AND person_id = 2",
+                Long.class, id);
+
+        jdbc.update("INSERT INTO group_members (group_id, person_id) VALUES (40, 4)");
+        assertEquals(Outcome.OK, service.refreshEditors(hop, id).outcome());
+        assertEquals(List.of(2L, 4L), jdbc.queryForList(
+                "SELECT person_id FROM ui_builder_page_editor WHERE page_id = ? ORDER BY person_id", Long.class, id));
+        assertEquals(adaRow, jdbc.queryForObject("SELECT id FROM ui_builder_page_editor WHERE page_id = ? AND person_id = 2",
+                Long.class, id), "kept, not deleted and inserted again");
+
+        jdbc.update("DELETE FROM group_members WHERE group_id = 40 AND person_id = 2");
+        assertEquals(Outcome.OK, service.refreshEditors(hop, id).outcome());
+        assertEquals(List.of(4L), jdbc.queryForList("SELECT person_id FROM ui_builder_page_editor WHERE page_id = ?",
+                Long.class, id));
+    }
+
+    @Test
+    void galleryCardsAreStoredWithEachCopyAndAnOldPageWithoutOneStillShows() throws IOException {
+        long id = create(hop, "Flood Watch", null).summary().id();
+        service.publish(hop, id, new PublishRequest(0L, "flood-watch"));
+        assertEquals(Outcome.PUBLISHED_CHANGED,
+                service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, 5L)).outcome());
+        assertEquals(Outcome.OK, service.setVisibility(niko, id, new VisibilityRequest("PUBLIC", null, 0L)).outcome());
+        Map<String, Object> cards = jdbc.queryForMap("SELECT published_card, public_card FROM ui_builder_page WHERE id = ?", id);
+        assertEquals("Flood Watch", json.readTree((String) cards.get("published_card")).get("title").asText());
+        assertEquals(cards.get("published_card"), cards.get("public_card"));
+
+        jdbc.update("UPDATE ui_builder_page SET published_card = NULL, public_card = NULL WHERE id = ?", id);
+        assertEquals(List.of("Flood Watch"), service.gallery(ada, null).body().stream().map(GalleryItem::title).toList());
+        assertEquals(List.of("Flood Watch"), service.gallery(null, null).body().stream().map(GalleryItem::title).toList());
+        assertEquals("PUBLIC", service.gallery(ada, null).body().get(0).visibility());
+
+        assertEquals(1, service.approveCourse(niko, new BulkVisibilityRequest("csp", null)).body().updated());
+        jdbc.update("UPDATE ui_builder_page SET published_card = '{\"title\":\"From the card\"}' WHERE id = ?", id);
+        assertEquals(1, service.approveCourse(niko, new BulkVisibilityRequest("csp", null)).body().updated());
+        assertEquals("From the card", service.gallery(null, null).body().get(0).title(), "approving copies the card too");
     }
 
     @Test
@@ -263,7 +326,7 @@ class UiBuilderPersistenceTest {
                     ObjectNode next = spec("Writer " + writer);
                     futures.add(pool.submit(() -> {
                         start.await(10, TimeUnit.SECONDS);
-                        return service.save(caller, id, new SaveRequest(0L, next, null, null, null, null, null, null)).outcome();
+                        return service.save(caller, id, new SaveRequest(0L, next, null, null, null, null, null, null, null)).outcome();
                     }));
                 }
                 List<Outcome> outcomes = new ArrayList<>();
