@@ -49,7 +49,7 @@ class ToolchainSessionServiceTest {
     void setUp() {
         MockitoAnnotations.openMocks(this);
         clock = new MutableClock(NOW);
-        service = new ToolchainSessionService(repository, new ToolchainStationRules(), clock, PAIRING_CODE_LIFETIME, AGENT_TOKEN_LIFETIME);
+        service = new ToolchainSessionService(repository, new ToolchainStationRules("opencs/pages"), clock, PAIRING_CODE_LIFETIME, AGENT_TOKEN_LIFETIME);
 
         when(repository.save(any(ToolchainSessionEntity.class))).thenAnswer(invocation -> {
             ToolchainSessionEntity row = invocation.getArgument(0);
@@ -210,7 +210,7 @@ class ToolchainSessionServiceTest {
         String auth = "Bearer " + paired.agentToken();
         service.submitResults(id, auth, new ResultsRequest("linux", "terminal-town-gate", List.of(
                 new CheckEvidence("working-folder", 0, "/home/toby"),
-                new CheckEvidence("trail-folder", 0, "/home/toby/toolchain-trail"))));
+                new CheckEvidence("pages-clone", 0, "/home/toby/opencs/pages"))));
 
         clock.advanceSeconds(60);
         StationView requested = service.requestCheck("toby", id, "editor-isle-tower");
