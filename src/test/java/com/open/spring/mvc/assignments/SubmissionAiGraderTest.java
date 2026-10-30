@@ -122,7 +122,7 @@ class SubmissionAiGraderTest {
 
     @Test
     void aReviewEvaluationIsRecordedOnTheReviewOnly() throws Exception {
-        GradeReview review = new GradeReview();
+        GradeReviewEntity review = new GradeReviewEntity();
         when(reviewService.aiEvaluationTarget(eq(55L), any()))
                 .thenReturn(new GradeReviewService.AiEvaluationTarget(review, submission, null));
         var graded = AssignmentAiGradingService.GradeResult.graded(0.75, 3, "Re-evaluated.", false);

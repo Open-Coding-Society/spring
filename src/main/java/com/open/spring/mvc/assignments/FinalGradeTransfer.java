@@ -30,6 +30,8 @@ public class FinalGradeTransfer {
 
     private static final Logger logger = LoggerFactory.getLogger(FinalGradeTransfer.class);
     static final int ATTEMPTS = 3;
+    // Waits this long times the attempt number, so a retry doesn't land inside the same busy write.
+    static final long RETRY_DELAY_MILLIS = 100;
 
     private final AssignmentSubmissionJPA submissionRepo;
     private final AssignmentJpaRepository assignmentRepo;
@@ -54,7 +56,17 @@ public class FinalGradeTransfer {
                     throw e;
                 }
                 logger.info("Gradebook transfer for assignment {} hit a concurrent write; retrying", assignmentId);
+                pause(attempt * RETRY_DELAY_MILLIS);
             }
+        }
+    }
+
+    private static void pause(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("Interrupted while retrying the gradebook transfer", e);
         }
     }
 

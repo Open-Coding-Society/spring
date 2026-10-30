@@ -7,6 +7,7 @@ import java.util.Map;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
@@ -34,45 +35,58 @@ public class ToolchainStationRules {
 
     private record Rule(String id, String label, Predicate<String> passes, String fix) {}
 
-    private static final Map<String, List<Rule>> STATIONS = new LinkedHashMap<>();
+    /** Stations whose checks the boss station runs again: the pages clone and every required tool. */
+    private static final List<String> FINAL_CHECK_STATIONS =
+        List.of("terminal-town-gate", "compiler-canyon-forge", "editor-isle-tower", "git-village-hall");
 
-    static {
-        STATIONS.put("terminal-town-gate", List.of(
+    private final Map<String, List<Rule>> stations = new LinkedHashMap<>();
+
+    /** projectFolder is where the first station tells students to clone pages, e.g. opencs/pages. */
+    public ToolchainStationRules(@Value("${toolchain.project-folder}") String projectFolder) {
+        stations.put("terminal-town-gate", List.of(
             rule("working-folder", "Working folder", "^(?:/|[A-Za-z]:[\\\\/]|\\\\\\\\)\\S*",
                 "Run the agent from a terminal so it can read your current folder."),
-            rule("trail-folder", "Created toolchain-trail folder", "(?:^|[\\\\/])toolchain-trail[\\\\/]?\\s*$",
-                "Create the folder with mkdir toolchain-trail in your home folder or the folder you run the agent from.")));
-        STATIONS.put("compiler-canyon-forge", List.of(
+            rule("pages-clone", "Cloned pages into " + projectFolder, endsWithFolder(projectFolder),
+                "Clone the class repo so it is at ~/" + projectFolder + ", then run the agent from inside it.")));
+        stations.put("compiler-canyon-forge", List.of(
             rule("python", "Python 3", "\\bPython\\s+3\\.\\d+", "Install Python 3 and make sure python3 (or py on Windows) runs."),
             rule("pip", "pip", "^pip\\s+\\d+(?:\\.\\d+)+", "Run: python3 -m ensurepip --upgrade"),
             rule("ruby", "Ruby", "\\bruby\\s+\\d+(?:\\.\\d+)+", "Install Ruby for your operating system, then open a new terminal."),
             // Bundler 2 prints "Bundler version 2.x"; Bundler 4+ prints only the number.
             rule("bundler", "Bundler", "^(?:Bundler version\\s+)?\\d+\\.\\d+", "Run: gem install bundler"),
             rule("rubygems", "RubyGems", "^\\d+\\.\\d+(?:\\.\\d+)?", "RubyGems comes with Ruby; reinstall Ruby if gem --version fails.")));
-        STATIONS.put("editor-isle-tower", List.of(
+        stations.put("editor-isle-tower", List.of(
             rule("editor", "VS Code or Cursor", "^\\d+\\.\\d+(?:\\.\\d+)?",
                 "Install VS Code and add the code command to your PATH (Command Palette: Shell Command: Install 'code' command in PATH).")));
-        STATIONS.put("git-village-hall", List.of(
+        stations.put("git-village-hall", List.of(
             rule("git", "Git", "\\bgit version\\s+\\d+(?:\\.\\d+)+", "Install Git, then open a new terminal."),
             new Rule("git-name", "Git author name", output -> !output.isBlank(),
                 "Run: git config --global user.name \"Your Name\""),
             new Rule("git-email", "Git author email",
                 output -> output.contains("@") && !Pattern.compile("example\\.com|you@|your-email", Pattern.CASE_INSENSITIVE).matcher(output).find(),
                 "Run: git config --global user.email \"you@yourdomain\" with your real email.")));
-        STATIONS.put("github-gateway-arch", List.of(
+        stations.put("github-gateway-arch", List.of(
             rule("github-remote", "GitHub remote", "github\\.com[:/]\\S+",
                 "Run the agent inside a repository you cloned from GitHub."),
             rule("remote-branch", "Remote branch reachable", "\\b[0-9a-f]{40,64}\\s+refs/heads/\\S+",
                 "Check your network, then run git ls-remote --heads origin inside the repository.")));
-        STATIONS.put("build-bridge", List.of(
+        stations.put("build-bridge", List.of(
             rule("bundle-check", "Project dependencies installed",
                 "the gemfile.s dependencies are satisfied|bundle complete!",
                 "Inside the project run ./scripts/venv.sh (or bundle install), then run the agent again.")));
-        STATIONS.put(BOSS_STATION, List.of(
-            rule("recent-commit", "Recent commit", "^[0-9a-f]{7,40}\\s+\\S",
-                "Make a commit in your repository, then run the agent inside it."),
-            rule("push-dry-run", "Push dry run", "everything up.to.date|\\[new branch\\]|->\\s*\\S+",
-                "Run git push --dry-run inside the repository and fix any error it shows.")));
+        // The finish line only confirms the setup; it never commits or pushes to pages.
+        List<Rule> finalChecks = new ArrayList<>();
+        FINAL_CHECK_STATIONS.forEach(station -> finalChecks.addAll(stations.get(station)));
+        stations.put(BOSS_STATION, List.copyOf(finalChecks));
+    }
+
+    /** Matches a path that ends in the folder, with / or \\ between its parts (Windows Git prints C:/...). */
+    private static String endsWithFolder(String folder) {
+        List<String> parts = new ArrayList<>();
+        for (String part : folder.split("/")) {
+            parts.add(Pattern.quote(part));
+        }
+        return "(?:^|[\\\\/])" + String.join("[\\\\/]", parts) + "[\\\\/]?$";
     }
 
     private static Rule rule(String id, String label, String regex, String fix) {
@@ -82,13 +96,13 @@ public class ToolchainStationRules {
 
     /** The teacher's stationRules.requireAccessible: unknown stations get a 400. */
     public void requireAccessible(String studentUid, String stationId) {
-        if (stationId == null || !STATIONS.containsKey(stationId)) {
+        if (stationId == null || !stations.containsKey(stationId)) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Unknown station.");
         }
     }
 
     public boolean isKnown(String stationId) {
-        return stationId != null && STATIONS.containsKey(stationId);
+        return stationId != null && stations.containsKey(stationId);
     }
 
     /** Checks every rule of the station; a check the agent did not send fails. */
@@ -100,7 +114,7 @@ public class ToolchainStationRules {
             }
         }
         List<CheckResult> results = new ArrayList<>();
-        for (Rule rule : STATIONS.getOrDefault(stationId, List.of())) {
+        for (Rule rule : stations.getOrDefault(stationId, List.of())) {
             Evidence item = byId.get(rule.id());
             if (item == null) {
                 results.add(new CheckResult(rule.id(), rule.label(), false, "The agent did not send this check. Update the agent and run it again."));
