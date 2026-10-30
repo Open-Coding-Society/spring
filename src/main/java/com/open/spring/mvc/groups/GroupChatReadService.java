@@ -14,6 +14,8 @@ import com.open.spring.mvc.person.Person;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import com.open.spring.mvc.groups.GroupChatIdentityService.AuthenticatedIdentity;
+
 /**
  * Unread counts for group chat, the group-side equivalent of the direct-message
  * unread summary.
@@ -32,6 +34,7 @@ public class GroupChatReadService {
     private final GroupChatReadStateJpaRepository readStateRepository;
     private final GroupsJpaRepository groupsRepository;
     private final GroupChatService groupChatService;
+    private final GroupChatIdentityService identityService;
 
     /**
      * Unread count per group id, across this person's groups. A group with nothing
@@ -88,9 +91,10 @@ public class GroupChatReadService {
         readStateRepository.save(state);
     }
 
-    // Match on uid, not display name: two members can share a name
-    private boolean isFrom(GroupChatMessage message, String uid) {
-        return uid != null && uid.equals(message.getAuthor_uid());
+    private boolean isFrom(GroupChatMessage message, String displayName) {
+        AuthenticatedIdentity identity = identityService.getCurrentIdentity();
+
+        return displayName != null && displayName.equals(identity.getDisplayName());
     }
 
     /**
