@@ -1,5 +1,7 @@
 package com.open.spring.mvc.groups;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -11,6 +13,8 @@ import java.util.UUID;
 @AllArgsConstructor
 public class GroupChatMessage {
     private String id;
+    /** History saved before the rename to author calls this field name. */
+    @JsonAlias("name")
     private String author;
     private String author_uid;
     private String message;
