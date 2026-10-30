@@ -52,14 +52,11 @@ public class GroupChatRealtimeService {
 
     /**
      * Returns whether the message existed (and was broadcast as edited). Throws
-     * {@link SecurityException} if {@code requesterDisplayName} didn't send it --
-     * see {@link GroupChatService#editMessage} for why a display name, not a uid.
+     * {@link SecurityException} if the authenticated requester's uid is not the author uid.
      */
-    public boolean editMessage(Long groupId, String messageId, String newMessage, String requesterDisplayName) {
+    public boolean editMessage(Long groupId, String messageId, String newMessage, String requesterUid) {
         Groups group = getGroupOrThrow(groupId);
-        AuthenticatedIdentity identity = identityService.getCurrentIdentity();
-
-        boolean updated = groupChatService.editMessage(identity.getUid(), group.getName(), messageId, newMessage, requesterDisplayName);
+        boolean updated = groupChatService.editMessage(group.getName(), messageId, newMessage, requesterUid);
         if (!updated) {
             return false;
         }
@@ -77,12 +74,10 @@ public class GroupChatRealtimeService {
         return true;
     }
 
-    /** Throws {@link SecurityException} if {@code requesterDisplayName} didn't send it. */
-    public void deleteMessage(Long groupId, String messageId, String requesterDisplayName) {
+    /** Throws {@link SecurityException} if the authenticated requester didn't send it. */
+    public void deleteMessage(Long groupId, String messageId, String requesterUid) {
         Groups group = getGroupOrThrow(groupId);
-        AuthenticatedIdentity identity = identityService.getCurrentIdentity();
-        
-        groupChatService.deleteMessage(identity.getUid(), group.getName(), messageId, requesterDisplayName);
+        groupChatService.deleteMessage(group.getName(), messageId, requesterUid);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("deleteMessageServer")

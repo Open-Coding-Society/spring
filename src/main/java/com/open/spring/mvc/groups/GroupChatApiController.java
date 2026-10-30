@@ -102,8 +102,6 @@ public class GroupChatApiController {
         return new AuthenticatedIdentity(uid, person.getName());
     }
 
-    // GroupChatMessage only stores the sender's display name (no Person link), so the
-    // ownership check needs the authenticated uid resolved to that same display name.
     private String resolveCurrentDisplayName() {
         String uid = getCurrentUsername();
         if (uid == null) {
@@ -203,8 +201,8 @@ public class GroupChatApiController {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
 
-        String requesterDisplayName = resolveCurrentDisplayName();
-        if (requesterDisplayName == null) {
+        AuthenticatedIdentity identity = getCurrentIdentity();
+        if (identity == null) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
 
@@ -214,7 +212,7 @@ public class GroupChatApiController {
 
         boolean updated;
         try {
-            updated = realtimeService.editMessage(groupId, messageId, request.getMessage(), requesterDisplayName);
+            updated = realtimeService.editMessage(groupId, messageId, request.getMessage(), identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         } catch (RuntimeException ex) {
@@ -238,13 +236,13 @@ public class GroupChatApiController {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
 
-        String requesterDisplayName = resolveCurrentDisplayName();
-        if (requesterDisplayName == null) {
+        AuthenticatedIdentity identity = getCurrentIdentity();
+        if (identity == null) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
 
         try {
-            realtimeService.deleteMessage(groupId, messageId, requesterDisplayName);
+            realtimeService.deleteMessage(groupId, messageId, identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         } catch (RuntimeException ex) {

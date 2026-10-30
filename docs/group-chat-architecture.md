@@ -159,7 +159,7 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 
 - `api/groups.http`: open it in VS Code with the REST Client extension and run the 15 requests in order. Set `baseUrl`, `adminUid` and `adminPassword` under `rest-client.environmentVariables` in the Git-ignored `.vscode/settings.json`. Never put passwords in the file. It creates a test group, adds you, sends and reads messages, checks unread counts, and deletes the group.
 - **The WebSocket can't be tested from a `.http` file.** To check it, open a course page with a chat against a local server and watch the browser's Network panel (WS filter) for frames on `/topic/group/{id}`. Or connect any STOMP client to `ws://localhost:8589/ws-chat/websocket` (SockJS's raw WebSocket transport), send `CONNECT`, `SUBSCRIBE` to `/topic/group/{id}`, and `SEND` JSON events to `/app/groups.chat`.
-- There are no JUnit tests for this package yet.
+- Run the chat regression tests with `./mvnw test '-Dtest=GroupChat*Test'`. They cover UID-based ownership, REST identity forwarding and unread counts.
 
 ## Known issues
 
@@ -169,7 +169,7 @@ These were each reproduced against a local server built from `master` on 2026-10
 - **`group_chat_read_state` is never created on an existing database.** #225 added the `GroupChatReadState` entity, but nothing creates its table, and Hibernate runs with `ddl-auto=none`. On a database without the table, `POST /api/groups/chat/{groupId}/read` returns 500 (`no such table: group_chat_read_state`), and `GET /api/groups/chat/unread` fails the same way for anyone in a group. `direct_message_read_state` is created in `ModelInit`; this table needs the same.
 - **The client chooses the name for presence and typing.** `joinGroup`, `typingStart` and `heartbeat` use the `sender` field the client sends, even from a socket that isn't signed in.
 - **No membership checks.** Any signed-in account can read and send in any group, list and upload its files, and manage any group, its members and its grades. The membership checks in `GroupChatApiController` are commented out.
-- **Edit and delete compare display names.** Messages store the sender's display name, so two members with the same name can edit and delete each other's messages, and a teacher cannot delete a student's message.
+- **Edit and delete require the stored author uid.** The REST controller passes the authenticated account's uid through the realtime service; display names never establish ownership. Legacy messages without `author_uid` cannot be edited or deleted through these routes. Teachers cannot delete another account's message.
 - **Two sends at once can lose one.** Each send reads the group's S3 file, adds a line and writes the file back, without a lock.
 - **The first group created after a restart fails on SQLite.** `POST /api/groups` returns 500 with `SQLITE_BUSY_SNAPSHOT` the first time after the server starts; the next attempt works. This is the `GenerationType.AUTO` lock problem described under Assignment grading in `AGENTS.md`, here on `submitter_seq`. Not checked on MySQL.
 
