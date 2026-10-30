@@ -20,6 +20,7 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class GroupChatWebSocketController {
 
+    private final GroupChatIdentityService identityService;
     private final GroupChatRealtimeService realtimeService;
     private final GroupChatPresenceService presenceService;
 
@@ -31,8 +32,14 @@ public class GroupChatWebSocketController {
             return;
         }
 
+        // authenticated identity required for every event
+        if (principal == null || principal.getName() == null || principal.getName().isBlank()) {
+            return;
+        }
+
         Long groupId = event.getGroupId();
-        String sender = resolveSender(event, principal);
+        String sender = resolveSender(event, principal); // deprecated, remove later
+        String uid = principal.getName();
 
         switch (event.getContext()) {
             case "joinGroup" -> {
@@ -55,7 +62,8 @@ public class GroupChatWebSocketController {
                 }
                 ensureJoined(sessionId, groupId, sender);
                 try {
-                    realtimeService.publishMessage(groupId, event.getMessage(), event.getImage());
+                    var identity = identityService.resolve(uid);
+                    realtimeService.publishMessage(groupId, event.getMessage(), event.getImage(), identity);
                 } catch (RuntimeException ex) {
                     realtimeService.publishError(groupId, sender, ex.getMessage());
                 }
