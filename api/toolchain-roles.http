@@ -1,0 +1,82 @@
+### Toolchain pairing flow by role (REST Client). Pick the "local" environment, then run top to bottom.
+### Needs studentUid, studentPassword, teacherUid, teacherPassword in rest-client.environmentVariables (.vscode/settings.json, not committed).
+### Each request reads the previous responses, e.g. {{startSession.response.body.$.pairingCode}}.
+### Run step 0 only before the first login; REST Client remembers cookies.
+
+### 0. No login: expect 401
+POST {{baseUrl}}/api/toolchain/sessions
+Content-Type: application/json
+
+{"stationId": "terminal-town-gate"}
+
+### 1. Student logs in
+# @name loginStudent
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+
+{"uid": "{{studentUid}}", "password": "{{studentPassword}}"}
+
+### 2. Student starts a session: expect 200 with sessionId and pairingCode
+# @name startSession
+POST {{baseUrl}}/api/toolchain/sessions
+Content-Type: application/json
+
+{"stationId": "terminal-town-gate"}
+
+### 3. Agent pairs with that code (no login needed): expect 200 with agentToken
+# @name pairAgent
+POST {{baseUrl}}/api/toolchain/pair
+Content-Type: application/json
+
+{"pairingCode": "{{startSession.response.body.$.pairingCode}}"}
+
+### 4. The same code again: expect 401
+POST {{baseUrl}}/api/toolchain/pair
+Content-Type: application/json
+
+{"pairingCode": "{{startSession.response.body.$.pairingCode}}"}
+
+### 5. Student asks for a station check: expect 200, status CHECKING
+POST {{baseUrl}}/api/toolchain/sessions/{{startSession.response.body.$.sessionId}}/check
+Content-Type: application/json
+
+{"stationId": "terminal-town-gate"}
+
+### 6. Agent polls with its token: expect 200 and the station
+GET {{baseUrl}}/api/toolchain/sessions/{{startSession.response.body.$.sessionId}}/next
+Authorization: Bearer {{pairAgent.response.body.$.agentToken}}
+
+### 7. Garbage token: expect 401
+GET {{baseUrl}}/api/toolchain/sessions/{{startSession.response.body.$.sessionId}}/next
+Authorization: Bearer not-a-real-token
+
+### 8. Failing evidence: expect 200, status FAILED
+POST {{baseUrl}}/api/toolchain/sessions/{{startSession.response.body.$.sessionId}}/results
+Authorization: Bearer {{pairAgent.response.body.$.agentToken}}
+Content-Type: application/json
+
+{"os": "linux", "stationId": "terminal-town-gate", "checks": [
+  {"id": "working-folder", "exitCode": 0, "output": "/home/test"},
+  {"id": "pages-clone", "exitCode": 1, "output": "pages folder not found"}]}
+
+### 9. Passing evidence: expect 200, status VERIFIED
+POST {{baseUrl}}/api/toolchain/sessions/{{startSession.response.body.$.sessionId}}/results
+Authorization: Bearer {{pairAgent.response.body.$.agentToken}}
+Content-Type: application/json
+
+{"os": "linux", "stationId": "terminal-town-gate", "checks": [
+  {"id": "working-folder", "exitCode": 0, "output": "/home/test"},
+  {"id": "pages-clone", "exitCode": 0, "output": "/home/test/opencs/pages"}]}
+
+### 10. Student reads the final status: expect VERIFIED
+GET {{baseUrl}}/api/toolchain/sessions/{{startSession.response.body.$.sessionId}}
+
+### 11. Teacher logs in (replaces the student cookie)
+# @name loginTeacher
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+
+{"uid": "{{teacherUid}}", "password": "{{teacherPassword}}"}
+
+### 12. Teacher reads the student's session: expect 404 (only the owner may)
+GET {{baseUrl}}/api/toolchain/sessions/{{startSession.response.body.$.sessionId}}
