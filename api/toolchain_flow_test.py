@@ -5,13 +5,23 @@ agent token) and feeds them into the next request, so nothing is copied by hand.
 Pairing codes and tokens are never printed."""
 import http.cookiejar
 import json
+import os
+import sys
 import urllib.error
 import urllib.request
 
-BASE = "http://127.0.0.1:8585"
-PW = "LocalTest123!"          # local test password from ~/ocs-spring/.env
+# The base URL comes from JAVA_URI (same name as javaURI in the pages config). Default: local Spring.
+BASE = os.environ.get("JAVA_URI", "http://127.0.0.1:8585").rstrip("/")
+IS_LOCAL = BASE.startswith(("http://127.0.0.1", "http://localhost"))
+PW = os.environ.get("TOOLCHAIN_TEST_PASSWORD", "LocalTest123!" if IS_LOCAL else "")
+STUDENT_UID = os.environ.get("TOOLCHAIN_STUDENT_UID", "hop")
+TEACHER_UID = os.environ.get("TOOLCHAIN_TEACHER_UID", "niko")
 STATION = "terminal-town-gate"
-assert BASE.startswith("http://127.0.0.1"), "local testing only"
+if not IS_LOCAL and os.environ.get("TOOLCHAIN_TEST_ALLOW_REMOTE") != "1":
+    sys.exit("Refusing to run against " + BASE + ": this test creates sessions. "
+             "Set TOOLCHAIN_TEST_ALLOW_REMOTE=1 to allow a non-local server.")
+if not PW:
+    sys.exit("Set TOOLCHAIN_TEST_PASSWORD for a non-local server.")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -65,12 +75,12 @@ def evidence(exit_code=0, trail="/home/test/toolchain-trail", station=True):
 def main():
     student, teacher, agent, nobody = Actor(), Actor(), Actor(), Actor()
     try:
-        s, _ = student.call("POST", "/authenticate", {"uid": "hop", "password": PW})
+        s, _ = student.call("POST", "/authenticate", {"uid": STUDENT_UID, "password": PW})
     except urllib.error.URLError:
         print("Spring is not running on", BASE, "- start it first.")
         return
     check("student logs in", s == 200, f"status {s}")
-    s, _ = teacher.call("POST", "/authenticate", {"uid": "niko", "password": PW})
+    s, _ = teacher.call("POST", "/authenticate", {"uid": TEACHER_UID, "password": PW})
     check("teacher logs in", s == 200, f"status {s}")
 
     # 1. start: the student's response carries the session id and the one-time code
