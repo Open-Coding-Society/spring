@@ -1,0 +1,262 @@
+### UI Builder API Tests
+
+Exercises `/api/ui-builder` (pages, drafts, publishing, visibility, revisions,
+the editing lease and published pages) with the VS Code REST Client. Select the
+`local` or `deployed` environment; `baseUrl`, `adminUid` and `adminPassword`
+are the same variables `toolchain.http` uses, set in the Git-ignored
+`.vscode/settings.json`. Never put passwords in this file.
+
+Every signed-in UI Builder route checks that the request comes from an OCS
+page (UiBuilderRequestGuard): `X-Origin: client`, an `Origin` listed in
+`ui-builder.allowed-origins`, and a JSON body type on writes. Set `pagesOrigin`
+below to the site you test from (https://pages.opencodingsociety.com when
+deployed).
+
+Run the requests in order: later ones use the page id that request 4 returns.
+They write a real page on that environment, so its title says 2099, and the
+last requests delete it. A deleted page keeps its slug, so request 9 makes a
+new one each run.
+
+@pagesOrigin = http://localhost:4500
+
+### 1. Sign in (the JWT cookie is kept for the requests below)
+
+# @name loginUiBuilder
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+Accept: application/json
+
+{
+  "uid": "{{adminUid}}",
+  "password": "{{adminPassword}}"
+}
+
+### 2. Public: the gallery and a page that doesn't exist (404 {"error": "not_found"}, never 401)
+
+GET {{baseUrl}}/api/ui-builder/published
+
+###
+
+GET {{baseUrl}}/api/ui-builder/published/no-such-page-2099
+
+### 3. Without X-Origin: expect 403 {"error": "origin_rejected"}
+
+GET {{baseUrl}}/api/ui-builder/pages
+Origin: {{pagesOrigin}}
+
+### 4. Create a page: 201 with "slug": null and "version": 0
+
+# @name createPage
+POST {{baseUrl}}/api/ui-builder/pages
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "title": "HTTP test 2099",
+  "description": "Created by api/ui-builder.http",
+  "course": "csp",
+  "spec": {
+    "schemaVersion": 1,
+    "kind": "ocs-ui-page",
+    "page": { "title": "HTTP test 2099", "description": "Created by api/ui-builder.http", "byline": "", "course": "csp", "width": "contained", "image": "" },
+    "sections": [
+      { "id": "s-http2099", "type": "stack", "settings": {}, "hidden": false,
+        "cells": [ { "blocks": [
+          { "id": "b-http2099", "type": "hero", "settings": { "title": "HTTP test 2099", "lead": "Made by the REST Client." }, "hidden": false },
+          { "id": "b-hidden99", "type": "callout", "settings": { "body": "Hidden, so the published copy leaves it out." }, "hidden": true }
+        ] } ] }
+    ]
+  }
+}
+
+### 5. Your pages and groups
+
+GET {{baseUrl}}/api/ui-builder/pages?scope=mine
+Origin: {{pagesOrigin}}
+X-Origin: client
+
+###
+
+GET {{baseUrl}}/api/ui-builder/my-groups
+Origin: {{pagesOrigin}}
+X-Origin: client
+
+### 6. Save version 0: the answer has "version": 1
+
+# @name savePage
+PUT {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "version": 0,
+  "title": "HTTP test 2099 (saved)",
+  "spec": {
+    "schemaVersion": 1,
+    "kind": "ocs-ui-page",
+    "page": { "title": "HTTP test 2099 (saved)", "description": "Created by api/ui-builder.http", "byline": "", "course": "csp", "width": "contained", "image": "" },
+    "sections": [
+      { "id": "s-http2099", "type": "stack", "settings": {}, "hidden": false,
+        "cells": [ { "blocks": [
+          { "id": "b-http2099", "type": "hero", "settings": { "title": "HTTP test 2099 (saved)" }, "hidden": false }
+        ] } ] }
+    ]
+  }
+}
+
+### 7. Save version 0 again, as a second tab would: 409 version_conflict with currentVersion 1
+
+PUT {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "version": 0,
+  "spec": { "schemaVersion": 1, "kind": "ocs-ui-page", "page": { "title": "Stale tab" }, "sections": [] }
+}
+
+### 7b. "Keep mine" from that tab: save over version 1 with newRevision, so the answer has "version": 2
+# and request 12 lists two SAVE revisions (the copy it replaced stays in Revisions).
+
+PUT {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "version": 1,
+  "newRevision": true,
+  "title": "HTTP test 2099 (kept)",
+  "spec": {
+    "schemaVersion": 1,
+    "kind": "ocs-ui-page",
+    "page": { "title": "HTTP test 2099 (kept)", "description": "Created by api/ui-builder.http", "byline": "", "course": "csp", "width": "contained", "image": "" },
+    "sections": [
+      { "id": "s-http2099", "type": "stack", "settings": {}, "hidden": false,
+        "cells": [ { "blocks": [
+          { "id": "b-http2099", "type": "hero", "settings": { "title": "HTTP test 2099 (kept)" }, "hidden": false }
+        ] } ] }
+    ]
+  }
+}
+
+### 8. A spec with a script: 400 invalid_spec with details [{"nodeId": "b-bad2099", "field": "body", "key": "bad_body"}]
+
+PUT {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "version": 2,
+  "spec": { "schemaVersion": 1, "kind": "ocs-ui-page", "page": { "title": "Bad" },
+    "sections": [ { "id": "s-bad2099", "type": "stack", "settings": {}, "hidden": false,
+      "cells": [ { "blocks": [ { "id": "b-bad2099", "type": "text", "settings": { "body": "<script>alert(1)</script>" }, "hidden": false } ] } ] } ] }
+}
+
+### 9. Publish version 2 with a new slug (each run gets its own): status PUBLISHED, publishedVersion 2
+
+# @name publishPage
+POST {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/publish
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "version": 2,
+  "slug": "http-test-2099-{{$timestamp}}"
+}
+
+### 10. The published page (signed in), and the gallery
+
+GET {{baseUrl}}/api/ui-builder/published/{{publishPage.response.body.$.slug}}
+
+###
+
+GET {{baseUrl}}/api/ui-builder/published?course=csp
+
+### 11. The editing lease: take it, then give it back (204)
+
+POST {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/lease
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+###
+
+DELETE {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/lease
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+### 12. Revisions, newest first (SAVE and PUBLISH rows), and whether a slug is free
+
+GET {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/revisions
+Origin: {{pagesOrigin}}
+X-Origin: client
+
+###
+
+GET {{baseUrl}}/api/ui-builder/slug-available?slug={{publishPage.response.body.$.slug}}
+Origin: {{pagesOrigin}}
+X-Origin: client
+
+### 13. Make it public. A teacher or admin approves the published version they reviewed for everyone,
+# so they send its publishedVersion; anyone else only asks (and publishedVersion is ignored).
+
+POST {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/visibility
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "visibility": "PUBLIC",
+  "publishedVersion": {{publishPage.response.body.$.publishedVersion}}
+}
+
+### 13b. A teacher approving a version that isn't the published one (say a publish landed after their
+# review): 409 {"error": "published_changed", "publishedVersion": 2}, and nothing changes for visitors
+
+POST {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/visibility
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "visibility": "PUBLIC",
+  "publishedVersion": 0
+}
+
+### 14. Back to members only, then unpublish
+
+POST {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/visibility
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+{
+  "visibility": "SIGNED_IN"
+}
+
+###
+
+POST {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}/unpublish
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+### 15. Clean up: delete the test page (204), then reading it is 404
+
+DELETE {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}
+Origin: {{pagesOrigin}}
+X-Origin: client
+Content-Type: application/json
+
+###
+
+GET {{baseUrl}}/api/ui-builder/pages/{{createPage.response.body.$.id}}
+Origin: {{pagesOrigin}}
+X-Origin: client
