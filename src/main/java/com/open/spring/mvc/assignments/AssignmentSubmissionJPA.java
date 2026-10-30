@@ -77,12 +77,16 @@ public interface AssignmentSubmissionJPA extends JpaRepository<AssignmentSubmiss
             + "WHERE s.id = :id AND s.revision = :revision AND s.manualOverride = true")
     int clearManualOverride(@Param("id") Long id, @Param("revision") int revision, @Param("now") LocalDateTime now);
 
-    /** Saves new content as the next revision and resets its grading, including any override. */
+    /**
+     * Saves new content as the next revision and clears the AI grade, which was for the old content.
+     * A manual override carries over and stays effective.
+     */
     @Modifying(flushAutomatically = true)
     @Query("UPDATE AssignmentSubmission s SET s.content = :content, s.revision = s.revision + 1, "
-            + "s.grade = null, s.feedback = null, s.gradedAt = null, s.aiGrade = null, s.aiSummary = null, "
-            + "s.qualityScore = null, s.needsAiRegrade = null, s.manualOverride = false, s.manualGrade = null, "
-            + "s.manualFeedback = null "
+            + "s.aiGrade = null, s.aiSummary = null, s.qualityScore = null, s.needsAiRegrade = null, "
+            + "s.grade = CASE WHEN s.manualOverride = true THEN s.grade ELSE null END, "
+            + "s.feedback = CASE WHEN s.manualOverride = true THEN s.feedback ELSE null END, "
+            + "s.gradedAt = CASE WHEN s.manualOverride = true THEN s.gradedAt ELSE null END "
             + "WHERE s.id = :id AND s.revision = :revision")
     int startRevision(@Param("id") Long id, @Param("revision") int revision,
             @Param("content") Map<String, Object> content);

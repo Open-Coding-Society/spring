@@ -19,10 +19,10 @@ import com.open.spring.mvc.person.Person;
 /**
  * Changes a submission's content and grading state and records each change in its history.
  *
- * Rules: the AI grade is effective unless a person overrides it; new content starts a new revision
- * and releases any override; writes name the revision they apply to, so stale ones are refused;
- * once the assignment is closed only {@link #applyAuthorizedCorrection} (a teacher's review) can
- * change a grade.
+ * Rules: the AI grade is effective unless a person overrides it; new content starts a new revision,
+ * and an override carries over to it (the student petitions to have it reconsidered); writes name
+ * the revision they apply to, so stale ones are refused; once the assignment is closed only
+ * {@link #applyReviewedGrade} (a teacher's review) can change a grade.
  *
  * Every write takes the submission's row lock ({@link AssignmentSubmissionJPA#lockForGrading})
  * before reading, and loads the submission itself, so callers need no transaction of their own.
@@ -34,11 +34,11 @@ public class SubmissionGradingService {
 
     private final AssignmentSubmissionJPA submissionRepo;
     private final AssignmentJpaRepository assignmentRepo;
-    private final SubmissionGradeEventJPA eventRepo;
+    private final SubmissionGradeEventJpaRepository eventRepo;
     private final AssignmentAuthorizationService authorizationService;
 
     public SubmissionGradingService(AssignmentSubmissionJPA submissionRepo, AssignmentJpaRepository assignmentRepo,
-            SubmissionGradeEventJPA eventRepo, AssignmentAuthorizationService authorizationService) {
+            SubmissionGradeEventJpaRepository eventRepo, AssignmentAuthorizationService authorizationService) {
         this.submissionRepo = submissionRepo;
         this.assignmentRepo = assignmentRepo;
         this.eventRepo = eventRepo;
@@ -66,14 +66,14 @@ public class SubmissionGradingService {
             rollBack();
             return GradingResult.of(GradingOutcome.ASSIGNMENT_CLOSED, null);
         }
-        recordContent(saved.getId(), AssignmentSubmission.FIRST_REVISION, SubmissionGradeEvent.Type.SUBMITTED,
+        recordContent(saved.getId(), AssignmentSubmission.FIRST_REVISION, SubmissionGradeEventEntity.Type.SUBMITTED,
                 submittedBy, saved.getContent());
         return GradingResult.of(GradingOutcome.REVISION_CREATED, SubmissionGradingState.of(saved));
     }
 
     /**
      * Saves an edit. The caller sets the ordinary fields and checks permission; new content
-     * becomes the next revision.
+     * becomes the next revision and keeps any manual override.
      */
     @Transactional
     public GradingResult revise(AssignmentSubmission submission, Map<String, Object> newContent, Person editor) {
@@ -95,18 +95,18 @@ public class SubmissionGradingService {
         // A submission from before the grading history has no record of what it held; save that before
         // the new revision's entries, or it is lost. No actor: who submitted it wasn't recorded.
         if (eventRepo.findBySubmissionIdOrderByIdAsc(submission.getId()).isEmpty()) {
-            recordContent(submission.getId(), revision, SubmissionGradeEvent.Type.SUBMITTED, null, submission.getContent());
+            recordContent(submission.getId(), revision, SubmissionGradeEventEntity.Type.SUBMITTED, null, submission.getContent());
             if (before.effectiveGrade() != null) {
                 recordGrade(submission.getId(), revision, before.manualOverride()
-                        ? SubmissionGradeEvent.Type.MANUAL_OVERRIDE_SET : SubmissionGradeEvent.Type.AI_GRADED,
+                        ? SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET : SubmissionGradeEventEntity.Type.AI_GRADED,
                         null, before.effectiveGrade(), before.effectiveFeedback(), true, null);
             }
         }
+        recordContent(submission.getId(), revision + 1, SubmissionGradeEventEntity.Type.REVISED, editor, newContent);
         if (before.manualOverride()) {
-            recordGrade(submission.getId(), revision, SubmissionGradeEvent.Type.MANUAL_OVERRIDE_RELEASED_BY_REVISION,
-                    editor, before.manualGrade(), before.manualFeedback(), false, null);
+            recordGrade(submission.getId(), revision + 1, SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_KEPT_BY_REVISION,
+                    editor, before.manualGrade(), before.manualFeedback(), true, null);
         }
-        recordContent(submission.getId(), revision + 1, SubmissionGradeEvent.Type.REVISED, editor, newContent);
         submission.setContent(newContent);
         return reloaded(GradingOutcome.REVISION_CREATED, submission);
     }
@@ -128,7 +128,7 @@ public class SubmissionGradingService {
             return GradingResult.of(GradingOutcome.INVALID_GRADE, state);
         }
         submissionRepo.applyManualOverride(submissionId, state.revision(), grade, feedback, now());
-        recordGrade(submissionId, state.revision(), SubmissionGradeEvent.Type.MANUAL_OVERRIDE_SET, grader,
+        recordGrade(submissionId, state.revision(), SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET, grader,
                 grade, feedback, true, null);
         return reloaded(GradingOutcome.MANUAL_GRADE_APPLIED, guarded.submission());
     }
@@ -148,7 +148,7 @@ public class SubmissionGradingService {
         if (state.aiGrade() == null) {
             submissionRepo.flagForAiRegrade(submissionId, state.revision());
         }
-        recordGrade(submissionId, state.revision(), SubmissionGradeEvent.Type.MANUAL_OVERRIDE_CLEARED, actor,
+        recordGrade(submissionId, state.revision(), SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_CLEARED, actor,
                 state.manualGrade(), state.manualFeedback(), false, null);
         return reloaded(GradingOutcome.MANUAL_OVERRIDE_CLEARED, guarded.submission());
     }
@@ -175,7 +175,7 @@ public class SubmissionGradingService {
         }
         boolean applied = submissionRepo.makeAiGradeEffective(
                 submissionId, revision, result.usedDefaultRubric(), now()) == 1;
-        recordGrade(submissionId, revision, SubmissionGradeEvent.Type.AI_GRADED, null,
+        recordGrade(submissionId, revision, SubmissionGradeEventEntity.Type.AI_GRADED, null,
                 result.grade(), result.feedback(), applied, null);
         if (!applied) {
             logger.info("Kept manual grade for submission {}; AI grade saved for reference", submissionId);
@@ -200,31 +200,35 @@ public class SubmissionGradingService {
     }
 
     /**
-     * Applies a grade approved in a teacher review after close. Runs inside the review's
-     * transaction, which holds the submission lock and has checked the teacher.
+     * Applies the grade a review approved: an authorized correction after close, or a manual grade
+     * when a petition is decided before close. Runs inside the review's transaction, which holds the
+     * submission lock and has checked the teacher.
      */
     @Transactional(propagation = Propagation.MANDATORY)
-    GradingResult applyAuthorizedCorrection(AssignmentSubmission submission, GradeReview review,
+    GradingResult applyReviewedGrade(AssignmentSubmission submission, GradeReviewEntity review,
             Double grade, String feedback, Person teacher) {
         SubmissionGradingState state = submissionRepo.findGradingState(submission.getId()).orElseThrow();
         if (!isValidGrade(grade, submission.getAssignment())) {
             return GradingResult.of(GradingOutcome.INVALID_GRADE, state);
         }
         submissionRepo.applyManualOverride(submission.getId(), state.revision(), grade, feedback, now());
-        recordGrade(submission.getId(), state.revision(), SubmissionGradeEvent.Type.AUTHORIZED_CORRECTION, teacher,
-                grade, feedback, true, review.getId());
-        return reloaded(GradingOutcome.GRADE_CORRECTED, submission);
+        SubmissionGradeEventEntity.Type type = state.closed()
+                ? SubmissionGradeEventEntity.Type.AUTHORIZED_CORRECTION
+                : SubmissionGradeEventEntity.Type.MANUAL_OVERRIDE_SET;
+        recordGrade(submission.getId(), state.revision(), type, teacher, grade, feedback, true, review.getId());
+        return reloaded(state.closed() ? GradingOutcome.GRADE_CORRECTED : GradingOutcome.MANUAL_GRADE_APPLIED,
+                submission);
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
-    void recordReviewNoChange(SubmissionGradingState state, GradeReview review, Person teacher) {
-        recordGrade(state.submissionId(), state.revision(), SubmissionGradeEvent.Type.REVIEW_NO_CHANGE, teacher,
+    void recordReviewNoChange(SubmissionGradingState state, GradeReviewEntity review, Person teacher) {
+        recordGrade(state.submissionId(), state.revision(), SubmissionGradeEventEntity.Type.REVIEW_NO_CHANGE, teacher,
                 state.effectiveGrade(), review.getRationale(), true, review.getId());
     }
 
     @Transactional(propagation = Propagation.MANDATORY)
     void recordFinalized(SubmissionGradingState state, Person teacher) {
-        recordGrade(state.submissionId(), state.revision(), SubmissionGradeEvent.Type.FINALIZED, teacher,
+        recordGrade(state.submissionId(), state.revision(), SubmissionGradeEventEntity.Type.FINALIZED, teacher,
                 state.effectiveGrade(), state.effectiveFeedback(), state.effectiveGrade() != null, null);
     }
 
@@ -256,7 +260,7 @@ public class SubmissionGradingService {
     }
 
     @Transactional(readOnly = true)
-    public List<SubmissionGradeEvent> history(Long submissionId) {
+    public List<SubmissionGradeEventEntity> history(Long submissionId) {
         return eventRepo.findBySubmissionIdOrderByIdAsc(submissionId);
     }
 
@@ -302,9 +306,9 @@ public class SubmissionGradingService {
         return GradingResult.of(outcome, state);
     }
 
-    private void recordGrade(Long submissionId, int revision, SubmissionGradeEvent.Type type, Person actor,
+    private void recordGrade(Long submissionId, int revision, SubmissionGradeEventEntity.Type type, Person actor,
             Double grade, String feedback, boolean effective, Long reviewId) {
-        SubmissionGradeEvent event = event(submissionId, revision, type, actor);
+        SubmissionGradeEventEntity event = event(submissionId, revision, type, actor);
         event.setGrade(grade);
         event.setFeedback(feedback);
         event.setEffective(effective);
@@ -312,16 +316,16 @@ public class SubmissionGradingService {
         eventRepo.save(event);
     }
 
-    private void recordContent(Long submissionId, int revision, SubmissionGradeEvent.Type type, Person actor,
+    private void recordContent(Long submissionId, int revision, SubmissionGradeEventEntity.Type type, Person actor,
             Map<String, Object> content) {
-        SubmissionGradeEvent event = event(submissionId, revision, type, actor);
+        SubmissionGradeEventEntity event = event(submissionId, revision, type, actor);
         event.setContent(content);
         eventRepo.save(event);
     }
 
-    private static SubmissionGradeEvent event(Long submissionId, int revision, SubmissionGradeEvent.Type type,
+    private static SubmissionGradeEventEntity event(Long submissionId, int revision, SubmissionGradeEventEntity.Type type,
             Person actor) {
-        SubmissionGradeEvent event = SubmissionGradeEvent.of(submissionId, revision, type, now());
+        SubmissionGradeEventEntity event = SubmissionGradeEventEntity.of(submissionId, revision, type, now());
         event.setActorId(actor == null ? null : actor.getId());
         return event;
     }

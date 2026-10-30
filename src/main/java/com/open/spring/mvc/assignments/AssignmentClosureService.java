@@ -12,7 +12,7 @@ import com.open.spring.mvc.person.Person;
 
 /**
  * Closes an assignment: its grades become final and are copied to the gradebook. Teacher-only,
- * with no reopen; afterwards a grade changes only through a {@link GradeReview}.
+ * with no reopen; afterwards a grade changes only through a {@link GradeReviewEntity}.
  *
  * The close locks the assignment's submissions, then the assignment row (the order every grading
  * path uses), so grading writes in progress finish first and later ones see the closure.

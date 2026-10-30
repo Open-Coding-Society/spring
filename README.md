@@ -50,6 +50,8 @@ The site is build on Springboot.  The project is primarly used to store and retr
 - [Group chat architecture guide](docs/group-chat-architecture.md) — explains groups and group chat: the REST routes, the STOMP WebSocket on port 8589, S3 message storage, a diagram, known issues, and `api/groups.http`.
 - [Toolchain architecture guide](docs/toolchain-architecture.md) — explains Setup, Scoring, Help, the interactive local agent, report-upload versus station-check flows, API routes, and persistence.
 - [Announcement architecture guide](docs/announcement-architecture.md) — a small example of the five standard parts (REST controller, entity, JPA repository, service, table initializer), with its routes, a diagram, and `api/announcement.http`.
+- [Grading architecture guide](docs/grading-architecture.md) — AI and manual grades, revisions, student petitions, closing an assignment, and teacher reviews. Try the routes with [api/grading.http](api/grading.http).
+- [UI Builder architecture guide](docs/ui-builder-architecture.md) — how Spring stores, checks, publishes and shares the Pages UI Builder's page documents: who may edit and see a page, the row lock and versions, the routes, the tables, known issues, and `api/ui-builder.http`.
 
 The Java implementation for CS Pathway is now together in `src/main/java/com/open/spring/mvc/toolchain/`. The interactive Toolchain Trail agent/session flow is the current integrated station-check implementation. A separate text-report upload and AI-review flow is still present in the code; confirm whether students still use it before removing it. Existing `/api/cs-pathway` and `/api/toolchain` routes are preserved even though the Java package and class names are now unified.
 
@@ -179,9 +181,9 @@ GIST_TOKEN=your-github-gist-token-here
 # spring.mail.password=your-app-password
 
 # S3 Bucket Defaults
-AWS_BUCKET_NAME=your-bucket-name
-AWS_ACCESS_KEY_ID=your-access-key
-AWS_SECRET_ACCESS_KEY=your-secret-key
+AWS_BUCKET_NAME=my-bucket
+AWS_ACCESS_KEY_ID=local-access-key
+AWS_SECRET_ACCESS_KEY=local-secret-key-change-me
 AWS_REGION=us-east-2
 # if developing locally, set the endoint heree
 # AWS_S3_ENDPOINT=http://localhost:9000
@@ -371,15 +373,23 @@ first migration; this section is the summary.
 
 ## Local S3 Development
 
+If you are developing a component of Spring that requires AWS S3 bucket connections, you can emulate the bucket locally with RustFS. You will need to install [Docker](docs.docker.com/engine/install/) (or a similar containerization software).
+
 1. Start the local instance of RustFS:
 ```
 docker-compose -f rustfs.yml up -d
 ```
 2. Uncomment this line in `.env`:
-```
+```env
 AWS_S3_ENDPOINT=http://localhost:9000
 ```
-
+3. Log into `http://localhost:9001` with these keys:
+```env
+RUSTFS_ACCESS_KEY=local-access-key # ID
+RUSTFS_SECRET_KEY=local-secret-key-change-me # password
+```
+4. Create a bucket in RustFS called `my-bucket` (or whatever you set `AWS_BUCKET_NAME` to).
+5. Run `spring` and check if messages are written to the bucket via the Group Chat service.
 
 # Testing Grade FRQs API with Postman
 

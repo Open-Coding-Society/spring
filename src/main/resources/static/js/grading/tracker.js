@@ -11,6 +11,7 @@
   let current = null;          // assignment shown in the window
   let submissions = [];
   let queueEta = {};           // submissionId -> eta seconds
+  let openReviews = {};        // submissionId -> open review, such as a petition before close
   let graders = new Map();     // id -> {id, name, uid} for the graders panel
 
   // ---------- dates: the API stores MM/DD/YYYY, date inputs use YYYY-MM-DD ----------
@@ -142,12 +143,14 @@
     $('subList').style.display = '';
     $('subRows').innerHTML = '<tr><td colspan="4" class="g-empty">Loading…</td></tr>';
     try {
-      const [subs, queue] = await Promise.all([
+      const [subs, queue, open] = await Promise.all([
         api(`/api/submissions/assignment/${current.id}`),
         api('/api/submissions/ai-queue').catch(() => ({ entries: [] })),
+        reviews.openForAssignment(current.id).catch(() => []),
       ]);
       submissions = subs;
       queueEta = Object.fromEntries(queue.entries.map(e => [e.submissionId, e.etaSeconds]));
+      openReviews = Object.fromEntries(open.map(r => [r.submissionId, r]));
       renderSubmissions();
     } catch (e) {
       $('subRows').innerHTML = `<tr><td colspan="4" class="g-empty">Could not load submissions: ${esc(e.message)}</td></tr>`;
@@ -170,15 +173,18 @@
       const status = eta != null ? `<span class="g-badge warn">AI queue · ${esc(formatEta(eta))}</span>`
         : s.grade != null ? '<span class="g-badge ok">Graded</span>' : '<span class="g-badge muted">Ungraded</span>';
       const overridden = s.grading?.manualOverride;
-      // Closed assignments only offer a teacher review.
-      const actions = current.closedAt
-        ? '<button class="g-btn" type="button" data-sub="review">Review</button>'
-        : `<input type="number" class="g-grade-input" step="0.01" min="0" max="${current.points ?? 1}" value="${s.grade ?? ''}" placeholder="/ ${current.points ?? 1}" aria-label="Grade">
+      const pending = openReviews[s.id];
+      const flag = pending ? ` <span class="g-badge warn">${pending.reason === 'PETITION' ? 'Petition' : 'Review'} open</span>` : '';
+      const reviewButton = '<button class="g-btn" type="button" data-sub="review">Review</button>';
+      // Closed assignments only offer a teacher review; before close, only an open petition does.
+      const actions = current.closedAt ? reviewButton
+        : `${pending ? reviewButton : ''}
+          <input type="number" class="g-grade-input" step="0.01" min="0" max="${current.points ?? 1}" value="${s.grade ?? ''}" placeholder="/ ${current.points ?? 1}" aria-label="Grade">
           <button class="g-btn" type="button" data-sub="grade">Save</button>
           <button class="g-btn" type="button" data-sub="ai">AI grade</button>
           ${overridden ? '<button class="g-btn" type="button" data-sub="clear" title="Remove the instructor grade so the AI grade applies">Use AI grade</button>' : ''}`;
       return `<tr data-id="${s.id}">
-        <td>${esc(submitterName(s))}${s.isLate ? ' <span class="g-badge bad">Late</span>' : ''}</td>
+        <td>${esc(submitterName(s))}${s.isLate ? ' <span class="g-badge bad">Late</span>' : ''}${flag}</td>
         <td class="text-nowrap">${esc(formatGrade(s.grade, current.points))} ${gradeSourceBadge(s.grading)}</td>
         <td>${status}</td>
         <td class="text-nowrap">
@@ -252,14 +258,14 @@
     }
   }
 
-  // ---------- teacher review (after close) ----------
+  // ---------- teacher review (after close, or a petition before) ----------
   let reviewSubmission = null;
   let openReviewId = null;
 
   async function openReview(submissionId) {
     reviewSubmission = submissions.find(s => s.id === submissionId);
     if (!reviewSubmission) return;
-    $('reviewSubtitle').textContent = `${submitterName(reviewSubmission)} · final grade `
+    $('reviewSubtitle').textContent = `${submitterName(reviewSubmission)} · ${current.closedAt ? 'final grade' : 'grade'} `
       + formatGrade(reviewSubmission.grade, current.points);
     $('reviewReason').innerHTML = Object.entries(REVIEW_REASONS)
       .map(([value, label]) => `<option value="${value}">${esc(label)}</option>`).join('');
@@ -278,7 +284,7 @@
     }
     const open = list.find(r => r.status === 'OPEN');
     openReviewId = open ? open.id : null;
-    $('reviewOpenForm').style.display = open ? 'none' : '';
+    $('reviewOpenForm').style.display = open || !current.closedAt ? 'none' : '';
     $('reviewOpen').style.display = open ? '' : 'none';
     if (open) {
       $('reviewOpenedBy').textContent = `${REVIEW_REASONS[open.reason]} · opened by ${open.openedBy || 'a teacher'} · grade then ${formatGrade(open.gradeAtOpen, current.points)}`;
@@ -296,6 +302,9 @@
 
   function evidenceHtml(review) {
     const parts = [];
+    if (review.petitionMessage) {
+      parts.push(`<div><b>Student's petition:</b><div style="white-space:pre-wrap">${esc(review.petitionMessage)}</div></div>`);
+    }
     if (review.aiGrade != null) {
       parts.push(`<div><b>AI re-evaluation:</b> ${esc(formatGrade(review.aiGrade, current.points))}
         <div class="g-sub" style="white-space:pre-wrap">${esc(review.aiFeedback)}</div></div>`);

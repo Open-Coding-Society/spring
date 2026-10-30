@@ -1,0 +1,226 @@
+### Grading API Tests
+
+Exercises the grading lifecycle with the VS Code REST Client: AI and manual
+grades, a revision that keeps the manual grade, a student's petition, close,
+and a teacher review after close. See docs/grading-architecture.md.
+
+Select the `local` or `deployed` environment. `baseUrl`, `adminUid` and
+`adminPassword` are the variables `toolchain.http` uses; this file also needs
+`studentUid` and `studentPassword` for a student account. Set them all in the
+Git-ignored `.vscode/settings.json`.
+
+Run the requests in order. They work on a throwaway "[TEST]" assignment made
+in step 2, so closing it in step 17 touches no real grades. Logging in again
+replaces the JWT cookie, so each "Sign in" switches who the requests run as.
+
+### 1. Sign in as the teacher
+
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+
+{
+  "uid": "{{adminUid}}",
+  "password": "{{adminPassword}}"
+}
+
+### 2. Make a throwaway test assignment
+
+# @name testAssignment
+POST {{baseUrl}}/api/assignments/test
+
+### 3. Switch it to link submissions so the student can edit it later
+
+PUT {{baseUrl}}/api/assignments/{{testAssignment.response.body.$.id}}/details
+Content-Type: application/json
+
+{
+  "name": "{{testAssignment.response.body.$.name}}",
+  "type": "test",
+  "points": 1,
+  "dueDate": "{{testAssignment.response.body.$.dueDate}}",
+  "assignmentType": "link",
+  "description": "Created by api/grading.http"
+}
+
+### 4. Sign in as the student
+
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+
+{
+  "uid": "{{studentUid}}",
+  "password": "{{studentPassword}}"
+}
+
+### 5. Look up the student's id
+
+# @name student
+GET {{baseUrl}}/api/person/get
+
+### 6. Submit revision 1; the AI grades it straight away if it can
+
+# @name submission
+POST {{baseUrl}}/api/submissions/submit/{{testAssignment.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "submitterId": {{student.response.body.$.id}},
+  "isGroup": false,
+  "content": { "type": "link", "url": "https://example.com/grading-http/v1", "notes": "" },
+  "comment": "First try"
+}
+
+### 7. Petition without a manual grade: expect 409 NO_MANUAL_OVERRIDE
+
+POST {{baseUrl}}/api/grade-reviews/submission/{{submission.response.body.$.id}}/petition
+Content-Type: application/json
+
+{
+  "message": "Please look again"
+}
+
+### 8. Sign in as the teacher
+
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+
+{
+  "uid": "{{adminUid}}",
+  "password": "{{adminPassword}}"
+}
+
+### 9. Set a manual grade for revision 1: expect MANUAL_GRADE_APPLIED
+
+POST {{baseUrl}}/api/submissions/grade/{{submission.response.body.$.id}}?grade=0.5&feedback=Part%202%20is%20missing&revision=1
+
+### 10. Sign in as the student
+
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+
+{
+  "uid": "{{studentUid}}",
+  "password": "{{studentPassword}}"
+}
+
+### 11. Resubmit: revision 2 keeps the manual grade (grading.source is MANUAL, grade 0.5)
+
+PUT {{baseUrl}}/api/submissions/{{submission.response.body.$.id}}
+Content-Type: multipart/form-data; boundary=grading
+
+--grading
+Content-Disposition: form-data; name="contentType"
+
+link
+--grading
+Content-Disposition: form-data; name="url"
+
+https://example.com/grading-http/v2
+--grading
+Content-Disposition: form-data; name="comment"
+
+Added part 2
+--grading--
+
+### 12. History: REVISED then MANUAL_OVERRIDE_KEPT_BY_REVISION at revision 2
+
+GET {{baseUrl}}/api/submissions/{{submission.response.body.$.id}}/grading-history
+
+### 13. Petition the kept grade: expect 201 REVIEW_OPENED
+
+POST {{baseUrl}}/api/grade-reviews/submission/{{submission.response.body.$.id}}/petition
+Content-Type: application/json
+
+{
+  "message": "Revision 2 adds part 2"
+}
+
+### 14. The student's petitions, without the teacher's evidence
+
+GET {{baseUrl}}/api/grade-reviews/submission/{{submission.response.body.$.id}}/petitions
+
+### 15. Sign in as the teacher
+
+POST {{baseUrl}}/authenticate
+Content-Type: application/json
+
+{
+  "uid": "{{adminUid}}",
+  "password": "{{adminPassword}}"
+}
+
+### 16. Open reviews on the assignment: the petition from step 13
+
+# @name openReviews
+GET {{baseUrl}}/api/grade-reviews/assignment/{{testAssignment.response.body.$.id}}/open
+
+### 17. Grant it before close: expect MANUAL_GRADE_APPLIED (the gradebook waits for close)
+
+POST {{baseUrl}}/api/grade-reviews/{{openReviews.response.body.$[0].id}}/decision
+Content-Type: application/json
+
+{
+  "decision": "ADJUST",
+  "rationale": "Part 2 is in revision 2",
+  "grade": 0.9,
+  "feedback": "Regraded revision 2"
+}
+
+### 18. A grade for revision 1 is out of date: expect 409 STALE_REVISION
+
+POST {{baseUrl}}/api/submissions/grade/{{submission.response.body.$.id}}?grade=0.1&revision=1
+
+### 19. Close: expect ASSIGNMENT_FINALIZED and grades copied to the gradebook (cannot be undone)
+
+POST {{baseUrl}}/api/assignments/{{testAssignment.response.body.$.id}}/close
+
+### 20. Closing again: expect 409 ASSIGNMENT_CLOSED
+
+POST {{baseUrl}}/api/assignments/{{testAssignment.response.body.$.id}}/close
+
+### 21. Grading after close: expect 409 ASSIGNMENT_CLOSED
+
+POST {{baseUrl}}/api/submissions/grade/{{submission.response.body.$.id}}?grade=0.2
+
+### 22. Open a teacher review: expect 201 REVIEW_OPENED
+
+# @name review
+POST {{baseUrl}}/api/grade-reviews/submission/{{submission.response.body.$.id}}
+Content-Type: application/json
+
+{
+  "reason": "REGRADE_REQUEST",
+  "evidence": "Checking the final grade"
+}
+
+### 23. Add identical submissions to the evidence
+
+POST {{baseUrl}}/api/grade-reviews/{{review.response.body.$.review.id}}/similarity
+
+### 24. Decide without a rationale: expect 400 RATIONALE_REQUIRED
+
+POST {{baseUrl}}/api/grade-reviews/{{review.response.body.$.review.id}}/decision
+Content-Type: application/json
+
+{
+  "decision": "NO_CHANGE",
+  "rationale": ""
+}
+
+### 25. Keep the grade: expect REVIEW_NO_CHANGE
+
+POST {{baseUrl}}/api/grade-reviews/{{review.response.body.$.review.id}}/decision
+Content-Type: application/json
+
+{
+  "decision": "NO_CHANGE",
+  "rationale": "The grade matches the rubric"
+}
+
+### 26. Every review of the submission, oldest first
+
+GET {{baseUrl}}/api/grade-reviews/submission/{{submission.response.body.$.id}}
+
+### 27. Clean up the test assignment
+
+POST {{baseUrl}}/api/assignments/delete/{{testAssignment.response.body.$.id}}
