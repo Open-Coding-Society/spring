@@ -22,7 +22,7 @@ fields:
     selector: "td:nth-child(1)"
     mode: "text"
   deadline:
-    selector: "td:nth-child(2)"
+    selector: "td:nth-child(3) span.clr"
     mode: "text"
   link:
     selector: "a"
