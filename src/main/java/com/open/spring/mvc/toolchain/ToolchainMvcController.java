@@ -14,13 +14,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 public class ToolchainMvcController {
     private final ToolchainScoresService scoreService;
     private final ToolchainReportService setupReportService;
-    private final ToolchainHelpService helpRequestService;
 
-    public ToolchainMvcController(ToolchainScoresService scoreService, ToolchainReportService setupReportService,
-            ToolchainHelpService helpRequestService) {
+    public ToolchainMvcController(ToolchainScoresService scoreService, ToolchainReportService setupReportService) {
         this.scoreService = scoreService;
         this.setupReportService = setupReportService;
-        this.helpRequestService = helpRequestService;
     }
 
     @GetMapping("/read")
@@ -28,7 +25,6 @@ public class ToolchainMvcController {
         model.addAttribute("levels", ToolchainEnumLevels.values());
         model.addAttribute("rows", scoreService.getStudentRows());
         model.addAttribute("setupReports", setupReportService.getReportsByUid());
-        model.addAttribute("helpRequests", helpRequestService.getRecentRequests());
         return "cs-pathway/read";
     }
 }

@@ -6,7 +6,7 @@ Toolchain is the Java feature area for the CS Pathway learning experience. It su
 
 - Setup: collect and review evidence that a student's local development tools are ready.
 - Scoring: record and display progress through the five learning levels.
-- Help: let a student send a request to a teacher. This is a teacher help-request queue, not OCS chat. OCS chat is a possible future direction and is not implemented by this package.
+- Station Helper: let a student ask an AI helper (Gemini) about the station they are on. Answers are not saved and do not reach a teacher. It replaced the red flag teacher help-request queue.
 
 | Area | Location or prefix | Notes |
 | --- | --- | --- |
@@ -111,10 +111,10 @@ The package follows the Spring MVC and persistence pattern used by the rest of t
 
 - REST controllers expose JSON or plain-text HTTP operations. They translate HTTP input and authentication into service calls and translate results or errors into HTTP responses. The routes are use-case endpoints; they do not provide full CRUD for every resource.
 - DTOs are Java records used to exchange request and response data. Keep API-specific request/response records inside their API controller, as in the agent API, and service-owned result records inside the service that produces them. Use short contextual names and a DTO comment explaining their purpose. Other callers and tests import the nested record from its owner. Jackson maps JSON properties to record components and back. Records are transport shapes, not database tables.
-- JPA entities are Java objects mapped to database rows. `ToolchainReportEntity`, `ToolchainHelpEntity`, and `ToolchainSessionEntity` are feature-owned entities. Scores reuse the shared `Stats` entity.
-- Student identity comes from the active `Person` account model. "Student" in this guide and diagram describes the user's role, not a separate student table. `ToolchainScoresService.StudentRecord` is a dashboard DTO; score and help services use `PersonJpaRepository` to look up display names.
+- JPA entities are Java objects mapped to database rows. `ToolchainReportEntity` and `ToolchainSessionEntity` are feature-owned entities. Scores reuse the shared `Stats` entity.
+- Student identity comes from the active `Person` account model. "Student" in this guide and diagram describes the user's role, not a separate student table. `ToolchainScoresService.StudentRecord` is a dashboard DTO; the score service uses `PersonJpaRepository` to look up display names.
 - `JpaRepository` interfaces provide persistence operations and derived queries. They are the Java persistence interface, not a separate SQL database or a hand-written SQL layer.
-- Services contain business rules and coordinate repositories or external systems. `ToolchainReviewService` calls Gemini; the other services manage pairing reports, scores, help requests, agent sessions, and station rules.
+- Services contain business rules and coordinate repositories or external systems. `ToolchainReviewService` calls Gemini; the other services manage pairing reports, scores, agent sessions, and station rules; `ToolchainChatService` also calls Gemini for the Station Helper.
 - `ToolchainMvcController` serves the Thymeleaf teacher/admin page at `/mvc/cs-pathway/read`. It supplies dashboard data to `templates/cs-pathway/read.html`; this is a server-rendered UI route, not a REST endpoint.
 - `ToolchainSessionApiRestController`, `ToolchainSessionService`, `StationView`, `ToolchainStationRules`, and `ToolchainSessionEntity` implement the agent session lifecycle and station evidence evaluation.
 
@@ -130,7 +130,7 @@ The package follows the Spring MVC and persistence pattern used by the rest of t
 | POST | `/api/cs-pathway/setup-report/review/{uid}` | Request an advisory AI review | Teacher or administrator |
 | GET | `/api/cs-pathway/scores` | Read the signed-in student's level scores | Signed-in account |
 | PUT | `/api/cs-pathway/scores/{levelKey}` | Record progress for one level | Signed-in account |
-| POST | `/api/cs-pathway/help-requests` | Create a help request | Signed-in account |
+| POST | `/api/cs-pathway/chat` | Ask the Station Helper (Gemini) a question | Signed-in account |
 | POST | `/api/toolchain/sessions` | Start an agent session and issue a pairing code | Signed-in account |
 | POST | `/api/toolchain/pair` | Exchange a one-time code for a scoped agent token | Pairing code |
 | POST | `/api/toolchain/sessions/{sessionId}/check` | Tell the paired agent which station to check | Session owner |
@@ -146,7 +146,7 @@ The session UUID is not a student UID or a level key. The current pairing-code l
 
 Use the VS Code REST Client extension with the two HTTP request files to exercise the API flows described above:
 
-- [`api/cspathway.http`](../api/cspathway.http) tests the existing `/api/cs-pathway/...` compatibility routes for setup reports, help requests, and scores. Those routes remain unchanged even though the Java types now live in `mvc.toolchain`.
+- [`api/cspathway.http`](../api/cspathway.http) tests the existing `/api/cs-pathway/...` compatibility routes for setup reports, scores, and the Station Helper chat. Those routes remain unchanged even though the Java types now live in `mvc.toolchain`.
 - [`api/toolchain.http`](../api/toolchain.http) tests the interactive `/api/toolchain/...` agent/session API, including start, pair, poll, result submission, and session status.
 
 Select the `local` or `deployed` REST Client environment before sending requests. Authenticate first for endpoints requiring the signed-in game/student. The agent HTTP file deliberately submits failing sample evidence by default; only replace it with actual local check output and exit codes when testing a successful station check.
@@ -168,40 +168,43 @@ The persisted record is keyed by student UID in `cs_pathway_setup_report`. It st
 - The student records progress with `PUT /api/cs-pathway/scores/{levelKey}` and a JSON body such as `{"percentComplete": 60}`. The server derives the student UID from the authenticated principal rather than accepting it from the body.
 - `ToolchainEnumLevels` defines the five stable level keys and their `submodule` numbers. Those numbers identify rows in the shared `Stats` table where `module` is `cs-pathway`; do not renumber them after data has been written.
 - Progress is constrained to 0 through 100 and only moves forward. Missing levels are returned as zero percent. A level is finished at 100 percent.
-- The teacher page combines score rows, setup reports, and recent help requests.
+- The teacher page combines score rows and setup reports.
 
-### Help-request flow
+### Station Helper flow
 
-- A signed-in student submits `POST /api/cs-pathway/help-requests` with `levelKey`, optional `station`, and `message`.
-- The service validates the level and text lengths, then stores a request in `cs_pathway_help_request`. A student can submit at most one request per minute.
-- The teacher/admin dashboard shows up to the 200 most recent requests at `/mvc/cs-pathway/read`.
+- The game's chat button sends `POST /api/cs-pathway/chat` with `levelKey`, `question`, `progress` (current station and its steps for the student's OS, verified stations, OS, a failed check) and the last few `history` turns. The page builds `progress` in the pages repo's `model/chatContext.js`.
+- `ToolchainChatService` validates the level and question (at most 500 characters, one question per student every 3 seconds), clips every `progress` field to one short line, and puts the progress in Gemini's system instruction so the answer fits the student's station. `ToolchainGeminiClient` sends the request with `gemini.api.key` and `gemini.api.url` and retries HTTP 429/503.
+- The rules tell Gemini to put each command in its own fenced code block and other exact text in single backticks; the game shows those as code with a Copy button.
+- Nothing is stored: the conversation lives in the page. Errors are written for students and never name server settings.
 
 ## Persistence and security
 
-- `cs_pathway_setup_report`, `cs_pathway_help_request`, and `toolchain_session` are initialized by `ToolchainReportTableInitializer`, `ToolchainHelpTableInitializer`, and `ToolchainSessionTableInitializer`. These `ApplicationRunner` components are needed because Hibernate uses `ddl-auto=none`. Keep their DDL and corresponding entity mappings aligned for both SQLite and MySQL.
+- `cs_pathway_setup_report` and `toolchain_session` are initialized by `ToolchainReportTableInitializer` and `ToolchainSessionTableInitializer`. These `ApplicationRunner` components are needed because Hibernate uses `ddl-auto=none`. Keep their DDL and corresponding entity mappings aligned for both SQLite and MySQL.
 - Score data is stored in the shared `Stats` table. Pathway queries are isolated in `ToolchainStatsJpaRepository`; do not create a second score table without a deliberate data migration.
 - Interactive station sessions are stored in `toolchain_session`; this is separate from score rows and setup-report rows because it has its own pairing, token-expiry, station-request, and result lifecycle. `ToolchainStationRules` is the server-side allow-list and evaluator; a client must not determine its own pass/fail result.
 - The server evaluates submitted check evidence but never runs commands on a student's machine. The external local agent must map station requests to predefined checks and require both explicit student approval and its own safety confirmation before executing any local command. Pairing alone must not authorize arbitrary command execution.
-- The score and help endpoints use the authenticated student principal. The pairing-code issue route and AI review route have explicit role rules. The text report upload is public at the HTTP layer and relies on a valid, unexpired pairing code in the service. The MVC dashboard is restricted to teachers and administrators. See `SecurityConfig` and `MvcSecurityConfig` for the actual access rules.
+- The score and chat endpoints use the authenticated student principal. The pairing-code issue route and AI review route have explicit role rules. The text report upload is public at the HTTP layer and relies on a valid, unexpired pairing code in the service. The MVC dashboard is restricted to teachers and administrators. See `SecurityConfig` and `MvcSecurityConfig` for the actual access rules.
 - Toolchain pair, poll, and result routes are public at the Spring Security matcher layer because the local agent has no browser JWT cookie; `ToolchainSessionService` requires a valid one-time pairing code or the session's scoped, unexpired bearer token. The game session routes require the signed-in owner.
 - Treat pairing codes and agent tokens as credentials: keep them random, short-lived, validated on every use, and out of logs. Avoid logging raw verifier reports or command output, which may contain local machine details.
 
 ## Package organization and naming
 
-The Java types are consolidated under `mvc.toolchain` so students can discuss scores, help requests, setup reports, and interactive station checks in one place. The files use feature-first, role-suffix names such as `ToolchainHelpEntity`, `ToolchainHelpService`, and `ToolchainHelpTableInitializer`. API controllers, DTOs, and repositories retain their established role names. The Java type renames do not change API routes or database tables.
+The Java types are consolidated under `mvc.toolchain` so students can discuss scores, the Station Helper, setup reports, and interactive station checks in one place. The files use feature-first, role-suffix names such as `ToolchainReportEntity`, `ToolchainChatService`, and `ToolchainSessionTableInitializer`. API controllers, DTOs, and repositories retain their established role names. The Java type renames do not change API routes or database tables.
 
 | Topic | Java types and responsibility |
 | --- | --- |
-| Help | `ToolchainHelp*` handles help submissions, dashboard rows, and persistence. `ToolchainHelpExceptionTooSoon` represents the submission cooldown. |
 | Reports | `ToolchainReport*` handles report pairing, uploads, and persistence. |
 | Review | `ToolchainReviewService` produces the advisory AI assessment as its nested `EvidenceRecord`. |
+| Station Helper | `ToolchainChat*` answers students' questions; request records are nested in `ToolchainChatApiRestController`, and `ToolchainChatExceptionTooSoon` represents the question cooldown. `ToolchainGeminiClient` makes the Gemini call. |
 | Sessions | `ToolchainSession*` manages the paired session, credentials, current station, and results. The local agent is a participant, not the server-side resource. |
 | Station rules | `ToolchainStationRules` evaluates evidence and returns `CheckResult` records; it does not execute commands. |
 | Scores | `ToolchainScores*` handles progress and dashboard summaries; `ToolchainStatsJpaRepository` accesses the shared `Stats` entity. |
 
 The public routes retain both `/api/cs-pathway` and `/api/toolchain` prefixes. Those names are part of the existing game/agent contract and are deliberately not renamed along with Java packages and files. Renaming routes or database tables should be a separate, coordinated migration that updates external game/agent clients and persisted data as needed.
 
-`ToolchainHelp*` names the help system rather than just its request operation. `ToolchainReport*` names the report system without restricting its Java types to setup reports. The current report validation and setup-review behavior are unchanged; supporting upgrade or other reports would require explicit changes to those rules. Existing `/setup-report` routes and `cs_pathway_setup_report` and `cs_pathway_help_request` tables retain their compatibility names.
+`ToolchainReport*` names the report system without restricting its Java types to setup reports. The current report validation and setup-review behavior are unchanged; supporting upgrade or other reports would require explicit changes to those rules. Existing `/setup-report` routes and the `cs_pathway_setup_report` table retain their compatibility names.
+
+The red flag help-request queue (`ToolchainHelp*`, `POST /api/cs-pathway/help-requests`) was removed. Its `cs_pathway_help_request` table was left in place so saved requests are not lost; nothing reads or writes it now, and dropping it is a separate decision.
 
 If the report-upload mechanism is no longer used, first confirm that its UI, REST clients, scripts, and saved reports are no longer needed. Then plan deprecation/removal separately instead of folding it into a package move.
 
