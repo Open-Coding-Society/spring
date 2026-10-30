@@ -80,6 +80,7 @@
 .g-table tr:last-child td { border-bottom: none; }
 .g-table tr.g-click { cursor: pointer; }
 .g-table tr.g-click:hover td { background: var(--g-panel); }
+.g-truncate { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .g-details { width: 100%; font-size: 0.9rem; }
 .g-details th { color: var(--g-muted); font-weight: 500; padding: 3px 12px 3px 0; white-space: nowrap; width: 1%; }
 .g-details td { padding: 3px 0; }
