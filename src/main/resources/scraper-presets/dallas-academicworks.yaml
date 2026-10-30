@@ -1,0 +1,55 @@
+# Preset for ScraperController's POST /api/scraper/run (preset: "dallas-academicworks").
+# Scrapes the Dallas College scholarship/opportunities listing.
+#
+# Field reference (same shape taught in the scraper lessons, see
+# _projects/systems/scraper/docs/):
+#   url            - page to start scraping
+#   itemsSelector  - CSS selector matching each repeated row/card
+#   fields         - named outputs: { selector, mode: text|attr|texts, attr }
+#   pagination     - how to find the next page
+#   detail         - follow each item's link and extract more fields from that page
+#   filters        - drop items whose deadline is blank or already "Ended"
+#   limits         - guardrails on pages/items/concurrency/timeout
+
+url: "https://dallascollege.academicworks.com/opportunities"
+itemsSelector: "table tbody tr"
+
+fields:
+  name:
+    selector: "a"
+    mode: "text"
+  award:
+    selector: "td:nth-child(1)"
+    mode: "text"
+  deadline:
+    selector: "td:nth-child(2)"
+    mode: "text"
+  link:
+    selector: "a"
+    mode: "attr"
+    attr: "href"
+
+pagination:
+  type: "optionDataDirectUrl"
+  selector: "option[name=page]"
+  attr: "data-direct-url"
+
+detail:
+  linkSelector: "a"
+  linkAttr: "href"
+  fields:
+    questions:
+      selector: ".js-question"
+      mode: "texts"
+
+filters:
+  deadlineField: "deadline"
+  skipBlankDeadline: true
+  skipEndedDeadline: true
+  endedValue: "Ended"
+
+limits:
+  maxPages: 20
+  maxItems: 1000
+  maxConcurrency: 10
+  timeoutMs: 20000
