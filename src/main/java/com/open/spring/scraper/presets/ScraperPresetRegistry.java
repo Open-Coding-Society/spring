@@ -1,73 +1,61 @@
 package com.open.spring.scraper.presets;
 
-import java.util.HashMap;
-import java.util.Map;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.Locale;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Component;
 
-import com.open.spring.scraper.dto.ScrapeField;
+import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import com.open.spring.scraper.dto.ScrapeRequest;
 
+/**
+ * Loads scraper presets from src/main/resources/scraper-presets/&lt;name&gt;.yaml instead of
+ * building them with ScrapeRequest's Java setters. A preset is the exact same JSON/YAML shape
+ * the scraper lessons already teach students to write by hand (see
+ * _projects/systems/scraper/docs/ in the frontend repo) - keeping presets in that same format,
+ * rather than ~40 lines of nested `new ScrapeRequest.PaginationConfig()` construction, means
+ * anyone who can write a lesson payload can also read or add a preset.
+ *
+ * Presets are read fresh on every request rather than cached: ScrapeRequest's fields are
+ * mutable and ScraperController.mergePresetAndOverrides() mutates the returned instance
+ * directly, so a cached singleton would leak overrides from one request's preset into the
+ * next's.
+ */
 @Component
 public class ScraperPresetRegistry {
+
+    private static final Logger logger = LoggerFactory.getLogger(ScraperPresetRegistry.class);
+    private static final String PRESET_DIRECTORY = "scraper-presets";
+
+    private final YAMLMapper yamlMapper = new YAMLMapper();
 
     public ScrapeRequest getPreset(String presetName) {
         if (presetName == null || presetName.isBlank()) {
             return null;
         }
-        if ("dallas-academicworks".equalsIgnoreCase(presetName)) {
-            return dallasAcademicWorks();
+
+        // Preset names become filenames on the classpath - reject anything that isn't a
+        // plain lowercase-and-dashes identifier before it ever reaches a resource lookup.
+        String normalized = presetName.trim().toLowerCase(Locale.ROOT);
+        if (!normalized.matches("[a-z0-9-]+")) {
+            return null;
         }
-        return null;
-    }
 
-    private ScrapeRequest dallasAcademicWorks() {
-        ScrapeRequest request = new ScrapeRequest();
-        request.setUrl("https://dallascollege.academicworks.com/opportunities");
-        request.setItemsSelector("table tbody tr");
+        String resourcePath = PRESET_DIRECTORY + "/" + normalized + ".yaml";
+        ClassPathResource resource = new ClassPathResource(resourcePath);
+        if (!resource.exists()) {
+            return null;
+        }
 
-        ScrapeRequest.PaginationConfig pagination = new ScrapeRequest.PaginationConfig();
-        pagination.setType("optionDataDirectUrl");
-        pagination.setSelector("option[name=page]");
-        pagination.setAttr("data-direct-url");
-        request.setPagination(pagination);
-
-        Map<String, ScrapeField> fields = new HashMap<>();
-        fields.put("name", field("a", "text", null));
-        fields.put("award", field("td:nth-child(1)", "text", null));
-        fields.put("deadline", field("td:nth-child(2)", "text", null));
-        fields.put("link", field("a", "attr", "href"));
-        request.setFields(fields);
-
-        ScrapeRequest.DetailConfig detail = new ScrapeRequest.DetailConfig();
-        detail.setLinkSelector("a");
-        detail.setLinkAttr("href");
-        Map<String, ScrapeField> detailFields = new HashMap<>();
-        detailFields.put("questions", field(".js-question", "texts", null));
-        detail.setFields(detailFields);
-        request.setDetail(detail);
-
-        ScrapeRequest.FilterConfig filters = new ScrapeRequest.FilterConfig();
-        filters.setDeadlineField("deadline");
-        filters.setSkipBlankDeadline(true);
-        filters.setSkipEndedDeadline(true);
-        filters.setEndedValue("Ended");
-        request.setFilters(filters);
-
-        ScrapeRequest.LimitsConfig limits = new ScrapeRequest.LimitsConfig();
-        limits.setMaxPages(20);
-        limits.setMaxItems(1000);
-        limits.setMaxConcurrency(10);
-        limits.setTimeoutMs(20000);
-        request.setLimits(limits);
-        return request;
-    }
-
-    private ScrapeField field(String selector, String mode, String attr) {
-        ScrapeField field = new ScrapeField();
-        field.setSelector(selector);
-        field.setMode(mode);
-        field.setAttr(attr);
-        return field;
+        try (InputStream in = resource.getInputStream()) {
+            return yamlMapper.readValue(in, ScrapeRequest.class);
+        } catch (IOException e) {
+            logger.error("Could not read scraper preset '{}' from {}: {}", presetName, resourcePath, e.getMessage());
+            return null;
+        }
     }
 }

@@ -320,8 +320,11 @@ public class GenericScraperService {
         return filters.isSkipEndedDeadline() && deadline.equalsIgnoreCase(filters.getEndedValue());
     }
 
+    // A genuine header row is built entirely of <th>; a data row that uses <th scope="row">
+    // for one cell (a common accessibility pattern) still has <td> siblings and must not be
+    // mistaken for one.
     private boolean looksLikeHeaderRow(Element row) {
-        return !row.select("th").isEmpty();
+        return row.select("td").isEmpty() && !row.select("th").isEmpty();
     }
 
     private String toAbsoluteUrl(String base, String pathOrUrl) {

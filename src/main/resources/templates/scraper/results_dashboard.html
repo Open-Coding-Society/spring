@@ -1,0 +1,66 @@
+<!DOCTYPE HTML>
+<html xmlns:layout="http://www.w3.org/1999/xhtml" xmlns:th="http://www.w3.org/1999/xhtml"
+    layout:decorate="~{layouts/base}" lang="en">
+
+<th:block layout:fragment="style" th:remove="tag">
+    <link rel="stylesheet" th:href="@{/assets/css/grading.css}">
+</th:block>
+
+<th:block layout:fragment="title" th:remove="tag">Scraper Results</th:block>
+
+<th:block layout:fragment="body" th:remove="tag">
+<div class="grading">
+    <h2>Scraper Results</h2>
+    <div class="g-sub">Every scrape a student chose to keep from the Pages scraper runner. Read-only - students manage their own from "My Scrapes".</div>
+
+    <div class="g-toolbar">
+        <input type="text" class="g-search" id="resultSearch" placeholder="Search by student uid, label, or source URL" aria-label="Search saved scrapes">
+        <span class="g-sub mb-0" id="resultCount"></span>
+    </div>
+
+    <div class="g-table-wrap">
+        <table class="g-table">
+            <thead>
+                <tr>
+                    <th>Student</th>
+                    <th>Label</th>
+                    <th>Source URL</th>
+                    <th>Items</th>
+                    <th>Saved</th>
+                </tr>
+            </thead>
+            <tbody id="resultRows"><tr><td colspan="5" class="g-empty">Loading…</td></tr></tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Result detail window -->
+<div class="g-modal" id="resultModal" role="dialog" aria-modal="true" aria-labelledby="rmTitle">
+    <div class="g-modal-box">
+        <div class="g-modal-head">
+            <div>
+                <h3 id="rmTitle">Saved scrape</h3>
+                <div class="g-sub mb-0" id="rmSubtitle"></div>
+            </div>
+            <button class="g-btn danger" type="button" id="rmDelete">Delete</button>
+            <button class="g-btn" type="button" data-close aria-label="Close">&times;</button>
+        </div>
+
+        <div class="g-two-col mb-2">
+            <div>
+                <div class="g-sub mb-1">Request</div>
+                <pre class="g-panel g-scroll" id="rmRequest"></pre>
+            </div>
+            <div>
+                <div class="g-sub mb-1">Result</div>
+                <pre class="g-panel g-scroll" id="rmResult"></pre>
+            </div>
+        </div>
+    </div>
+</div>
+</th:block>
+
+<th:block layout:fragment="script" th:remove="tag">
+<script th:src="@{/js/scraper/dashboard.js}"></script>
+</th:block>
+</html>
