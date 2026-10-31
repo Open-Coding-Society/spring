@@ -92,6 +92,57 @@ flowchart TD
 
 The pairing code currently expires after **5 minutes**, and the scoped agent token after **4 hours**, as configured by `toolchain.pairing-code-lifetime` and `toolchain.agent-token-lifetime` in `application.properties`. These bounded credential lifetimes are configurable; keep machine credentials scoped to one session and require re-pairing after expiry. Expiration does not automatically delete the persisted session or its results. If the agent-token lifetime is tightened, update the property and this documentation together.
 
+## Session lifecycle diagrams
+
+These two diagrams follow `ToolchainSessionService` line by line. The first shows who calls whom for one pairing, and the second shows how a session's status changes. `EXPIRED` and `AGENT_EXPIRED` are never stored. `view()` reports them when a lifetime has passed.
+
+```mermaid
+sequenceDiagram
+    participant Game as Signed-in game
+    participant Api as ToolchainSessionApiRestController
+    participant Svc as ToolchainSessionService
+    participant Rules as ToolchainStationRules
+    participant Db as toolchain_session table
+    participant Agent as Local Toolchain agent
+
+    Game->>Api: POST /api/toolchain/sessions with stationId
+    Api->>Svc: start for the signed-in student
+    Svc->>Rules: requireAccessible (unknown station is a 400)
+    Svc->>Db: save row with status WAITING_FOR_AGENT and the code hash only
+    Svc-->>Game: sessionId and one-time pairingCode
+    Agent->>Api: POST /api/toolchain/pair with pairingCode
+    Api->>Svc: pair
+    Svc->>Db: consume the code atomically (single use, unexpired)
+    Svc->>Db: save agent token hash and set status CHECKING
+    Svc-->>Agent: agentToken scoped to this session
+    Game->>Api: POST /api/toolchain/sessions/ID/check with stationId
+    Api->>Svc: requestCheck (owner only, agent must be connected)
+    Svc->>Db: set station and status CHECKING
+    Agent->>Api: GET /api/toolchain/sessions/ID/next with bearer token
+    Api->>Svc: nextRequest (token must match this session and be unexpired)
+    Svc-->>Agent: StationView with the requested station
+    Agent->>Api: POST /api/toolchain/sessions/ID/results with evidence
+    Api->>Svc: submitResults
+    Svc->>Rules: evaluate evidence (exit code 0 and output matches)
+    Svc->>Db: save VERIFIED or FAILED with the check results
+    Game->>Api: GET /api/toolchain/sessions/ID
+    Api-->>Game: StationView with status and checks
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> WAITING_FOR_AGENT: game starts a session
+    WAITING_FOR_AGENT --> CHECKING: agent pairs with the code
+    WAITING_FOR_AGENT --> EXPIRED: code lifetime passes
+    CHECKING --> VERIFIED: every check passes
+    CHECKING --> FAILED: a check fails or is missing
+    FAILED --> VERIFIED: agent reports again and every check passes
+    FAILED --> CHECKING: game requests a check
+    VERIFIED --> CHECKING: game requests a different station
+    CHECKING --> AGENT_EXPIRED: agent token lifetime passes
+    note right of AGENT_EXPIRED: Reported from any paired state once the token has expired
+```
+
 ## Two setup/report mechanisms
 
 There are two setup mechanisms in the code. They should not be confused just because both use pairing codes:
