@@ -88,7 +88,6 @@ public class GroupChatReadService {
         readStateRepository.save(state);
     }
 
-    // Match on uid, not display name: two members can share a name
     private boolean isFrom(GroupChatMessage message, String uid) {
         return uid != null && uid.equals(message.getAuthor_uid());
     }

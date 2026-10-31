@@ -19,6 +19,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.open.spring.mvc.groups.GroupChatIdentityService.AuthenticatedIdentity;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
@@ -81,8 +82,26 @@ public class GroupChatApiController {
         return uid == null ? null : personRepository.findByUid(uid);
     }
 
-    // GroupChatMessage only stores the sender's display name (no Person link), so the
-    // ownership check needs the authenticated uid resolved to that same display name.
+    private AuthenticatedIdentity getCurrentIdentity() {
+        Authentication auth =
+                SecurityContextHolder.getContext().getAuthentication();
+
+        if (auth == null
+                || !auth.isAuthenticated()
+                || "anonymousUser".equals(auth.getName())) {
+            return null;
+        }
+
+        String uid = auth.getName();
+        Person person = personRepository.findByUid(uid);
+
+        if (person == null) {
+            return null;
+        }
+
+        return new AuthenticatedIdentity(uid, person.getName());
+    }
+
     private String resolveCurrentDisplayName() {
         String uid = getCurrentUsername();
         if (uid == null) {
@@ -143,6 +162,12 @@ public class GroupChatApiController {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
 
+        AuthenticatedIdentity identity = getCurrentIdentity();
+
+        if (identity == null) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+
         // String currentUsername = getCurrentUsername();
         // if (currentUsername == null) {
         //     return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
@@ -156,7 +181,7 @@ public class GroupChatApiController {
         }
 
         try {
-            realtimeService.publishMessage(groupId, message.getMessage(), message.getImage());
+            realtimeService.publishMessage(groupId, message.getMessage(), message.getImage(), identity);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
@@ -176,8 +201,8 @@ public class GroupChatApiController {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
 
-        String requesterDisplayName = resolveCurrentDisplayName();
-        if (requesterDisplayName == null) {
+        AuthenticatedIdentity identity = getCurrentIdentity();
+        if (identity == null) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
 
@@ -187,7 +212,7 @@ public class GroupChatApiController {
 
         boolean updated;
         try {
-            updated = realtimeService.editMessage(groupId, messageId, request.getMessage(), requesterDisplayName);
+            updated = realtimeService.editMessage(groupId, messageId, request.getMessage(), identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         } catch (RuntimeException ex) {
@@ -211,13 +236,13 @@ public class GroupChatApiController {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
 
-        String requesterDisplayName = resolveCurrentDisplayName();
-        if (requesterDisplayName == null) {
+        AuthenticatedIdentity identity = getCurrentIdentity();
+        if (identity == null) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
 
         try {
-            realtimeService.deleteMessage(groupId, messageId, requesterDisplayName);
+            realtimeService.deleteMessage(groupId, messageId, identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         } catch (RuntimeException ex) {

@@ -109,18 +109,16 @@ public class GroupChatService {
 
     /**
      * Returns whether a message with that id was found (and updated) in this group.
-     * Throws {@link SecurityException} if the message exists but {@code requesterDisplayName}
-     * didn't send it. Compared by display name, not uid -- a {@link GroupChatMessage} only
-     * ever stores the sender's display name (there's no Person link, unlike direct messages),
-     * since group chat predates/doesn't use Person-backed identity for its S3-stored history.
+     * Throws {@link SecurityException} unless the authenticated requester's uid matches
+     * the stored author uid. Legacy messages without an author uid cannot be edited.
      */
-    public boolean editMessage(String groupName, String messageId, String newMessage, String requesterDisplayName) {
+    public boolean editMessage(String groupName, String messageId, String newMessage, String requesterUid) {
         if (messageId == null) return false;
         List<GroupChatMessage> messages = getMessages(groupName);
         boolean found = false;
         for (GroupChatMessage m : messages) {
             if (messageId.equals(m.getId())) {
-                if (requesterDisplayName == null || !requesterDisplayName.equals(m.getAuthor())) {
+                if (requesterUid == null || !requesterUid.equals(m.getAuthor_uid())) {
                     throw new SecurityException("Not the message sender");
                 }
                 m.setMessage(newMessage);
@@ -144,7 +142,7 @@ public class GroupChatService {
     }
 
     /** Same ownership rule as {@link #editMessage}; throws {@link SecurityException} on mismatch. */
-    public void deleteMessage(String groupName, String messageId, String requesterDisplayName) {
+    public void deleteMessage(String groupName, String messageId, String requesterUid) {
         if (messageId == null) return;
         List<GroupChatMessage> messages = getMessages(groupName);
 
@@ -153,7 +151,7 @@ public class GroupChatService {
                 .findFirst()
                 .orElse(null);
         if (target == null) return;
-        if (requesterDisplayName == null || !requesterDisplayName.equals(target.getAuthor())) {
+        if (requesterUid == null || !requesterUid.equals(target.getAuthor_uid())) {
             throw new SecurityException("Not the message sender");
         }
 

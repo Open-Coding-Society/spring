@@ -4,8 +4,6 @@ import java.time.Instant;
 import java.util.Optional;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
 
 import com.open.spring.mvc.groups.GroupChatIdentityService.AuthenticatedIdentity;
@@ -23,14 +21,12 @@ public class GroupChatRealtimeService {
     public static final String GROUP_TOPIC_PREFIX = "/topic/group/";
 
     private final GroupChatService groupChatService;
-    private final GroupChatIdentityService identityService;
     private final GroupsJpaRepository groupsRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
-    public GroupChatEvent publishMessage(Long groupId, String message, String image) {
+    public GroupChatEvent publishMessage(Long groupId, String message, String image, AuthenticatedIdentity identity) {
         Groups group = getGroupOrThrow(groupId);
 
-        AuthenticatedIdentity identity = identityService.getCurrentIdentity();
         if ((message == null || message.isBlank()) && (image == null || image.isBlank())) {
             throw new IllegalArgumentException("Message or image must be provided");
         }
@@ -56,12 +52,11 @@ public class GroupChatRealtimeService {
 
     /**
      * Returns whether the message existed (and was broadcast as edited). Throws
-     * {@link SecurityException} if {@code requesterDisplayName} didn't send it --
-     * see {@link GroupChatService#editMessage} for why a display name, not a uid.
+     * {@link SecurityException} if the authenticated requester's uid is not the author uid.
      */
-    public boolean editMessage(Long groupId, String messageId, String newMessage, String requesterDisplayName) {
+    public boolean editMessage(Long groupId, String messageId, String newMessage, String requesterUid) {
         Groups group = getGroupOrThrow(groupId);
-        boolean updated = groupChatService.editMessage(group.getName(), messageId, newMessage, requesterDisplayName);
+        boolean updated = groupChatService.editMessage(group.getName(), messageId, newMessage, requesterUid);
         if (!updated) {
             return false;
         }
@@ -79,10 +74,10 @@ public class GroupChatRealtimeService {
         return true;
     }
 
-    /** Throws {@link SecurityException} if {@code requesterDisplayName} didn't send it. */
-    public void deleteMessage(Long groupId, String messageId, String requesterDisplayName) {
+    /** Throws {@link SecurityException} if the authenticated requester didn't send it. */
+    public void deleteMessage(Long groupId, String messageId, String requesterUid) {
         Groups group = getGroupOrThrow(groupId);
-        groupChatService.deleteMessage(group.getName(), messageId, requesterDisplayName);
+        groupChatService.deleteMessage(group.getName(), messageId, requesterUid);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("deleteMessageServer")

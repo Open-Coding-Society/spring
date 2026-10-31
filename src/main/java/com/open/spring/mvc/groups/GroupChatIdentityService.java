@@ -1,6 +1,5 @@
 package com.open.spring.mvc.groups;
 
-import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Service;
@@ -17,19 +16,11 @@ public class GroupChatIdentityService {
 
     private final PersonJpaRepository personRepository;
 
-    public AuthenticatedIdentity getCurrentIdentity() {
-        Authentication auth =
-                SecurityContextHolder.getContext().getAuthentication();
-
-        if (auth == null
-                || !auth.isAuthenticated()
-                || auth instanceof AnonymousAuthenticationToken
-                || auth.getName() == null
-                || auth.getName().isBlank()) {
+    public AuthenticatedIdentity resolve(String uid) {
+        if (uid == null || uid.isBlank()) {
             throw new SecurityException("Authentication required");
         }
 
-        String uid = auth.getName();
         Person person = personRepository.findByUid(uid);
 
         if (person == null

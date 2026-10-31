@@ -35,17 +35,26 @@ Content-Type: application/json
 
 {}
 
-### 3. Help Requests
+### 3. Station Helper chat
 
-# Send a help request (Requires Authentication)
-# Use the cookie from the authentication request above
-POST {{baseUrl}}/api/cs-pathway/help-requests
+# Ask the Gemini Station Helper a question (Requires Authentication)
+POST {{baseUrl}}/api/cs-pathway/chat
 Content-Type: application/json
 
 {
   "levelKey": "toolchain-trail",
-  "station": "Git Village Hall",
-  "message": "I am stuck on the git commit step!"
+  "question": "git --version says command not found. What do I do?",
+  "progress": {
+    "stationName": "Git Village Hall",
+    "stationSkill": "Version control with git",
+    "stationStatus": "failed",
+    "os": "macOS",
+    "completedStations": ["Terminal Town Gate"],
+    "totalStations": 7,
+    "stationSteps": ["Check git: git --version"],
+    "failedChecks": ["git: command not found"]
+  },
+  "history": []
 }
 
 ### 4. Scoring & Progress

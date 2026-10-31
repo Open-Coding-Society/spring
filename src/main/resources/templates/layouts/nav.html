@@ -62,6 +62,9 @@
                                 <li><a class="dropdown-item"
                                         sec:authorize="hasRole('ROLE_TEACHER') or hasRole('ROLE_ADMIN')"
                                         th:href="@{/mvc/cs-pathway/read}">CS Pathway Scores</a></li>
+                                <li><a class="dropdown-item"
+                                        sec:authorize="hasRole('ROLE_TEACHER') or hasRole('ROLE_ADMIN')"
+                                        th:href="@{/mvc/scraper/results}">Scraper Results</a></li>
                                 <li><a class="dropdown-item" sec:authorize="hasRole('ROLE_ADMIN')"
                                      th:href="@{/api/imports/backups}">Database Backups</a></li>
                                 <li><a class="dropdown-item" sec:authorize="hasRole('ROLE_ADMIN')"
