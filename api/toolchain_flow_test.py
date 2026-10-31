@@ -17,6 +17,7 @@ PW = os.environ.get("TOOLCHAIN_TEST_PASSWORD", "LocalTest123!" if IS_LOCAL else 
 STUDENT_UID = os.environ.get("TOOLCHAIN_STUDENT_UID", "hop")
 TEACHER_UID = os.environ.get("TOOLCHAIN_TEACHER_UID", "niko")
 STATION = "terminal-town-gate"
+PAGES_FOLDER = os.environ.get("TOOLCHAIN_PROJECT_FOLDER", "opencs/pages")   # the server's toolchain.project-folder
 if not IS_LOCAL and os.environ.get("TOOLCHAIN_TEST_ALLOW_REMOTE") != "1":
     sys.exit("Refusing to run against " + BASE + ": this test creates sessions. "
              "Set TOOLCHAIN_TEST_ALLOW_REMOTE=1 to allow a non-local server.")
@@ -63,10 +64,10 @@ def check(label, ok, detail=""):
     print("PASS" if ok else "FAIL", "-", label, ("| " + detail) if detail else "")
 
 
-def evidence(exit_code=0, trail="/home/test/toolchain-trail", station=True):
+def evidence(exit_code=0, trail="/home/test/" + PAGES_FOLDER, station=True):
     body = {"os": "linux", "stationId": STATION, "checks": [
         {"id": "working-folder", "exitCode": 0, "output": "/home/test"},
-        {"id": "trail-folder", "exitCode": exit_code, "output": trail}]}
+        {"id": "pages-clone", "exitCode": exit_code, "output": trail}]}
     if not station:
         del body["stationId"]
     return body
