@@ -98,6 +98,16 @@ server.port=8585
 socket.port=8589
 ```
 
+### First run on a fresh checkout
+
+A new local database is empty, and the app does not create most tables itself (`ddl-auto=none`). Without this step startup fails with `Application run failed` and `no such table: person`.
+
+1. Create the `.env` file (see Configuration Requirements above and the `.env files` section below).
+2. Make sure the app is not running. `init` refuses to run while port 8585 is in use.
+3. Run `python3 scripts/db_migrate.py status` and confirm it says `Mode: SQLITE` and a path under `volumes/`.
+4. Run `python3 scripts/db_migrate.py init` and answer `y`. This resets only your local SQLite file.
+5. Start the app with `./mvnw spring-boot:run`.
+
 ## Run Project
 
 - Play or click entry point is Main.java, look for Run option in code.  This eanbles Springboot to build and load.
