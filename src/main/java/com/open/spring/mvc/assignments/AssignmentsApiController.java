@@ -897,7 +897,7 @@ public class AssignmentsApiController {
 		));
 	// if the uid from the AuthenticationPrincipal does not match the requested studentId,
 	// reject the request; EXCEPTION: admins/teachers are allowed
-	if (!p.getUid().equals(requesterUid) && !(requester.hasRoleWithName("ROLE_TEACHER") || requester.hasRoleWithName("ROLE_ADMIN"))) {
+	if (!p.getUid().equals(requesterUid) && !(requester.hasRole("ROLE_TEACHER") || requester.hasRole("ROLE_ADMIN"))) {
 		throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User does not have access to this resource");
 	}
 
