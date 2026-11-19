@@ -9,7 +9,9 @@ import java.util.Optional;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -23,6 +25,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.person.RolesJsonConverter;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -43,6 +46,11 @@ public class GroupsApiController {
 
     @Autowired
     private ClassGroupMembershipService classGroupMembershipService;
+
+    @Autowired
+    private MentorAccess mentorAccess;
+
+    private static final RolesJsonConverter ROLES = new RolesJsonConverter();
 
     // ===== DTOs =====
     @Data
@@ -79,6 +87,37 @@ public class GroupsApiController {
     }
 
     // ===== Helper Methods =====
+
+    /** The signed-in Person, or null when nobody is signed in. */
+    private Person currentPerson() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        if (auth == null || !auth.isAuthenticated() || "anonymousUser".equals(auth.getName())) {
+            return null;
+        }
+        return personRepository.findByUid(auth.getName());
+    }
+
+    /**
+     * Refuses a mentor the routes that look through or change groups (see MentorRules.manageGroups), or null when
+     * the signed-in account may go on.
+     */
+    private ResponseEntity<Object> mentorManageRefusal() {
+        return MentorRules.manageGroups(currentPerson()).map(MentorRules.Refusal::toResponse).orElse(null);
+    }
+
+    /** The people with these ids, in order, once each, leaving out ids that match no one. */
+    private List<Person> findPeople(List<Long> personIds) {
+        List<Person> found = new ArrayList<>();
+        if (personIds != null) {
+            for (Long personId : new java.util.LinkedHashSet<>(personIds)) {
+                if (personId != null) {
+                    personRepository.findById(personId).ifPresent(found::add);
+                }
+            }
+        }
+        return found;
+    }
+
     private Map<String, Object> buildGroupResponse(Groups group) {
         Map<String, Object> groupMap = new LinkedHashMap<>();
         groupMap.put("id", group.getId());
@@ -87,7 +126,7 @@ public class GroupsApiController {
         groupMap.put("course", group.getCourse());
 
         List<Map<String, Object>> membersList = new ArrayList<>();
-        List<Object[]> memberRows = groupsRepository.findGroupMembersRaw(group.getId());
+        List<Object[]> memberRows = groupsRepository.findGroupMembersWithRolesRaw(group.getId());
 
         for (Object[] row : memberRows) {
             Map<String, Object> member = new LinkedHashMap<>();
@@ -95,6 +134,8 @@ public class GroupsApiController {
             member.put("uid", (String) row[1]);
             member.put("name", (String) row[2]);
             member.put("email", (String) row[3]);
+            // So a page can show a team's mentors without asking about each member
+            member.put("mentor", MentorRules.isMentorRoles(ROLES.convertToEntityAttribute((String) row[4])));
             membersList.add(member);
         }
 
@@ -109,7 +150,11 @@ public class GroupsApiController {
      */
     @GetMapping
     @Transactional(readOnly = true)
-    public ResponseEntity<List<Map<String, Object>>> getAllGroups() {
+    public ResponseEntity<?> getAllGroups() {
+        ResponseEntity<Object> refusal = mentorManageRefusal();
+        if (refusal != null) {
+            return refusal;
+        }
         try {
             List<Groups> groups = groupsRepository.findAll();
             List<Map<String, Object>> result = new ArrayList<>();
@@ -129,11 +174,15 @@ public class GroupsApiController {
      */
     @GetMapping("/{id}")
     @Transactional(readOnly = true)
-    public ResponseEntity<Map<String, Object>> getGroupById(@PathVariable Long id) {
+    public ResponseEntity<?> getGroupById(@PathVariable Long id) {
         try {
             Optional<Groups> groupOpt = groupsRepository.findById(id);
             if (groupOpt.isEmpty()) {
                 return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+            }
+            Optional<MentorRules.Refusal> refusal = mentorAccess.toUse(currentPerson(), groupOpt.get());
+            if (refusal.isPresent()) {
+                return refusal.get().toResponse();
             }
             return new ResponseEntity<>(buildGroupResponse(groupOpt.get()), HttpStatus.OK);
         } catch (Exception e) {
@@ -146,7 +195,15 @@ public class GroupsApiController {
      */
     @GetMapping("/person/{personId}")
     @Transactional(readOnly = true)
-    public ResponseEntity<List<Map<String, Object>>> getGroupsByPersonId(@PathVariable Long personId) {
+    public ResponseEntity<?> getGroupsByPersonId(@PathVariable Long personId) {
+        Person viewer = currentPerson();
+        if (viewer != null && !personId.equals(viewer.getId())) {
+            // A mentor sees only their own groups
+            ResponseEntity<Object> refusal = mentorManageRefusal();
+            if (refusal != null) {
+                return refusal;
+            }
+        }
         try {
             Optional<Person> personOpt = personRepository.findById(personId);
             if (personOpt.isEmpty()) {
@@ -172,8 +229,12 @@ public class GroupsApiController {
      */
     @GetMapping("/search")
     @Transactional(readOnly = true)
-    public ResponseEntity<List<Map<String, Object>>> searchGroupsByName(
+    public ResponseEntity<?> searchGroupsByName(
             @org.springframework.web.bind.annotation.RequestParam(value = "name", required = true) String searchTerm) {
+        ResponseEntity<Object> refusal = mentorManageRefusal();
+        if (refusal != null) {
+            return refusal;
+        }
         try {
             if (searchTerm == null || searchTerm.trim().isEmpty()) {
                 return new ResponseEntity<>(
@@ -203,7 +264,11 @@ public class GroupsApiController {
      */
     @PostMapping
     @Transactional
-    public ResponseEntity<Map<String, Object>> createGroup(@RequestBody GroupCreateDto dto) {
+    public ResponseEntity<?> createGroup(@RequestBody GroupCreateDto dto) {
+        ResponseEntity<Object> mentorRefusal = mentorManageRefusal();
+        if (mentorRefusal != null) {
+            return mentorRefusal;
+        }
         try {
             if (dto.getName() == null || dto.getName().isEmpty()) {
                 return new ResponseEntity<>(
@@ -219,6 +284,13 @@ public class GroupsApiController {
                 );
             }
 
+            // A group can start with a mentor only when its maker could have added them (MentorRules.startGroup)
+            List<Person> initialMembers = findPeople(dto.getMemberIds());
+            Optional<MentorRules.Refusal> refusal = mentorAccess.toStart(currentPerson(), dto.getName(), initialMembers);
+            if (refusal.isPresent()) {
+                return refusal.get().toResponse();
+            }
+
             Groups group = new Groups();
             group.setName(dto.getName());
             group.setPeriod(dto.getPeriod());
@@ -228,11 +300,8 @@ public class GroupsApiController {
 
             // Add members if provided
             if (dto.getMemberIds() != null) {
-                for (Long personId : dto.getMemberIds()) {
-                    Optional<Person> personOpt = personRepository.findById(personId);
-                    if (personOpt.isPresent()) {
-                        savedGroup.addPerson(personOpt.get());
-                    }
+                for (Person person : initialMembers) {
+                    savedGroup.addPerson(person);
                 }
                 savedGroup = groupsRepository.save(savedGroup);
             }
@@ -256,7 +325,12 @@ public class GroupsApiController {
      */
     @PostMapping("/bulk")
     @Transactional
-    public ResponseEntity<Map<String, Object>> bulkCreateGroups(@RequestBody BulkGroupCreateDto dto) {
+    public ResponseEntity<?> bulkCreateGroups(@RequestBody BulkGroupCreateDto dto) {
+        ResponseEntity<Object> mentorRefusal = mentorManageRefusal();
+        if (mentorRefusal != null) {
+            return mentorRefusal;
+        }
+        Person actor = currentPerson();
         try {
             List<Map<String, Object>> created = new ArrayList<>();
             List<String> errors = new ArrayList<>();
@@ -275,6 +349,14 @@ public class GroupsApiController {
                         continue;
                     }
 
+                    List<Person> initialMembers = findPeople(groupDto.getMemberIds());
+                    Optional<MentorRules.Refusal> refusal =
+                            mentorAccess.toStart(actor, groupDto.getName(), initialMembers);
+                    if (refusal.isPresent()) {
+                        errors.add("Group '" + groupDto.getName() + "': " + refusal.get().message());
+                        continue;
+                    }
+
                     Groups group = new Groups();
                     group.setName(groupDto.getName());
                     group.setPeriod(groupDto.getPeriod());
@@ -283,11 +365,8 @@ public class GroupsApiController {
                     Groups savedGroup = groupsRepository.save(group);
 
                     if (groupDto.getMemberIds() != null) {
-                        for (Long personId : groupDto.getMemberIds()) {
-                            Optional<Person> personOpt = personRepository.findById(personId);
-                            if (personOpt.isPresent()) {
-                                savedGroup.addPerson(personOpt.get());
-                            }
+                        for (Person person : initialMembers) {
+                            savedGroup.addPerson(person);
                         }
                         savedGroup = groupsRepository.save(savedGroup);
                     }
@@ -323,7 +402,7 @@ public class GroupsApiController {
      * groups with the classes selected on their profile.
      */
     @PutMapping("/class-memberships")
-    public ResponseEntity<Map<String, Object>> syncClassMemberships(
+    public ResponseEntity<?> syncClassMemberships(
             @AuthenticationPrincipal UserDetails userDetails,
             @RequestBody ClassMembershipSyncDto dto) {
         if (userDetails == null) {
@@ -331,6 +410,10 @@ public class GroupsApiController {
                 Map.of("error", "Authentication is required"),
                 HttpStatus.UNAUTHORIZED
             );
+        }
+
+        if (MentorRules.isMentor(personRepository.findByUid(userDetails.getUsername()))) {
+            return MentorRules.Refusal.CLASS_GROUP.toResponse();
         }
 
         try {
@@ -352,9 +435,13 @@ public class GroupsApiController {
      */
     @PutMapping("/{id}")
     @Transactional
-    public ResponseEntity<Map<String, Object>> updateGroup(
+    public ResponseEntity<?> updateGroup(
             @PathVariable Long id,
             @RequestBody GroupUpdateDto dto) {
+        ResponseEntity<Object> refusal = mentorManageRefusal();
+        if (refusal != null) {
+            return refusal;
+        }
         try {
             Optional<Groups> groupOpt = groupsRepository.findById(id);
             if (groupOpt.isEmpty()) {
@@ -392,7 +479,11 @@ public class GroupsApiController {
 
     
     @DeleteMapping("/{id}")
-    public ResponseEntity<Map<String, Object>> deleteGroup (@PathVariable Long id) {
+    public ResponseEntity<?> deleteGroup (@PathVariable Long id) {
+        ResponseEntity<Object> refusal = mentorManageRefusal();
+        if (refusal != null) {
+            return refusal;
+        }
         try {
             Optional<Groups> groupOpt = groupsRepository.findById(id);
             if (groupOpt.isEmpty()) {
@@ -422,7 +513,7 @@ public class GroupsApiController {
      */
     @DeleteMapping("/{id}/members/{personId}")
     @Transactional
-    public ResponseEntity<Map<String, Object>> removePersonFromGroup(
+    public ResponseEntity<?> removePersonFromGroup(
             @PathVariable Long id,
             @PathVariable Long personId) {
         try {
@@ -444,6 +535,12 @@ public class GroupsApiController {
 
             Groups group = groupOpt.get();
             Person person = personOpt.get();
+
+            // The team manages its mentors; a mentor may only leave
+            Optional<MentorRules.Refusal> refusal = mentorAccess.toRemove(currentPerson(), group, person);
+            if (refusal.isPresent()) {
+                return refusal.get().toResponse();
+            }
 
             if (!group.getGroupMembers().contains(person)) {
                 return new ResponseEntity<>(
@@ -469,7 +566,7 @@ public class GroupsApiController {
      */
     @PostMapping("/{id}/members/{personId}")
     @Transactional
-    public ResponseEntity<Map<String, Object>> addPersonToGroup(
+    public ResponseEntity<?> addPersonToGroup(
             @PathVariable Long id,
             @PathVariable Long personId) {
         try {
@@ -491,6 +588,12 @@ public class GroupsApiController {
 
             Groups group = groupOpt.get();
             Person person = personOpt.get();
+
+            // A team member or a teacher adds a mentor, and only to a group a mentor may use
+            Optional<MentorRules.Refusal> refusal = mentorAccess.toAdd(currentPerson(), group, person);
+            if (refusal.isPresent()) {
+                return refusal.get().toResponse();
+            }
 
             if (group.getGroupMembers().contains(person)) {
                 return new ResponseEntity<>(
@@ -515,6 +618,10 @@ public class GroupsApiController {
     @GetMapping("/{id}/grades")
     @Transactional(readOnly = true)
     public ResponseEntity<?> getGroupGrades(@PathVariable Long id) {
+        ResponseEntity<Object> mentorRefusal = mentorManageRefusal();
+        if (mentorRefusal != null) {
+            return mentorRefusal;
+        }
         Optional<Groups> groupOpt = groupsRepository.findById(id);
         if (groupOpt.isEmpty()) return new ResponseEntity<>(HttpStatus.NOT_FOUND);
 
@@ -529,6 +636,10 @@ public class GroupsApiController {
     @Transactional
     public ResponseEntity<?> putGroupGrades(@PathVariable Long id,
                                         @RequestBody List<Map<String, Object>> grades) {
+        ResponseEntity<Object> mentorRefusal = mentorManageRefusal();
+        if (mentorRefusal != null) {
+            return mentorRefusal;
+        }
         Optional<Groups> groupOpt = groupsRepository.findById(id);
         if (groupOpt.isEmpty()) return new ResponseEntity<>(HttpStatus.NOT_FOUND);
 
@@ -548,6 +659,10 @@ public class GroupsApiController {
     @Transactional
     public ResponseEntity<?> addGroupGrade(@PathVariable Long id,
                                         @RequestBody Map<String, Object> gradeEntry) {
+        ResponseEntity<Object> mentorRefusal = mentorManageRefusal();
+        if (mentorRefusal != null) {
+            return mentorRefusal;
+        }
         Optional<Groups> groupOpt = groupsRepository.findById(id);
         if (groupOpt.isEmpty()) return new ResponseEntity<>(HttpStatus.NOT_FOUND);
 
@@ -613,6 +728,10 @@ public class GroupsApiController {
     @DeleteMapping("/{id}/grades")
     @Transactional
     public ResponseEntity<?> clearGroupGrades(@PathVariable Long id) {
+        ResponseEntity<Object> mentorRefusal = mentorManageRefusal();
+        if (mentorRefusal != null) {
+            return mentorRefusal;
+        }
         Optional<Groups> groupOpt = groupsRepository.findById(id);
         if (groupOpt.isEmpty()) return new ResponseEntity<>(HttpStatus.NOT_FOUND);
 

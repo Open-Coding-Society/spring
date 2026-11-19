@@ -47,18 +47,29 @@ public class GroupChatApiController {
     private final GroupChatReadService readService;
     private final GroupsJpaRepository groupsRepository;
     private final PersonJpaRepository personRepository;
+    private final MentorAccess mentorAccess;
 
     public GroupChatApiController(
             GroupChatService groupChatService,
             GroupChatRealtimeService realtimeService,
             GroupChatReadService readService,
             GroupsJpaRepository groupsRepository,
-            PersonJpaRepository personRepository) {
+            PersonJpaRepository personRepository,
+            MentorAccess mentorAccess) {
         this.groupChatService = groupChatService;
         this.realtimeService = realtimeService;
         this.readService = readService;
         this.groupsRepository = groupsRepository;
         this.personRepository = personRepository;
+        this.mentorAccess = mentorAccess;
+    }
+
+    /**
+     * A mentor rule's refusal for the signed-in account and this group, or null when it may go on. Only a mentor
+     * can be refused here; everyone else's chat works as before (see MentorRules).
+     */
+    private ResponseEntity<Object> mentorRefusal(Groups group) {
+        return mentorAccess.toUse(currentPerson(), group).map(MentorRules.Refusal::toResponse).orElse(null);
     }
 
     @Data
@@ -128,6 +139,14 @@ public class GroupChatApiController {
 
     @GetMapping("/analytics/{personId}")
     public ResponseEntity<?> getUserAnalytics(@PathVariable Long personId) {
+        Person viewer = currentPerson();
+        if (viewer != null && !personId.equals(viewer.getId())) {
+            Optional<MentorRules.Refusal> refusal = MentorRules.manageGroups(viewer);
+            if (refusal.isPresent()) {
+                return refusal.get().toResponse();
+            }
+        }
+
         Optional<Person> personOpt = personRepository.findById(personId);
         if (personOpt.isEmpty()) {
             return new ResponseEntity<>("Person not found", HttpStatus.NOT_FOUND);
@@ -148,6 +167,10 @@ public class GroupChatApiController {
         Optional<Groups> groupOpt = groupsRepository.findById(groupId);
         if (groupOpt.isEmpty()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
         }
 
         // String currentUsername = getCurrentUsername();
@@ -176,6 +199,10 @@ public class GroupChatApiController {
 
         if (identity == null) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
         }
 
         // String currentUsername = getCurrentUsername();
@@ -215,6 +242,10 @@ public class GroupChatApiController {
         if (identity == null) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
+        }
 
         if (request == null || request.getMessage() == null || request.getMessage().isBlank()) {
             return new ResponseEntity<>("message is required", HttpStatus.BAD_REQUEST);
@@ -249,6 +280,10 @@ public class GroupChatApiController {
         AuthenticatedIdentity identity = getCurrentIdentity();
         if (identity == null) {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
         }
 
         try {
@@ -294,6 +329,10 @@ public class GroupChatApiController {
         if (groupOpt.isEmpty()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
+        }
 
         readService.markRead(groupOpt.get(), person);
         return new ResponseEntity<>(HttpStatus.OK);
@@ -304,6 +343,10 @@ public class GroupChatApiController {
         Optional<Groups> groupOpt = groupsRepository.findById(groupId);
         if (groupOpt.isEmpty()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
         }
 
         // String currentUsername = getCurrentUsername();
@@ -364,6 +407,10 @@ public class GroupChatApiController {
         Optional<Groups> groupOpt = groupsRepository.findById(groupId);
         if (groupOpt.isEmpty()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
         }
 
         // String currentUsername = getCurrentUsername();

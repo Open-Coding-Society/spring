@@ -108,7 +108,7 @@ Edits and deletes made through REST are broadcast too, as `editMessageServer` an
 
 ## REST operations
 
-Every route needs a signed-in account (the JWT cookie from `POST /authenticate`); without one the answer is 401. No route checks for a teacher or admin role.
+Every route needs a signed-in account (the JWT cookie from `POST /authenticate`); without one the answer is 401. No route checks for a teacher or admin role. Mentors are the exception: see [Mentors](#mentors).
 
 ### Groups (`GroupsApiController`)
 
@@ -143,6 +143,27 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 | POST | `/api/groups/chat/{groupId}/files` | Upload `{filename, base64Data}`; 400 when `filename` isn't a valid path, 409 `{message, filename}` when a file is already shared at that path, 503 `{message, filename}` with `Retry-After` when S3 can't say for now whether the path is taken. Broadcasts `sendFileServer` with `filename` and `size`, not the bytes | Any signed-in account |
 | GET | `/api/groups/chat/analytics/{personId}` | Message and file counts across a person's groups | Any signed-in account |
 
+## Mentors
+
+A mentor is an account with `ROLE_MENTOR` and no teacher or admin role. Flask verifies mentors, and `POST /api/person/mentor/confirm` gives the role. A mentor never talks with a student privately, and the team manages its mentors. `MentorRules` holds every rule as a static method; `MentorAccess` loads what they need about a group (its members, through `GroupsJpaRepository.findMembersOf`, and whether it is a class group). A refusal answers 403 with `{"error": ..., "reason": ...}`; a page shows its own words for the reason. Requests from and about anyone else are answered as before, without the extra query.
+
+| Route | A mentor | Everyone else |
+|---|---|---|
+| `/api/groups/chat/{id}/messages` (read, send, edit, delete), `/read`, `/files`; `GET /api/groups/{id}` | Only a group they are a member of, that isn't a class group and has at least 2 members who aren't mentors (`mentor_not_in_group`, `mentor_class_group`, `mentor_team_too_small`) | As before |
+| `GET /api/groups/person/{personId}`, `GET /api/groups/chat/analytics/{personId}` | Only their own id (`mentor_cannot_manage`) | As before |
+| `GET /api/groups`, `/search`, `POST /api/groups`, `/bulk`, `PUT` and `DELETE /api/groups/{id}`, `/{id}/grades` | Refused (`mentor_cannot_manage`) | As before, except that a new group's `memberIds` may hold a mentor only if its maker could add them |
+| `PUT /api/groups/class-memberships` | Refused (`mentor_class_group`) | As before |
+| `POST /api/groups/{id}/members/{personId}` | Refused, themselves included (`mentor_cannot_manage`) | Adding a mentor needs a member who isn't a mentor, or a teacher (`team_manages_mentors`), and a group a mentor may use. Adding anyone else: as before |
+| `DELETE /api/groups/{id}/members/{personId}` | Only themselves, to leave (`mentor_cannot_manage`) | Removing a mentor needs a member who isn't a mentor, or a teacher (`team_manages_mentors`). Leaving: always |
+| `POST /api/dm/conversations`, `/api/dm/conversations/{id}/messages` (send, edit) | Refused (`mentor_no_direct_messages`) | Refused when the conversation would include a mentor. Reading old messages and deleting your own still work |
+
+- A group response marks each member `"mentor": true` or `false`, so a page can list a team's mentors.
+- `POST /api/groups/bulk` makes the other groups when one breaks a mentor rule, and lists that one under `errors` with the refusal's message (one bad group doesn't stop a teacher's batch), so its answer stays 200.
+- Members are counted once each: a new group's `memberIds` may repeat an id, and the team size counts different people.
+- If a team drops below 2 members who aren't mentors, its mentor loses the group until it is back to 2. Nobody is stopped from leaving.
+- Not covered yet: the group socket. Anyone can subscribe to `/topic/group/{id}`, and a socket `sendFile` needs no sign-in (see Known issues). A direct message topic already admits only that conversation's participants (`DirectMessageTopicGuard`).
+- Tests: `./mvnw test -Dtest='Mentor*Test,GroupChatMentorTest,GroupMembersMentorTest,DirectMessageMentorTest'`.
+
 ## Persistence
 
 | Data | Where | Notes |
@@ -171,7 +192,8 @@ These were each reproduced against a local server built from `master` on 2026-10
 - **Sending a message over the WebSocket fails.** Since commit `27a58329` ("identity service delegation, remove client controlled sender"), `sendMessage` resolves the sender with `GroupChatIdentityService`, which reads Spring Security's context. Nothing puts the signed-in account into that context for WebSocket messages: `/ws-chat` is `permitAll`, and `ChatSocketIdentityInterceptor` reads the login cookie only for the direct message topic check, without setting a Principal. So every `sendMessage`, signed in or not, is answered with `errorServer` "Authentication required", and the message is neither saved nor broadcast. Sending with `POST /api/groups/chat/{groupId}/messages` works: the message is broadcast to every subscriber with the signed-in account's name. The course site's chats send over the WebSocket, so they are affected.
 - **`group_chat_read_state` is never created on an existing database.** #225 added the `GroupChatReadState` entity, but nothing creates its table, and Hibernate runs with `ddl-auto=none`. On a database without the table, `POST /api/groups/chat/{groupId}/read` returns 500 (`no such table: group_chat_read_state`), and `GET /api/groups/chat/unread` fails the same way for anyone in a group. `direct_message_read_state` is created in `ModelInit`; this table needs the same.
 - **The client chooses the name for presence and typing.** `joinGroup`, `typingStart` and `heartbeat` use the `sender` field the client sends, even from a socket that isn't signed in.
-- **No membership checks.** Any signed-in account can read and send in any group, list and upload its files, and manage any group, its members and its grades. The membership checks in `GroupChatApiController` are commented out.
+- **No membership checks.** Any signed-in account that isn't a mentor can read and send in any group, list and upload its files, and manage any group, its members and its grades. The membership checks in `GroupChatApiController` are commented out. Mentors are checked: see [Mentors](#mentors).
+- **The group socket checks no one.** `/ws-chat` is `permitAll`, so anyone, signed in or not, can subscribe to `/topic/group/{id}` and receive what is posted there live, and `sendFile` stores a file in any group under the name the client gives. Direct message topics are guarded (`DirectMessageTopicGuard`).
 - **Edit and delete require the stored author uid.** The REST controller passes the authenticated account's uid through the realtime service; display names never establish ownership. Legacy messages without `author_uid` cannot be edited or deleted through these routes. Teachers cannot delete another account's message.
 - **Two sends at once can lose one.** Each send reads the group's S3 file, adds a line and writes the file back, without a lock.
 - **The first group created after a restart fails on SQLite.** `POST /api/groups` returns 500 with `SQLITE_BUSY_SNAPSHOT` the first time after the server starts; the next attempt works. This is the `GenerationType.AUTO` lock problem described under Assignment grading in `AGENTS.md`, here on `submitter_seq`. Not checked on MySQL.

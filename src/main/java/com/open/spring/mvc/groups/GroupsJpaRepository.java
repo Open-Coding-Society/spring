@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import com.open.spring.mvc.person.Person;
+
 public interface GroupsJpaRepository extends JpaRepository<Groups, Long> {
     
     // Find a group by its ID
@@ -43,6 +45,23 @@ public interface GroupsJpaRepository extends JpaRepository<Groups, Long> {
     @Query("SELECT g FROM Groups g WHERE SIZE(g.groupMembers) = :memberCount")
     List<Groups> findGroupsByMemberCount(@Param("memberCount") int memberCount);
     
+    /**
+     * A group's members, for MentorRules. One query, so it works outside a transaction
+     * (spring.jpa.open-in-view is false, so Groups.groupMembers can't be read lazily there).
+     */
+    @Query("SELECT p FROM Groups g JOIN g.groupMembers p WHERE g.id = :groupId")
+    List<Person> findMembersOf(@Param("groupId") Long groupId);
+
+    /**
+     * The rows a group response lists its members from: id, uid, name, email and roles_json, the roles saying
+     * whether each member is a mentor. Kept apart from findGroupMembersRaw, which other services read.
+     */
+    @Query(value = "SELECT p.id, p.uid, p.name, p.email, p.roles_json FROM group_members gm " +
+                   "JOIN person p ON gm.person_id = p.id " +
+                   "WHERE gm.group_id = :groupId " +
+                   "ORDER BY p.id", nativeQuery = true)
+    List<Object[]> findGroupMembersWithRolesRaw(@Param("groupId") Long groupId);
+
     // Get raw member data for a group (avoids Hibernate hydration issues)
     @Query(value = "SELECT p.id, p.uid, p.name, p.email FROM group_members gm " +
                    "JOIN person p ON gm.person_id = p.id " +

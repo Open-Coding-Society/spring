@@ -84,6 +84,11 @@ public class ClassGroupMembershipService {
             .toList();
     }
 
+    /** Whether a group name is one of the class groups, ignoring case and spaces around it. */
+    public boolean isClassGroup(String groupName) {
+        return groupName != null && classGroupNames.contains(groupName.trim().toUpperCase(Locale.ROOT));
+    }
+
     private Set<String> normalizeClasses(List<String> classes) {
         Set<String> normalizedClasses = new LinkedHashSet<>();
         if (classes == null) {

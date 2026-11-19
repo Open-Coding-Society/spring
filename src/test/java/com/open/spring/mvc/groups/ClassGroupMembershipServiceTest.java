@@ -95,6 +95,14 @@ class ClassGroupMembershipServiceTest {
     }
 
     @Test
+    void isClassGroupKnowsTheConfiguredGroupsWhateverTheCase() {
+        assertTrue(service.isClassGroup("CSA"));
+        assertTrue(service.isClassGroup(" csse "));
+        assertFalse(service.isClassGroup("Team Rocket"));
+        assertFalse(service.isClassGroup(null));
+    }
+
+    @Test
     void syncMembershipsMapsEverySupportedClassToItsSameNamedGroup() {
         for (String className : List.of("CSA", "CSP", "CSH", "CSSE")) {
             service.syncMemberships("student", List.of(className));
