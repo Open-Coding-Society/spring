@@ -373,6 +373,10 @@ public class GroupChatApiController {
         if (groupOpt.isEmpty()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
+        }
         return new ResponseEntity<>(groupChatService.sharedFileIndex(groupOpt.get().getName()), HttpStatus.OK);
     }
 
@@ -386,6 +390,10 @@ public class GroupChatApiController {
         Optional<Groups> groupOpt = groupsRepository.findById(groupId);
         if (groupOpt.isEmpty()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
         }
         byte[] bytes = groupChatService.readSharedFile(groupOpt.get().getName(), cleanPath);
         if (bytes == null) {

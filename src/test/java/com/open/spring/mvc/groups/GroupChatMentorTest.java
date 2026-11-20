@@ -1,5 +1,6 @@
 package com.open.spring.mvc.groups;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
@@ -9,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -108,9 +110,13 @@ class GroupChatMentorTest {
         assertRefused(reason, controller.getSharedFiles(TEAM));
         assertRefused(reason, controller.uploadSharedFile(TEAM,
                 new GroupChatApiController.FileUploadRequest("notes.txt", "aGk=")));
+        assertRefused(reason, controller.getSharedFileIndex(TEAM));
+        assertRefused(reason, controller.getSharedFileContent(TEAM, "notes.txt"));
         verify(realtime, never()).publishMessage(anyLong(), anyString(), any(), any());
         verify(realtime, never()).publishFile(anyLong(), any(), anyString(), anyString());
         verify(chat, never()).getMessages(anyString());
+        verify(chat, never()).sharedFileIndex(anyString());
+        verify(chat, never()).readSharedFile(anyString(), anyString());
     }
 
     @Test
@@ -126,6 +132,18 @@ class GroupChatMentorTest {
         signIn(mentor);
         assertRefused("mentor_team_too_small", controller.getMessages(SOLO));
         assertRefused("mentor_team_too_small", controller.postMessage(SOLO, text("just us")));
+        assertRefused("mentor_team_too_small", controller.getSharedFileIndex(SOLO));
+        assertRefused("mentor_team_too_small", controller.getSharedFileContent(SOLO, "notes.txt"));
+    }
+
+    @Test
+    void aMemberMentorWithATeamOfTwoListsAndDownloadsTheTeamsFiles() {
+        when(chat.readSharedFile("Team Rocket", "notes.txt")).thenReturn("hi".getBytes(StandardCharsets.UTF_8));
+        signIn(mentor);
+        assertEquals(HttpStatus.OK, controller.getSharedFileIndex(TEAM).getStatusCode());
+        ResponseEntity<?> file = controller.getSharedFileContent(TEAM, "notes.txt");
+        assertEquals(HttpStatus.OK, file.getStatusCode());
+        assertArrayEquals("hi".getBytes(StandardCharsets.UTF_8), (byte[]) file.getBody());
     }
 
     @Test
@@ -138,6 +156,7 @@ class GroupChatMentorTest {
     void aStudentWhoIsNotAMemberStillReadsAsBefore() {
         signIn(outsider);
         assertEquals(HttpStatus.OK, controller.getMessages(TEAM).getStatusCode());
+        assertEquals(HttpStatus.OK, controller.getSharedFileIndex(TEAM).getStatusCode());
         verify(groups, never()).findMembersOf(anyLong());
     }
 
