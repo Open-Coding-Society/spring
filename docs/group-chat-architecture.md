@@ -132,7 +132,7 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 | Method | Route | Operation | Who |
 |---|---|---|---|
 | GET | `/api/groups/chat/{groupId}/messages` | The group's messages | Any signed-in account |
-| POST | `/api/groups/chat/{groupId}/messages` | Send `{message, image}`; broadcasts it and returns the history | Any signed-in account. The sender is the signed-in account. |
+| POST | `/api/groups/chat/{groupId}/messages` | Send `{message, image}`; broadcasts it and returns the history. 503 with `Retry-After` when S3 can't read the group's messages for now, and then nothing is saved or broadcast | Any signed-in account. The sender is the signed-in account. |
 | PATCH | `/api/groups/chat/{groupId}/messages/{messageId}` | Edit a message | Only its sender (403 otherwise) |
 | DELETE | `/api/groups/chat/{groupId}/messages/{messageId}` | Delete a message | Only its sender (403 otherwise) |
 | GET | `/api/groups/chat/unread` | `{total, unreadByGroup}` across your groups | You |
@@ -155,7 +155,7 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 
 - **History is keyed by group name, not id.** Renaming a group with `PUT /api/groups/{id}` leaves its history under the old name.
 - **Without S3 settings** (AWS credentials, region and bucket), the server logs `S3 is disabled` at startup. Sends still broadcast live, but nothing is saved, so history and files come back empty. This is the normal state of a local server.
-- **Every new message rewrites the whole file**, read then write. Sending, editing and deleting take one lock per group (`messageLocks` in `GroupChatService`), so two at once keep both changes. The lock only holds within one server: several servers writing the same bucket would need S3's conditional writes.
+- **Every new message rewrites the whole file**, read then write. Sending, editing and deleting take one lock per group (`messageLocks` in `GroupChatService`), so two at once keep both changes. The lock only holds within one server: several servers writing the same bucket would need S3's conditional writes. A send reads the file strictly (`S3FileHandler.decodeFileOrThrow`), since writing back an empty read would replace the whole history: only S3's 404 reads as no messages yet, and any other failure to read refuses the send. When S3 timed out, couldn't be reached or answered with a 5xx, that's a 503 with `Retry-After` (`MessagesReadFailedException`); S3 refusing the read (a 4xx) or a bug here gets the route's usual 400. Edits and deletes still read with `decodeFile`, which answers a failed read the same as a missing file, so after one they find nothing to change and write nothing.
 - **A shared file's bytes never go over the socket.** `sendFileServer` names the file and its size; a member downloads it from `/files/content`. Sending the bytes to every subscriber could overflow a session's 512 KB send buffer while another frame was queued, and Spring closes a session that overflows.
 
 ## Testing
@@ -164,6 +164,7 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 - **The WebSocket can't be tested from a `.http` file.** To check it, open a course page with a chat against a local server and watch the browser's Network panel (WS filter) for frames on `/topic/group/{id}`. Or connect any STOMP client to `ws://localhost:8589/ws-chat/websocket` (SockJS's raw WebSocket transport), send `CONNECT`, `SUBSCRIBE` to `/topic/group/{id}`, and `SEND` JSON events to `/app/groups.chat`. A `SUBSCRIBE` to `/topic/dm/{id}` only goes through when the handshake carries a participant's `jwt_java_spring` cookie (a `Cookie` header) and an `Origin` header from the REST API's CORS list, such as `http://localhost:4500`. Without them, or for a wildcard subscription, a `/user/...` destination or a `SEND` to `/topic/dm/...`, the frame is dropped and the server logs a "refused" warning. Run the socket's own tests with `./mvnw test '-Dtest=DirectMessageTopic*Test,ChatSocketIdentityInterceptorTest,WebSocketBrokerConfigTest'`.
 - Run the chat regression tests with `./mvnw test '-Dtest=GroupChat*Test'`. They cover UID-based ownership, REST identity forwarding and unread counts. `GroupChatFilesTest` covers the file index, one-file downloads, the path rules, the bytes-free frame, uploads that land together, a path that is already shared, two uploads of one path at once, and a check that fails; `S3FileHandlerExistsTest` covers the strict check.
 - `GroupChatServiceTest` covers two sends, an edit and a send, and a delete and a send landing at once.
+- `GroupChatSendTest` sends through the controller to a real `S3FileHandler` over a stand-in S3 client: a read that fails, a read S3 refuses, a bug, a group with no messages file yet, and a server without S3. `S3FileHandlerDecodeTest` covers the strict read. Run the S3 handler tests with `./mvnw test '-Dtest=S3FileHandler*Test'`.
 
 ## Known issues
 
