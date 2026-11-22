@@ -35,6 +35,12 @@ public class GroupChatService {
     private final S3FileHandler s3FileHandler;
     private final ObjectMapper objectMapper;
 
+    // One lock per group for its messages file. Sending, editing and deleting each read the
+    // whole file, change it and write it back, so two at once would both change the same old
+    // copy and the later write would drop the other's change. This keeps them apart within
+    // this server only; several servers would need S3's conditional writes instead.
+    private final Map<String, Object> messageLocks = new ConcurrentHashMap<>();
+
     // One lock per group for the "shared by" sidecar, which is read, changed and written
     // back on every upload: a folder shared from the page uploads several files at once,
     // and without this the last write would drop the others' attribution.
@@ -112,18 +118,20 @@ public class GroupChatService {
     }
 
     public List<GroupChatMessage> addMessage(String groupName, GroupChatMessage message) {
-        List<GroupChatMessage> messages = getMessages(groupName);
-        messages.add(message);
+        synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
+            List<GroupChatMessage> messages = getMessages(groupName);
+            messages.add(message);
 
-        String jsonl = messages.stream()
-                .map(this::toJson)
-                .collect(Collectors.joining("\n"));
+            String jsonl = messages.stream()
+                    .map(this::toJson)
+                    .collect(Collectors.joining("\n"));
 
-        String base64Data = Base64.getEncoder()
-                .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
+            String base64Data = Base64.getEncoder()
+                    .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
 
-        s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
-        return messages;
+            s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+            return messages;
+        }
     }
 
     /**
@@ -133,58 +141,62 @@ public class GroupChatService {
      */
     public boolean editMessage(String groupName, String messageId, String newMessage, String requesterUid) {
         if (messageId == null) return false;
-        List<GroupChatMessage> messages = getMessages(groupName);
-        boolean found = false;
-        for (GroupChatMessage m : messages) {
-            if (messageId.equals(m.getId())) {
-                if (requesterUid == null || !requesterUid.equals(m.getAuthor_uid())) {
-                    throw new SecurityException("Not the message sender");
+        synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
+            List<GroupChatMessage> messages = getMessages(groupName);
+            boolean found = false;
+            for (GroupChatMessage m : messages) {
+                if (messageId.equals(m.getId())) {
+                    if (requesterUid == null || !requesterUid.equals(m.getAuthor_uid())) {
+                        throw new SecurityException("Not the message sender");
+                    }
+                    m.setMessage(newMessage);
+                    m.setEdited(true);
+                    found = true;
+                    break;
                 }
-                m.setMessage(newMessage);
-                m.setEdited(true);
-                found = true;
-                break;
             }
+
+            if (found) {
+                String jsonl = messages.stream()
+                        .map(this::toJson)
+                        .collect(Collectors.joining("\n"));
+
+                String base64Data = Base64.getEncoder()
+                        .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
+
+                s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+            }
+            return found;
         }
-
-        if (found) {
-            String jsonl = messages.stream()
-                    .map(this::toJson)
-                    .collect(Collectors.joining("\n"));
-
-            String base64Data = Base64.getEncoder()
-                    .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
-
-            s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
-        }
-        return found;
     }
 
     /** Same ownership rule as {@link #editMessage}; throws {@link SecurityException} on mismatch. */
     public void deleteMessage(String groupName, String messageId, String requesterUid) {
         if (messageId == null) return;
-        List<GroupChatMessage> messages = getMessages(groupName);
+        synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
+            List<GroupChatMessage> messages = getMessages(groupName);
 
-        GroupChatMessage target = messages.stream()
-                .filter(m -> messageId.equals(m.getId()))
-                .findFirst()
-                .orElse(null);
-        if (target == null) return;
-        if (requesterUid == null || !requesterUid.equals(target.getAuthor_uid())) {
-            throw new SecurityException("Not the message sender");
-        }
+            GroupChatMessage target = messages.stream()
+                    .filter(m -> messageId.equals(m.getId()))
+                    .findFirst()
+                    .orElse(null);
+            if (target == null) return;
+            if (requesterUid == null || !requesterUid.equals(target.getAuthor_uid())) {
+                throw new SecurityException("Not the message sender");
+            }
 
-        boolean removed = messages.remove(target);
+            boolean removed = messages.remove(target);
 
-        if (removed) {
-            String jsonl = messages.stream()
-                    .map(this::toJson)
-                    .collect(Collectors.joining("\n"));
+            if (removed) {
+                String jsonl = messages.stream()
+                        .map(this::toJson)
+                        .collect(Collectors.joining("\n"));
 
-            String base64Data = Base64.getEncoder()
-                    .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
+                String base64Data = Base64.getEncoder()
+                        .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
 
-            s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+                s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+            }
         }
     }
 
