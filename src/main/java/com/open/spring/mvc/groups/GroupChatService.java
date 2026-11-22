@@ -353,6 +353,8 @@ public class GroupChatService {
         try {
             return s3FileHandler.uploadFileOrThrow(base64Data, SHARED_FILES_PREFIX + path, groupName);
         } catch (RuntimeException e) {
+            // A write that timed out may still be stored (S3 lost its answer). Sharing it again
+            // then gets a 409, which the page handles like any other taken name.
             log.warn("Could not store {} in group {}", path, groupName, e);
             if (isUnavailable(e)) {
                 throw new SharedFileStorageUnavailableException(path, e);
