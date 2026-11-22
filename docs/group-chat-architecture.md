@@ -104,7 +104,7 @@ The client sends a `GroupChatEvent` JSON object whose `context` names the event.
 | `heartbeat` | `heartbeatServer` with `participants` | |
 | anything else | `errorServer` | `Unsupported context`. |
 
-Edits and deletes made through REST are broadcast too, as `editMessageServer` and `deleteMessageServer`.
+Edits and deletes made through REST are broadcast too, as `editMessageServer` and `deleteMessageServer`. So are reactions, as `reactionsServer` with the `messageId` and the message's `reactions` after the change (see Reactions).
 
 ## REST operations
 
@@ -135,6 +135,9 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 | POST | `/api/groups/chat/{groupId}/messages` | Send `{message, image}`; broadcasts it and returns the history | Any signed-in account. The sender is the signed-in account. |
 | PATCH | `/api/groups/chat/{groupId}/messages/{messageId}` | Edit a message | Only its sender (403 otherwise) |
 | DELETE | `/api/groups/chat/{groupId}/messages/{messageId}` | Delete a message | Only its sender (403 otherwise) |
+| GET | `/api/groups/chat/{groupId}/reactions` | Every reaction in the chat, as `{messageId: [{reaction, people: [{uid, name}]}]}` | Any signed-in account |
+| PUT | `/api/groups/chat/{groupId}/messages/{messageId}/reactions/{reaction}` | Add your reaction (`like`, `love`, `haha`, `wow`, `sad`, `celebrate`); answers `{messageId, reactions}` and broadcasts `reactionsServer`. 400 for any other key, or a `messageId` that isn't a UUID | Any signed-in account |
+| DELETE | `/api/groups/chat/{groupId}/messages/{messageId}/reactions/{reaction}` | Remove your reaction; the same answer and broadcast, and 200 even when it wasn't there | Any signed-in account |
 | GET | `/api/groups/chat/unread` | `{total, unreadByGroup}` across your groups | You |
 | POST | `/api/groups/chat/{groupId}/read` | Mark a group read | You |
 | GET | `/api/groups/chat/{groupId}/files` | Shared files with who uploaded them, each with its bytes as `base64Data` | Any signed-in account |
@@ -149,6 +152,7 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 |---|---|---|
 | Groups and members | SQL: `groups`, `group_members`, and the shared `submitter` table | Ids come from `submitter_seq`, shared with `Person`. |
 | Read states | SQL: `group_chat_read_state` (`group_id`, `person_id`, `last_read_at`) | One row per member per group. |
+| Reactions | SQL: `message_reaction` (`chat_type`, `chat_id`, `message_id`, `person_id`, `reaction`), created at startup by `MessageReactionTableInitializer` | Shared with direct messages (`chat_type` is `DM` or `GROUP`). All five columns are the primary key, so a person leaves each reaction once on a message. Never stored in the group's S3 file. |
 | Messages | S3: `<group name>/messages-images/messages.jsonl` | One JSON line per message: `id`, `author` (display name), `author_uid`, `message`, `date`, `image`, `edited`. |
 | Shared files | S3: `<group name>/shared-files/` plus `shared-files-meta.json` for who uploaded each | A file shared from a folder keeps its folders: `filename` is a path like `project/src/Main.java` (`SharedFilePaths`: no `..`, `.` or empty names, nothing absolute, no backslashes or control characters, at most 512 characters and 255 per name). A shared file is never written over: the same path again is refused with 409, and so is an upload of a path another upload is writing at that moment (`sharesInFlight`, within one server), so two people sharing `notes.md` at once keep both files. The page then shares its copy under the next free name. A file goes up as one base64 string in JSON, so `JsonLimitsConfig` lets a JSON string be up to 50,000,000 characters, enough for a 35 MB file (Jackson's default of 20,000,000 stopped uploads at about 14 MB; nginx caps a request at 50 MB). The existence check is strict (`S3FileHandler.fileExistsOrThrow`): only S3's 404 reads as free, and any other failure to check refuses the upload rather than risk writing over a file. When S3 timed out, couldn't be reached or answered with a 5xx (a throttle, an outage), that's a 503 with `Retry-After` (`SharedFileCheckFailedException`); S3 refusing the request (a 4xx) or a bug here is a 500. Writes to the metadata file take a lock per group, so uploads that land together keep every name. |
 | Presence | Memory only | Lost on restart; rebuilt as clients rejoin. |
@@ -158,11 +162,22 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 - **Every new message rewrites the whole file**, read then write, with no lock.
 - **A shared file's bytes never go over the socket.** `sendFileServer` names the file and its size; a member downloads it from `/files/content`. Sending the bytes to every subscriber could overflow a session's 512 KB send buffer while another frame was queued, and Spring closes a session that overflows.
 
+## Reactions
+
+People react to a message in a group chat or a direct message with one of six emoji. Spring stores the key, never the emoji: `like` 👍, `love` ❤️, `haha` 😂, `wow` 😮, `sad` 😢, `celebrate` 🎉. The list is `Reaction` in `mvc/reactions`, and Pages' Messages `reactions.js` lists the same keys in the same order, so change both together.
+
+- A person can leave several reactions on one message, one of each. PUT adds yours and DELETE removes it. Both answer `{messageId, reactions}`, where `reactions` is `[{reaction, people: [{uid, name}]}]` in the list's order, with people sorted by name.
+- Group chats use the three routes in the table above. A reaction never reads or writes the group's S3 file: checking that the message exists would mean downloading the whole file, images and all, on every click. So the `messageId` only has to be a UUID, and a reaction on a message that doesn't exist is never shown. Deleting a message removes its reactions.
+- Direct messages have the same three routes under `/api/dm/conversations/{id}`: `GET .../reactions`, and `PUT` or `DELETE .../messages/{messageId}/reactions/{reaction}`. Only the conversation's participants may use them (403 otherwise). A message from another conversation is 404, and a deleted one is 409. The change goes out on `/topic/dm/{id}` as `type: "reactions"`, with `id`, `conversationId` and `reactions`.
+- A reaction is not a message. It sends no push notification, changes no unread count, and doesn't show up in search.
+- `GroupChatEvent` and `DirectMessageEvent` carry `reactions` only on reaction frames (`@JsonInclude(NON_NULL)`), so every other frame is unchanged. The course chats ignore `reactionsServer`.
+
 ## Testing
 
 - `api/groups.http`: open it in VS Code with the REST Client extension and run the requests in order. Set `baseUrl`, `adminUid` and `adminPassword` under `rest-client.environmentVariables` in the Git-ignored `.vscode/settings.json`. Never put passwords in the file. It creates a test group, adds you, sends and reads messages, checks unread counts, and deletes the group.
 - **The WebSocket can't be tested from a `.http` file.** To check it, open a course page with a chat against a local server and watch the browser's Network panel (WS filter) for frames on `/topic/group/{id}`. Or connect any STOMP client to `ws://localhost:8589/ws-chat/websocket` (SockJS's raw WebSocket transport), send `CONNECT`, `SUBSCRIBE` to `/topic/group/{id}`, and `SEND` JSON events to `/app/groups.chat`. A `SUBSCRIBE` to `/topic/dm/{id}` only goes through when the handshake carries a participant's `jwt_java_spring` cookie (a `Cookie` header) and an `Origin` header from the REST API's CORS list, such as `http://localhost:4500`. Without them, or for a wildcard subscription, a `/user/...` destination or a `SEND` to `/topic/dm/...`, the frame is dropped and the server logs a "refused" warning. Run the socket's own tests with `./mvnw test '-Dtest=DirectMessageTopic*Test,ChatSocketIdentityInterceptorTest,WebSocketBrokerConfigTest'`.
 - Run the chat regression tests with `./mvnw test '-Dtest=GroupChat*Test'`. They cover UID-based ownership, REST identity forwarding and unread counts. `GroupChatFilesTest` covers the file index, one-file downloads, the path rules, the bytes-free frame, uploads that land together, a path that is already shared, two uploads of one path at once, and a check that fails; `S3FileHandlerExistsTest` covers the strict check.
+- Reactions: `./mvnw test '-Dtest=GroupChatReactionTest,DirectMessageReactionTest,MessageReaction*Test,ReactionTest'`. They cover both chats' frames and status codes, that a group reaction never touches S3 and a DM reaction never sends a push, the summaries' order, and the table's primary key on SQLite.
 
 ## Known issues
 
@@ -180,5 +195,6 @@ These were each reproduced against a local server built from `master` on 2026-10
 
 - Keep routes, event `context` names and JSON field names stable: the course site's chat pages depend on them. Change them together with the Pages client.
 - New tables need a `CREATE TABLE IF NOT EXISTS` that runs at startup, because Hibernate runs with `ddl-auto=none`.
+- Reaction keys change in `Reaction` and in Pages' Messages `reactions.js` together.
 - Anything that needs to know who is sending must work over both REST and the WebSocket, or send through REST.
 - Update this guide and `api/groups.http` when routes, events or storage change. `README.md` and `AGENTS.md` link here.
