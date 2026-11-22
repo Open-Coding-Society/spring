@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -24,6 +25,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.reactions.ChatType;
+import com.open.spring.mvc.reactions.MessageReactionService;
+import com.open.spring.mvc.reactions.MessageReactionService.MessageReactions;
+import com.open.spring.mvc.reactions.Reaction;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -46,6 +51,7 @@ public class DirectMessageApiController {
     private final DirectMessageConversationJpaRepository conversationRepository;
     private final DirectMessageJpaRepository messageRepository;
     private final PersonJpaRepository personRepository;
+    private final MessageReactionService reactionService;
 
     @Data
     @NoArgsConstructor
@@ -292,6 +298,81 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+    }
+
+    /** Every reaction in the conversation, by message id: what the page draws when it opens it. */
+    @GetMapping("/conversations/{id}/reactions")
+    @Transactional(readOnly = true)
+    public ResponseEntity<Object> getReactions(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable("id") Long id) {
+        Person person = currentPerson(userDetails);
+        if (person == null) {
+            return new ResponseEntity<>(Map.of("error", "User not authenticated"), HttpStatus.UNAUTHORIZED);
+        }
+
+        Optional<DirectMessageConversation> conversationOpt = conversationRepository.findById(id);
+        if (conversationOpt.isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        if (!directMessageService.isParticipant(conversationOpt.get(), person)) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        return new ResponseEntity<>(reactionService.forChat(ChatType.DM, id), HttpStatus.OK);
+    }
+
+    /** Adds the caller's reaction, by its lowercase key such as "like", and answers with the message's reactions. */
+    @PutMapping("/conversations/{id}/messages/{messageId}/reactions/{reaction}")
+    @Transactional
+    public ResponseEntity<Object> addReaction(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable("id") Long id,
+            @PathVariable("messageId") Long messageId,
+            @PathVariable("reaction") String reaction) {
+        return setReaction(userDetails, id, messageId, reaction, true);
+    }
+
+    /** Removes the caller's reaction; removing one that isn't there still answers 200. */
+    @DeleteMapping("/conversations/{id}/messages/{messageId}/reactions/{reaction}")
+    @Transactional
+    public ResponseEntity<Object> removeReaction(
+            @AuthenticationPrincipal UserDetails userDetails,
+            @PathVariable("id") Long id,
+            @PathVariable("messageId") Long messageId,
+            @PathVariable("reaction") String reaction) {
+        return setReaction(userDetails, id, messageId, reaction, false);
+    }
+
+    private ResponseEntity<Object> setReaction(UserDetails userDetails, Long id, Long messageId, String key, boolean on) {
+        Person person = currentPerson(userDetails);
+        if (person == null) {
+            return new ResponseEntity<>(Map.of("error", "User not authenticated"), HttpStatus.UNAUTHORIZED);
+        }
+
+        Optional<DirectMessageConversation> conversationOpt = conversationRepository.findById(id);
+        if (conversationOpt.isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+
+        DirectMessageConversation conversation = conversationOpt.get();
+        if (!directMessageService.isParticipant(conversation, person)) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        Optional<Reaction> reaction = Reaction.fromKey(key);
+        if (reaction.isEmpty()) {
+            return new ResponseEntity<>(Map.of("error", "unknown reaction"), HttpStatus.BAD_REQUEST);
+        }
+
+        try {
+            return new ResponseEntity<>(new MessageReactions(String.valueOf(messageId),
+                    directMessageService.setReaction(conversation, person, messageId, reaction.get(), on)), HttpStatus.OK);
+        } catch (NoSuchElementException ex) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        } catch (IllegalStateException ex) {
+            return new ResponseEntity<>(Map.of("error", ex.getMessage()), HttpStatus.CONFLICT);
         }
     }
 

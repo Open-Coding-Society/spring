@@ -15,6 +15,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.push.PushNotificationService;
+import com.open.spring.mvc.reactions.ChatType;
+import com.open.spring.mvc.reactions.MessageReactionService;
+import com.open.spring.mvc.reactions.Reaction;
 
 import lombok.RequiredArgsConstructor;
 
@@ -41,6 +44,7 @@ public class DirectMessageService {
     private final DirectMessageReadStateJpaRepository readStateRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final PushNotificationService pushNotificationService;
+    private final MessageReactionService reactionService;
 
     public record UnreadSender(String uid, String name) {
     }
@@ -222,6 +226,8 @@ public class DirectMessageService {
         message.setDeleted(true);
         message.setBody("");
         messageRepository.save(message);
+        // A tombstone shows no reactions, so none are kept for it.
+        reactionService.removeAllFor(ChatType.DM, conversation.getId(), String.valueOf(messageId));
 
         DirectMessageEvent event = DirectMessageEvent.builder()
                 .id(message.getId())
@@ -233,6 +239,41 @@ public class DirectMessageService {
                 .deleted(true)
                 .build();
         messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + conversation.getId(), event);
+    }
+
+    /**
+     * Adds ({@code on}) or removes {@code person}'s reaction to a message, then tells the
+     * conversation's topic with a "reactions" frame. A reaction isn't a message: nobody gets a
+     * phone notification and nothing becomes unread. Throws {@link NoSuchElementException} if
+     * the message isn't in this conversation and {@link IllegalStateException} if it was
+     * deleted; {@code noRollbackFor} for the reason given on {@link #editMessage}.
+     */
+    @Transactional(noRollbackFor = {NoSuchElementException.class, IllegalStateException.class})
+    public List<MessageReactionService.ReactionSummary> setReaction(DirectMessageConversation conversation,
+            Person person, Long messageId, Reaction reaction, boolean on) {
+        DirectMessage message = messageRepository.findByIdAndConversation(messageId, conversation)
+                .orElseThrow(() -> new NoSuchElementException("Message not found"));
+        if (message.isDeleted()) {
+            throw new IllegalStateException("Message was deleted");
+        }
+
+        String key = String.valueOf(messageId);
+        if (on) {
+            reactionService.add(ChatType.DM, conversation.getId(), key, person, reaction);
+        } else {
+            reactionService.remove(ChatType.DM, conversation.getId(), key, person, reaction);
+        }
+        List<MessageReactionService.ReactionSummary> reactions =
+                reactionService.forMessage(ChatType.DM, conversation.getId(), key);
+
+        DirectMessageEvent event = DirectMessageEvent.builder()
+                .id(messageId)
+                .conversationId(conversation.getId())
+                .type("reactions")
+                .reactions(reactions)
+                .build();
+        messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + conversation.getId(), event);
+        return reactions;
     }
 
     @Transactional(readOnly = true)

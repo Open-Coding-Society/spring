@@ -1,5 +1,10 @@
 package com.open.spring.mvc.directmessages;
 
+import java.util.List;
+
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.open.spring.mvc.reactions.MessageReactionService;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -16,7 +21,7 @@ import lombok.NoArgsConstructor;
 public class DirectMessageEvent {
     private Long id;
     private Long conversationId;
-    private String type;      // "message" for new posts, "edited" for edits
+    private String type;      // "message", "edited", "deleted", or "reactions"
     private String senderUid;
     private String senderName;
     private String senderPfp;
@@ -26,4 +31,10 @@ public class DirectMessageEvent {
     private String sentAt;
     private boolean deleted;
     private boolean edited;
+    /**
+     * On a "reactions" frame, the message's reactions after the change. Left out of every
+     * other frame, so those stay exactly as they were.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<MessageReactionService.ReactionSummary> reactions;
 }
