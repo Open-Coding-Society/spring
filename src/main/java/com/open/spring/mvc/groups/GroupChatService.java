@@ -104,9 +104,8 @@ public class GroupChatService {
     /**
      * The group's messages for a send, which writes the whole file back. Strict: a read that
      * failed throws rather than reading as an empty chat, which the send would save over the
-     * history. Only S3's 404 means no messages yet. S3 out of reach or answering a 5xx is
-     * something to wait out, so that throws MessagesReadFailedException; anything else goes up
-     * as it is.
+     * history. Only S3's 404 means no messages yet. S3 being unavailable for a moment (see
+     * isUnavailable) throws MessagesReadFailedException; anything else goes up as it is.
      */
     private List<GroupChatMessage> readMessagesOrThrow(String groupName) {
         String base64Data;
@@ -115,7 +114,7 @@ public class GroupChatService {
         } catch (SdkClientException | S3Exception e) {
             // Logged for every failure: the route answers a refused read without logging it.
             log.warn("Could not read the messages of group {}", groupName, e);
-            if (e instanceof S3Exception answered && answered.statusCode() < 500) {
+            if (!isUnavailable(e)) {
                 // S3 refused the request (no permission, a bad key): waiting won't fix that.
                 throw e;
             }

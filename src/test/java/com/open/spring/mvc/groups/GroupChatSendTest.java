@@ -37,6 +37,7 @@ import com.open.spring.mvc.S3uploads.S3FileHandler;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
+import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.core.ResponseBytes;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.sync.RequestBody;
@@ -134,10 +135,15 @@ class GroupChatSendTest {
 
     @Test
     void aReadThatFailsRefusesTheSendWithA503AndKeepsTheHistory() {
-        // S3 throttled (503 Slow Down) or out of reach: failures that clear if you wait.
+        // S3 throttled (503 Slow Down), out of reach, or timing out the request (its RequestTimeout
+        // comes as a 400): failures that clear if you wait.
         List<RuntimeException> failures = List.of(
                 (S3Exception) S3Exception.builder().statusCode(503).message("Slow Down").build(),
-                SdkClientException.create("Unable to execute HTTP request: Read timed out"));
+                SdkClientException.create("Unable to execute HTTP request: Read timed out"),
+                (S3Exception) S3Exception.builder().statusCode(400)
+                        .awsErrorDetails(AwsErrorDetails.builder().errorCode("RequestTimeout").build())
+                        .message("Your socket connection to the server was not read from or written to within the timeout period.")
+                        .build());
         for (RuntimeException failure : failures) {
             useFreshStorage();
             objects.put(MESSAGES_KEY, ADA_LINE.getBytes(StandardCharsets.UTF_8));
