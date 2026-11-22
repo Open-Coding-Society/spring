@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import java.nio.charset.StandardCharsets;
 
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,6 +30,10 @@ import org.springframework.web.bind.annotation.RestController;
 import com.open.spring.mvc.groups.GroupChatIdentityService.AuthenticatedIdentity;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.reactions.ChatType;
+import com.open.spring.mvc.reactions.MessageReactionService;
+import com.open.spring.mvc.reactions.MessageReactionService.MessageReactions;
+import com.open.spring.mvc.reactions.Reaction;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -42,23 +48,31 @@ public class GroupChatApiController {
     // short outage clears in seconds.
     private static final int SHARE_RETRY_AFTER_SECONDS = 5;
 
+    // A saved group message's id is a UUID (GroupChatMessage). Reactions don't read the group's
+    // S3 file to check that the message exists, so the id at least has to look like one.
+    static final Pattern MESSAGE_ID =
+            Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+
     private final GroupChatService groupChatService;
     private final GroupChatRealtimeService realtimeService;
     private final GroupChatReadService readService;
     private final GroupsJpaRepository groupsRepository;
     private final PersonJpaRepository personRepository;
+    private final MessageReactionService reactionService;
 
     public GroupChatApiController(
             GroupChatService groupChatService,
             GroupChatRealtimeService realtimeService,
             GroupChatReadService readService,
             GroupsJpaRepository groupsRepository,
-            PersonJpaRepository personRepository) {
+            PersonJpaRepository personRepository,
+            MessageReactionService reactionService) {
         this.groupChatService = groupChatService;
         this.realtimeService = realtimeService;
         this.readService = readService;
         this.groupsRepository = groupsRepository;
         this.personRepository = personRepository;
+        this.reactionService = reactionService;
     }
 
     @Data
@@ -260,6 +274,60 @@ public class GroupChatApiController {
         }
 
         return new ResponseEntity<>(HttpStatus.OK);
+    }
+
+    /**
+     * Every reaction in the group's chat, by message id: what the page draws when it opens the
+     * chat. Like posting, it needs a signed-in person but not membership.
+     */
+    @GetMapping("/{groupId}/reactions")
+    public ResponseEntity<?> getReactions(@PathVariable Long groupId) {
+        if (currentPerson() == null) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+        if (groupsRepository.findById(groupId).isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        return new ResponseEntity<>(reactionService.forChat(ChatType.GROUP, groupId), HttpStatus.OK);
+    }
+
+    /** Adds the caller's reaction, by its lowercase key such as "like", and answers with the message's reactions. */
+    @PutMapping("/{groupId}/messages/{messageId}/reactions/{reaction}")
+    public ResponseEntity<?> addReaction(
+            @PathVariable Long groupId,
+            @PathVariable String messageId,
+            @PathVariable String reaction) {
+        return setReaction(groupId, messageId, reaction, true);
+    }
+
+    /** Removes the caller's reaction; removing one that isn't there still answers 200. */
+    @DeleteMapping("/{groupId}/messages/{messageId}/reactions/{reaction}")
+    public ResponseEntity<?> removeReaction(
+            @PathVariable Long groupId,
+            @PathVariable String messageId,
+            @PathVariable String reaction) {
+        return setReaction(groupId, messageId, reaction, false);
+    }
+
+    private ResponseEntity<?> setReaction(Long groupId, String messageId, String key, boolean on) {
+        Person person = currentPerson();
+        if (person == null) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+        if (groupsRepository.findById(groupId).isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        Optional<Reaction> reaction = Reaction.fromKey(key);
+        if (reaction.isEmpty()) {
+            return new ResponseEntity<>("unknown reaction", HttpStatus.BAD_REQUEST);
+        }
+        if (messageId == null || !MESSAGE_ID.matcher(messageId).matches()) {
+            return new ResponseEntity<>("messageId is not a message id", HttpStatus.BAD_REQUEST);
+        }
+
+        List<MessageReactionService.ReactionSummary> reactions =
+                realtimeService.setReaction(groupId, person, messageId, reaction.get(), on);
+        return new ResponseEntity<>(new MessageReactions(messageId, reactions), HttpStatus.OK);
     }
 
     /**

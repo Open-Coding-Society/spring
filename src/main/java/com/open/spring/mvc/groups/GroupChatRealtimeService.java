@@ -1,12 +1,17 @@
 package com.open.spring.mvc.groups;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import com.open.spring.mvc.groups.GroupChatIdentityService.AuthenticatedIdentity;
+import com.open.spring.mvc.person.Person;
+import com.open.spring.mvc.reactions.ChatType;
+import com.open.spring.mvc.reactions.MessageReactionService;
+import com.open.spring.mvc.reactions.Reaction;
 
 import lombok.RequiredArgsConstructor;
 
@@ -23,6 +28,7 @@ public class GroupChatRealtimeService {
     private final GroupChatService groupChatService;
     private final GroupsJpaRepository groupsRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final MessageReactionService reactionService;
 
     public GroupChatEvent publishMessage(Long groupId, String message, String image, AuthenticatedIdentity identity) {
         Groups group = getGroupOrThrow(groupId);
@@ -78,6 +84,7 @@ public class GroupChatRealtimeService {
     public void deleteMessage(Long groupId, String messageId, String requesterUid) {
         Groups group = getGroupOrThrow(groupId);
         groupChatService.deleteMessage(group.getName(), messageId, requesterUid);
+        reactionService.removeAllFor(ChatType.GROUP, groupId, messageId);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("deleteMessageServer")
@@ -87,6 +94,34 @@ public class GroupChatRealtimeService {
                 .build();
 
         broadcastToGroup(groupId, event);
+    }
+
+    /**
+     * Adds ({@code on}) or removes {@code person}'s reaction to a message, then tells the
+     * group's topic with a reactionsServer frame. Reactions are kept in the database, never in
+     * the group's S3 message file, so a reaction can't change or drop a message.
+     */
+    public List<MessageReactionService.ReactionSummary> setReaction(
+            Long groupId, Person person, String messageId, Reaction reaction, boolean on) {
+        getGroupOrThrow(groupId);
+        if (on) {
+            reactionService.add(ChatType.GROUP, groupId, messageId, person, reaction);
+        } else {
+            reactionService.remove(ChatType.GROUP, groupId, messageId, person, reaction);
+        }
+        List<MessageReactionService.ReactionSummary> reactions =
+                reactionService.forMessage(ChatType.GROUP, groupId, messageId);
+
+        GroupChatEvent event = GroupChatEvent.builder()
+                .context("reactionsServer")
+                .groupId(groupId)
+                .messageId(messageId)
+                .reactions(reactions)
+                .date(Instant.now().toString())
+                .build();
+
+        broadcastToGroup(groupId, event);
+        return reactions;
     }
 
     /**

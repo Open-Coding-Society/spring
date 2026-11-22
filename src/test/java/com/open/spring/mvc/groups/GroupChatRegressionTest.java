@@ -30,6 +30,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.open.spring.mvc.S3uploads.S3FileHandler;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.reactions.MessageReactionService;
 
 class GroupChatRegressionTest {
     private S3FileHandler storage;
@@ -50,9 +51,9 @@ class GroupChatRegressionTest {
         groups = mock(GroupsJpaRepository.class);
         readStates = mock(GroupChatReadStateJpaRepository.class);
         reads = new GroupChatReadService(readStates, groups, chat);
-        realtime = new GroupChatRealtimeService(chat, groups, mock(SimpMessagingTemplate.class));
+        realtime = new GroupChatRealtimeService(chat, groups, mock(SimpMessagingTemplate.class), mock(MessageReactionService.class));
         PersonJpaRepository people = mock(PersonJpaRepository.class);
-        controller = new GroupChatApiController(chat, realtime, reads, groups, people);
+        controller = new GroupChatApiController(chat, realtime, reads, groups, people, mock(MessageReactionService.class));
 
         Groups group = spy(new Groups());
         when(group.getId()).thenReturn(7L);
