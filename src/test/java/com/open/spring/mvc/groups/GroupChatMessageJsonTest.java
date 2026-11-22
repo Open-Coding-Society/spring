@@ -54,7 +54,7 @@ class GroupChatMessageJsonTest {
     @Test
     void addingAMessageKeepsTheSenderOfOlderLines() throws Exception {
         S3FileHandler s3 = mock(S3FileHandler.class);
-        when(s3.decodeFile("CSA", "messages-images/messages.jsonl")).thenReturn(
+        when(s3.decodeFileOrThrow("CSA", "messages-images/messages.jsonl")).thenReturn(
                 Base64.getEncoder().encodeToString(SAVED_BEFORE_RENAME.getBytes(StandardCharsets.UTF_8)));
         GroupChatService service = new GroupChatService(s3, objectMapper);
 
