@@ -65,6 +65,35 @@ class DirectMessageTopicBrokerTest {
         broker.stop();
     }
 
+    /** A group chat reader, signed out like a course chat visitor, must not get a frame a client made up. */
+    @Test
+    void aClientSendToAGroupTopicReachesNobody() {
+        connect("reader-socket");
+        connect("outsider-socket");
+        subscribe("reader-socket", null, "/topic/group/7");
+
+        StompHeaderAccessor send = StompHeaderAccessor.create(StompCommand.SEND);
+        send.setSessionId("outsider-socket");
+        send.setSessionAttributes(Map.of());
+        send.setDestination("/topic/group/7");
+        clientInbound.send(MessageBuilder.createMessage(
+                "{\"context\":\"sendMessageServer\",\"groupId\":7,\"sender\":\"Thomas Edison\",\"message\":\"FAKE: click this link\"}"
+                        .getBytes(StandardCharsets.UTF_8),
+                send.getMessageHeaders()));
+
+        assertEquals(List.of(), socketsThatReceivedSomething());
+    }
+
+    @Test
+    void theServersGroupBroadcastStillReachesSignedOutReaders() {
+        connect("reader-socket");
+        subscribe("reader-socket", null, "/topic/group/7");
+
+        serverBroadcast("/topic/group/7", "{\"context\":\"sendMessageServer\",\"message\":\"hello class\"}");
+
+        assertEquals(List.of("reader-socket"), socketsThatReceivedSomething());
+    }
+
     /**
      * Spring turns SUBSCRIBE /user/X into a subscription to X + "-user" + the session id, which a
      * SockJS client picks itself. Session id "}" closes the brace this destination opens, so the

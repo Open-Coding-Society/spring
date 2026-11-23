@@ -13,6 +13,7 @@ import org.springframework.util.AntPathMatcher;
 import org.springframework.util.PathMatcher;
 
 import com.open.spring.mvc.groups.ChatSocketIdentityInterceptor;
+import com.open.spring.mvc.groups.WebSocketBrokerConfig;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,8 +27,9 @@ import lombok.extern.slf4j.Slf4j;
  * <li>No wildcard SUBSCRIBE on any topic. The broker matches {@code *}, {@code **}, {@code ?}
  * and {@code {name}} as patterns, so {@code /topic/**} would get every DM with no id at all.
  * No client uses one.</li>
- * <li>No client SEND to a DM topic. The broker relays a client's SEND to every subscriber, so it
- * would show up in someone's thread as a real message. Only the server posts there.</li>
+ * <li>No client SEND to any topic, DM or group ({@code /topic...}). The broker relays a client's
+ * SEND to every subscriber, so it would show up in someone's chat as a real message. Only the
+ * server posts there; pages send through REST or {@code /app/groups.chat}.</li>
  * <li>No SUBSCRIBE or SEND to a user destination ({@code /user/...}). Nothing on this socket uses
  * them, and Spring rewrites a {@code /user/X} subscription to X plus "-user" plus the session id
  * after this check. A SockJS client picks its own session id, so the two halves together can make
@@ -102,8 +104,8 @@ public class DirectMessageTopicGuard implements ChannelInterceptor {
 
     /** Why a client's SEND is refused, or null to let it through. */
     private static String whySendIsRefused(String destination) {
-        if (isDirectMessageTopic(destination)) {
-            return "only the server sends to direct message topics";
+        if (destination != null && destination.startsWith(WebSocketBrokerConfig.BROKER_PREFIX)) {
+            return "only the server sends to topics";
         }
         if (isUserDestination(destination)) {
             return NO_USER_DESTINATIONS;
