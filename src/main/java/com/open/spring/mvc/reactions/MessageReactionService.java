@@ -13,7 +13,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.open.spring.mvc.person.Person;
-import com.open.spring.mvc.person.PersonJpaRepository;
 
 import lombok.RequiredArgsConstructor;
 
@@ -30,7 +29,6 @@ public class MessageReactionService {
             .thenComparing(reactor -> reactor.uid() == null ? "" : reactor.uid());
 
     private final MessageReactionJpaRepository repository;
-    private final PersonJpaRepository personRepository;
 
     /** Someone who reacted, as the page shows them. */
     public record Reactor(String uid, String name) {
@@ -56,10 +54,7 @@ public class MessageReactionService {
     /** Removes this person's reaction. Removing one that isn't there changes nothing. */
     @Transactional
     public void remove(ChatType type, Long chatId, String messageId, Person person, Reaction reaction) {
-        MessageReaction.Key key = new MessageReaction.Key(type, chatId, messageId, person.getId(), reaction);
-        if (repository.existsById(key)) {
-            repository.deleteById(key);
-        }
+        repository.deleteOne(type, chatId, messageId, person.getId(), reaction);
     }
 
     /** One message's reactions, in the enum's order. */
@@ -89,7 +84,7 @@ public class MessageReactionService {
     /** Removes every reaction on a message, as when the message is deleted. */
     @Transactional
     public void removeAllFor(ChatType type, Long chatId, String messageId) {
-        repository.deleteByKeyChatTypeAndKeyChatIdAndKeyMessageId(type, chatId, messageId);
+        repository.deleteAllOnMessage(type, chatId, messageId);
     }
 
     // Everyone in one query. Someone whose account is gone isn't in the result, so they drop out.
@@ -99,7 +94,7 @@ public class MessageReactionService {
             return Map.of();
         }
         Map<Long, Reactor> reactors = new HashMap<>();
-        for (Person person : personRepository.findAllById(ids)) {
+        for (MessageReactionJpaRepository.ReactorName person : repository.findReactorNames(ids)) {
             reactors.put(person.getId(), new Reactor(person.getUid(), person.getName()));
         }
         return reactors;

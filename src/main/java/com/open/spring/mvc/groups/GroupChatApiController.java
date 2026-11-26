@@ -48,10 +48,11 @@ public class GroupChatApiController {
     // short outage clears in seconds.
     private static final int SHARE_RETRY_AFTER_SECONDS = 5;
 
-    // A saved group message's id is a UUID (GroupChatMessage). Reactions don't read the group's
-    // S3 file to check that the message exists, so the id at least has to look like one.
+    // A saved group message's id is a UUID (GroupChatMessage), written in lowercase. Reactions
+    // don't read the group's S3 file to check that the message exists, so the id at least has to
+    // look like one; an uppercase copy would match some lookups and not others on MySQL.
     static final Pattern MESSAGE_ID =
-            Pattern.compile("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$");
+            Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
 
     private final GroupChatService groupChatService;
     private final GroupChatRealtimeService realtimeService;

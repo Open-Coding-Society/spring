@@ -133,6 +133,8 @@ class GroupChatReactionTest {
 
         assertEquals(HttpStatus.BAD_REQUEST, controller.addReaction(3L, "not-a-message", "love").getStatusCode());
         assertEquals(HttpStatus.BAD_REQUEST, controller.addReaction(3L, "../shared-files", "love").getStatusCode());
+        // Saved ids are lowercase; an uppercase one would match some lookups and not others on MySQL.
+        assertEquals(HttpStatus.BAD_REQUEST, controller.addReaction(3L, MESSAGE_ID.toUpperCase(), "love").getStatusCode());
         verify(reactionService, never()).add(any(), any(), any(), any(), any());
     }
 
