@@ -81,6 +81,11 @@ public class AssignmentAuthorizationService {
         return submission.getSubmitter().getMembers().stream().anyMatch(member -> isSamePerson(member, user));
     }
 
+    /** Whether a listing may show this submission to the user: their own, or one they may manage. */
+    public boolean canSeeSubmission(Person user, AssignmentSubmission submission) {
+        return isSubmitter(user, submission) || canManageSubmission(user, submission);
+    }
+
     public boolean isTeacherOrAdmin(Person user) {
         return user != null
             && (user.hasRole(ROLE_TEACHER) || user.hasRole(ROLE_ADMIN));

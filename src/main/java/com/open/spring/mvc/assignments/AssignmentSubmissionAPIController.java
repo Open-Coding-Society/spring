@@ -119,23 +119,27 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Get all submissions for a specific student.
+     * Get a student's submissions, only the ones the caller may see
+     * (AssignmentAuthorizationService.canSeeSubmission).
      * 
      * @param studentId the ID of the student whose submissions are to be fetched
      * @return a ResponseEntity containing a list of submissions for the given student ID
      */
     @Transactional
     @GetMapping("/getSubmissions/{studentId}")
-    public ResponseEntity<?> getSubmissions(@PathVariable Long studentId) {
+    public ResponseEntity<?> getSubmissions(@PathVariable Long studentId,
+            @AuthenticationPrincipal UserDetails userDetails) {
         if (personRepo.findById(studentId).isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Student not found");
         }
 
+        Person currentUser = getAuthenticatedPerson(userDetails);
         List<AssignmentSubmissionReturnDto> dtos = Stream.concat(
             submissionRepo.findBySubmitterId(studentId).stream(),
             groupRepo.findGroupsByPersonId(studentId).stream()
                 .flatMap(group -> submissionRepo.findBySubmitterId(group.getId()).stream())
         )
+        .filter(submission -> assignmentAuthorizationService.canSeeSubmission(currentUser, submission))
         .map(AssignmentSubmissionReturnDto::new)
         .toList();
 
@@ -836,14 +840,16 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Extract all submissions for a specific assignment.
+     * Extract an assignment's submissions, only the ones the caller may see
+     * (AssignmentAuthorizationService.canSeeSubmission).
      * 
      * @param assignmentId the ID of the assignment whose submissions are to be extracted
      * @return a ResponseEntity containing a list of all submissions for the assignment
      */
     @GetMapping("/extract/{assignmentId}")
     @Transactional
-    public ResponseEntity<?> extractSubmissionsByAssignment(@PathVariable Long assignmentId) {
+    public ResponseEntity<?> extractSubmissionsByAssignment(@PathVariable Long assignmentId,
+            @AuthenticationPrincipal UserDetails userDetails) {
         Assignment assignment = assignmentRepo.findById(assignmentId).orElse(null);
         if (assignment == null) {
             return new ResponseEntity<>(
@@ -852,8 +858,10 @@ public class AssignmentSubmissionAPIController {
             );
         }
 
+        Person currentUser = getAuthenticatedPerson(userDetails);
         List<AssignmentSubmission> submissions = submissionRepo.findByAssignmentId(assignmentId);
         List<AssignmentSubmissionReturnDto> submissionDtos = submissions.stream()
+            .filter(submission -> assignmentAuthorizationService.canSeeSubmission(currentUser, submission))
             .map(AssignmentSubmissionReturnDto::new)
             .collect(Collectors.toList());
 
