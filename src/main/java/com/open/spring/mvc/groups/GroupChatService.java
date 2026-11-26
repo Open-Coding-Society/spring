@@ -9,6 +9,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -103,13 +104,23 @@ public class GroupChatService {
     }
 
     /**
-     * The group's messages for a send, an edit or a delete, which write the whole file back.
-     * Strict: a read that failed throws rather than reading as an empty chat, which a send would
-     * save over the history and an edit or delete would answer as "not found". Only S3's 404
-     * means no messages yet. S3 being unavailable for a moment (see isUnavailable) throws
-     * MessagesStorageUnavailableException; anything else goes up as it is.
+     * One line of a group's messages file: a message, or a line that didn't read as one, kept
+     * as it was so that saving the file again doesn't drop it.
      */
-    private List<GroupChatMessage> readMessagesOrThrow(String groupName) {
+    private record MessagesLine(GroupChatMessage message, String unreadable) {
+        static MessagesLine of(GroupChatMessage message) {
+            return new MessagesLine(message, null);
+        }
+    }
+
+    /**
+     * The group's messages file, line by line, for a send, an edit or a delete, which write the
+     * whole file back. Strict: a read that failed throws rather than reading as an empty chat,
+     * which a send would save over the history and an edit or delete would answer as "not
+     * found". Only S3's 404 means no messages yet. S3 being unavailable for a moment (see
+     * isUnavailable) throws MessagesStorageUnavailableException; anything else goes up as it is.
+     */
+    private List<MessagesLine> readMessagesOrThrow(String groupName) {
         String base64Data;
         try {
             base64Data = s3FileHandler.decodeFileOrThrow(groupName, MESSAGES_FILE);
@@ -122,21 +133,22 @@ public class GroupChatService {
             }
             throw new MessagesStorageUnavailableException(e);
         }
-        return parseMessages(groupName, base64Data);
+        return parseLines(groupName, base64Data);
     }
 
     /**
-     * Saves the group's whole messages file. Strict: a write that failed throws, so a send, an
-     * edit or a delete isn't answered as saved when it wasn't. S3 being unavailable for a moment
-     * (see isUnavailable) throws MessagesStorageUnavailableException; anything else goes up as
-     * it is. Without S3 settings nothing is stored, and the chat still works live.
+     * Saves the group's whole messages file: each message as JSON, and each line that didn't
+     * read as a message as it was. Strict: a write that failed throws, so a send, an edit or a
+     * delete isn't answered as saved when it wasn't. S3 being unavailable for a moment (see
+     * isUnavailable) throws MessagesStorageUnavailableException; anything else goes up as it is.
+     * Without S3 settings nothing is stored, and the chat still works live.
      */
-    private void writeMessagesOrThrow(String groupName, List<GroupChatMessage> messages) {
+    private void writeMessagesOrThrow(String groupName, List<MessagesLine> lines) {
         if (!s3FileHandler.isConfigured()) {
             return;
         }
-        String jsonl = messages.stream()
-                .map(this::toJson)
+        String jsonl = lines.stream()
+                .map(line -> line.message() != null ? toJson(line.message()) : line.unreadable())
                 .collect(Collectors.joining("\n"));
         String base64Data = Base64.getEncoder().encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
         try {
@@ -154,6 +166,24 @@ public class GroupChatService {
     }
 
     private List<GroupChatMessage> parseMessages(String groupName, String base64Data) {
+        return messagesOf(parseLines(groupName, base64Data));
+    }
+
+    private static List<GroupChatMessage> messagesOf(List<MessagesLine> lines) {
+        return lines.stream()
+                .map(MessagesLine::message)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private static GroupChatMessage find(List<MessagesLine> lines, String messageId) {
+        return messagesOf(lines).stream()
+                .filter(m -> messageId.equals(m.getId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<MessagesLine> parseLines(String groupName, String base64Data) {
         if (base64Data == null || base64Data.isBlank()) {
             return new ArrayList<>();
         }
@@ -171,31 +201,32 @@ public class GroupChatService {
             return new ArrayList<>();
         }
 
-        List<GroupChatMessage> messages = new ArrayList<>();
+        List<MessagesLine> lines = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new StringReader(jsonl))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isBlank()) continue;
                 try {
-                    GroupChatMessage msg = objectMapper.readValue(line, GroupChatMessage.class);
-                    messages.add(msg);
+                    lines.add(MessagesLine.of(objectMapper.readValue(line, GroupChatMessage.class)));
                 } catch (Exception e) {
-                    log.warn("Skipping invalid message line for group {}: {}", groupName, line, e);
+                    // Left out of the chat, but kept in the file: a save writes it back as it is.
+                    log.warn("Keeping an unreadable message line of group {} as it is: {}", groupName, line, e);
+                    lines.add(new MessagesLine(null, line));
                 }
             }
         } catch (Exception e) {
             log.warn("Failed reading messages for group {}", groupName, e);
         }
 
-        return messages;
+        return lines;
     }
 
     public List<GroupChatMessage> addMessage(String groupName, GroupChatMessage message) {
         synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
-            List<GroupChatMessage> messages = readMessagesOrThrow(groupName);
-            messages.add(message);
-            writeMessagesOrThrow(groupName, messages);
-            return messages;
+            List<MessagesLine> lines = readMessagesOrThrow(groupName);
+            lines.add(MessagesLine.of(message));
+            writeMessagesOrThrow(groupName, lines);
+            return messagesOf(lines);
         }
     }
 
@@ -208,25 +239,18 @@ public class GroupChatService {
     public Optional<List<GroupChatMessage>> editMessage(String groupName, String messageId, String newMessage, String requesterUid) {
         if (messageId == null) return Optional.empty();
         synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
-            List<GroupChatMessage> messages = readMessagesOrThrow(groupName);
-            boolean found = false;
-            for (GroupChatMessage m : messages) {
-                if (messageId.equals(m.getId())) {
-                    if (requesterUid == null || !requesterUid.equals(m.getAuthor_uid())) {
-                        throw new SecurityException("Not the message sender");
-                    }
-                    m.setMessage(newMessage);
-                    m.setEdited(true);
-                    found = true;
-                    break;
-                }
-            }
-
-            if (!found) {
+            List<MessagesLine> lines = readMessagesOrThrow(groupName);
+            GroupChatMessage target = find(lines, messageId);
+            if (target == null) {
                 return Optional.empty();
             }
-            writeMessagesOrThrow(groupName, messages);
-            return Optional.of(messages);
+            if (requesterUid == null || !requesterUid.equals(target.getAuthor_uid())) {
+                throw new SecurityException("Not the message sender");
+            }
+            target.setMessage(newMessage);
+            target.setEdited(true);
+            writeMessagesOrThrow(groupName, lines);
+            return Optional.of(messagesOf(lines));
         }
     }
 
@@ -237,19 +261,15 @@ public class GroupChatService {
     public boolean deleteMessage(String groupName, String messageId, String requesterUid) {
         if (messageId == null) return false;
         synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
-            List<GroupChatMessage> messages = readMessagesOrThrow(groupName);
-
-            GroupChatMessage target = messages.stream()
-                    .filter(m -> messageId.equals(m.getId()))
-                    .findFirst()
-                    .orElse(null);
+            List<MessagesLine> lines = readMessagesOrThrow(groupName);
+            GroupChatMessage target = find(lines, messageId);
             if (target == null) return false;
             if (requesterUid == null || !requesterUid.equals(target.getAuthor_uid())) {
                 throw new SecurityException("Not the message sender");
             }
 
-            messages.remove(target);
-            writeMessagesOrThrow(groupName, messages);
+            lines.removeIf(line -> line.message() == target);
+            writeMessagesOrThrow(groupName, lines);
             return true;
         }
     }
@@ -496,8 +516,9 @@ public class GroupChatService {
         try {
             return objectMapper.writeValueAsString(message);
         } catch (Exception e) {
-            log.warn("Failed to serialize message: {}", message, e);
-            return "{}";
+            // Writing "{}" instead would replace the message in the file with nothing.
+            log.warn("Could not write message {} of a group chat", message.getId(), e);
+            throw new IllegalStateException("Could not write message " + message.getId(), e);
         }
     }
 }
