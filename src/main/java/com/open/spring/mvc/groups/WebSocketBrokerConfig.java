@@ -20,11 +20,14 @@ import com.open.spring.mvc.directmessages.DirectMessageTopicGuard;
  * <p>
  * When a socket opens, {@link ChatSocketIdentityInterceptor} reads the login cookie. Every frame a
  * client sends then passes {@link DirectMessageTopicGuard}, which lets only a conversation's
- * participants subscribe to its /topic/dm/{id}.
+ * participants subscribe to its /topic/dm/{id} and keeps clients from sending to any topic.
  */
 @Configuration
 @EnableWebSocketMessageBroker
 public class WebSocketBrokerConfig implements WebSocketMessageBrokerConfigurer {
+
+    /** The simple broker handles every destination that starts with this, so only the server may send there. */
+    public static final String BROKER_PREFIX = "/topic";
 
     private final ChatSocketIdentityInterceptor identityInterceptor;
     private final DirectMessageTopicGuard directMessageTopicGuard;
@@ -53,7 +56,7 @@ public class WebSocketBrokerConfig implements WebSocketMessageBrokerConfigurer {
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic");
+        registry.enableSimpleBroker(BROKER_PREFIX);
         registry.setApplicationDestinationPrefixes("/app");
     }
 }

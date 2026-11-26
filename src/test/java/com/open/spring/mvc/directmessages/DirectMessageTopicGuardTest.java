@@ -91,10 +91,12 @@ class DirectMessageTopicGuardTest {
         assertNull(guard.preSend(frame(StompCommand.SEND, "/user/hop/queue/messages", SIGNED_OUT), channel));
     }
 
-    @Test
-    void clientCannotSendToADmTopic() {
-        assertNull(guard.preSend(frame(StompCommand.SEND, "/topic/dm/1", HOP), channel));
-        assertNull(guard.preSend(frame(StompCommand.SEND, "/topic/dm/1", SIGNED_OUT), channel));
+    /** The broker relays a client's SEND to every subscriber of any destination starting with /topic. */
+    @ParameterizedTest
+    @ValueSource(strings = {"/topic/dm/1", "/topic/group/7", "/topic/anything", "/topicx"})
+    void clientCannotSendToAnyTopic(String destination) {
+        assertNull(guard.preSend(frame(StompCommand.SEND, destination, HOP), channel));
+        assertNull(guard.preSend(frame(StompCommand.SEND, destination, SIGNED_OUT), channel));
     }
 
     @Test
