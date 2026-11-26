@@ -79,7 +79,7 @@ final class ProbeContext implements AutoCloseable {
     enum Caller {
         ANONYMOUS(null), INVALID_TOKEN(null), EXPIRED_TOKEN("ROLE_USER"), NO_ROLE(null),
         USER("ROLE_USER"), STUDENT("ROLE_STUDENT"), MENTOR("ROLE_MENTOR"), TEACHER("ROLE_TEACHER"),
-        ADMIN("ROLE_ADMIN"), ASSIGNMENT_SYNC("ROLE_ASSIGNMENT_SYNC");
+        ADMIN("ROLE_ADMIN"), ASSIGNMENT_SYNC("ROLE_ASSIGNMENT_SYNC"), CALLS_WEBHOOK("ROLE_CALLS_WEBHOOK");
 
         final String role;
 

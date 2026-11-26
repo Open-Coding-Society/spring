@@ -52,7 +52,10 @@ to their calls with no calls code. Role names come only from `application.proper
 ## REST operations
 
 Every route but the webhook needs a signed-in person (the default `/api/**` rule in
-`SecurityConfig`) and the page headers the guard checks. Errors are `{"reason": ...}`.
+`SecurityConfig`) and the page headers the guard checks. The webhook needs `ROLE_CALLS_WEBHOOK`,
+which no account holds: `LiveKitWebhookAuthenticationFilter` gives it to a request that carries
+LiveKit's signature, and `permissions.json` lists the webhook under that role. Errors are
+`{"reason": ...}`.
 
 | Route | Answers |
 |---|---|
@@ -62,7 +65,7 @@ Every route but the webhook needs a signed-in person (the default `/api/**` rule
 | `POST /api/calls/{id}/participants/{identity}/pause`, `/resume`, `/remove` | 204; 403 `NOT_A_MODERATOR`; 404 `PARTICIPANT_NOT_FOUND` (pause, resume); 409 `WAITING_FOR_SUPERVISOR` (resume while the rules keep them paused); 503 `MEDIA_UNAVAILABLE` |
 | `POST /api/calls/{id}/end` | 204; 403 `NOT_A_MODERATOR`; 503 `MEDIA_UNAVAILABLE` |
 | `GET /api/calls/live?course=csa` | 200 `[{"id","title","contextType","count","oneOnOne"}]`: the live calls with someone in them that the caller may join; with `course`, that course's room and its teams' group rooms |
-| `POST /api/calls/webhook` (LiveKit only, no login) | 200; 401 `bad_signature`; 413 `body_too_large` (over 64 KB, refused before it is read) |
+| `POST /api/calls/webhook` (LiveKit only, signed in by its signature) | 200; the chain's 401 (403 for a signed-in account) without LiveKit's signature over the body, or with a body over 64 KB; 404 `calls_disabled` for a signed request while calls are off and LiveKit is still set up |
 | any route | 401 `unauthorized`, 403 `origin_rejected`, 404 `calls_disabled`; 503 `CALLS_UNAVAILABLE` when the database fails (for example, a table couldn't be created) |
 
 - `contextType` is `GROUP`, `DM` or `COURSE`. `contextKey` is the group's or DM's id, or the course
@@ -109,8 +112,9 @@ email. The room's name is its random UUID.
 
 LiveKit posts to `/api/calls/webhook` when someone joins or leaves and when a room finishes. Each
 request carries a JWT in `Authorization` (LiveKit 1.13 sends it without `Bearer `) whose `sha256`
-claim is the base64 SHA-256 of the body; `LiveKitWebhookVerifier` checks both, and anything else is
-401. LiveKit retries and may send events out of order, so each step can run twice: a connection
+claim is the base64 SHA-256 of the body; `LiveKitWebhookVerifier` checks both, first in
+`LiveKitWebhookAuthenticationFilter` (the chain refuses anything else) and again in the
+controller. LiveKit retries and may send events out of order, so each step can run twice: a connection
 (LiveKit's `sid`) that already left, or was in a room that finished, can't come back, and two tabs
 count as one person.
 
@@ -172,6 +176,8 @@ On SQLite, Hibernate reports a unique-key failure as `JpaSystemException`; on My
   scheduler and clock the test moves, `ManualCallScheduler`).
 - `CallPresenceTest`, `CallIdentityTest`, `LiveKitTokensTest`, `LiveKitWebhookVerifierTest`:
   presence, identities, the token and the webhook signature.
+- `LiveKitWebhookAuthenticationFilterTest`, `CallWebhookSecurityTest`: who the webhook filter signs
+  in, and the webhook behind the real filter chain.
 - `LiveKitRoomsTest`: the room service requests, against a stand-in HTTP server.
 - `CallRoomTableInitializerTest`, `CallAttendanceTableInitializerTest`, `CallAttendanceServiceTest`:
   the tables and the nightly clean-up.

@@ -113,7 +113,7 @@ final class SampleLabels {
             new Label("GET /api/person/capstones", MENTOR, "Mentor only: not Admin, not Teacher"),
             new Label("PUT /api/person/capstones/choice", MENTOR, "listed before PUT /api/person/**, which is Admin"),
             new Label("DELETE /api/person/capstones/choices", MENTOR, "listed before DELETE /api/person/**, which is Admin"),
-            new Label("POST /api/calls/webhook", "anyone", "permitAll: the call server has no login cookie and the handler checks its signature"),
+            new Label("POST /api/calls/webhook", "roles:ROLE_CALLS_WEBHOOK", "hasAuthority: only LiveKit's signature signs a request in with that role"),
             new Label("POST /api/calls", ALL4, "no rule names it: the default, which keeps Mentors out"),
             new Label("GET /api/calls/live", ALL4, "default"));
 

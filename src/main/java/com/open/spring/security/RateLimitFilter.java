@@ -3,6 +3,9 @@ package com.open.spring.security;
 import io.github.bucket4j.Bandwidth;
 import io.github.bucket4j.Bucket;
 import io.github.bucket4j.Refill;
+
+import com.open.spring.mvc.calls.LiveKitWebhookAuthenticationFilter;
+
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -63,10 +66,16 @@ public class RateLimitFilter extends OncePerRequestFilter {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         boolean loggedIn = auth != null && auth.isAuthenticated()
                 && !(auth instanceof AnonymousAuthenticationToken);
+        // LiveKit's webhook is signed in by its signature, not by an account, so it is keyed by its
+        // server's address under its own prefix: anyone can sign up with the name it is signed in as.
+        boolean liveKit = loggedIn && auth.getAuthorities().stream()
+                .anyMatch(authority -> LiveKitWebhookAuthenticationFilter.ROLE.equals(authority.getAuthority()));
         boolean isLogin = "/authenticate".equals(request.getServletPath());
 
         String username;
-        if (loggedIn) {
+        if (liveKit) {
+            username = "livekit-ip:" + request.getRemoteAddr();
+        } else if (loggedIn) {
             username = "user:" + auth.getName();
         } else if (isLogin) {
             username = "login-ip:" + request.getRemoteAddr();
@@ -75,7 +84,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
 
         // Track logged-in users
-        if (loggedIn) {
+        if (loggedIn && !liveKit) {
             activeUsers.put(username, true);
         }
 
