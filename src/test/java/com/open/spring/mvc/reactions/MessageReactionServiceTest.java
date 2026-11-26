@@ -13,6 +13,8 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
 
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.reactions.MessageReactionService.ReactionSummary;
@@ -153,5 +155,17 @@ class MessageReactionServiceTest {
         person.setUid(uid);
         person.setName(name);
         return person;
+    }
+
+    @Test
+    void removingAMessagesReactionsCommitsOnItsOwn() throws Exception {
+        // Chats remove a deleted message's reactions after the delete commits. Spring runs a
+        // transactional call made then inside the finished transaction, where nothing commits,
+        // unless it asks for a new one.
+        Transactional transactional = MessageReactionService.class
+                .getMethod("removeAllFor", ChatType.class, Long.class, String.class)
+                .getAnnotation(Transactional.class);
+
+        assertEquals(Propagation.REQUIRES_NEW, transactional.propagation());
     }
 }

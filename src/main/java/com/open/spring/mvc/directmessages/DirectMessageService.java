@@ -8,6 +8,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -22,6 +23,7 @@ import com.open.spring.mvc.reactions.MessageReactionService;
 import com.open.spring.mvc.reactions.Reaction;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Business logic for direct messages: finding/creating conversations, checking
@@ -31,6 +33,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class DirectMessageService {
 
     public static final String DM_TOPIC_PREFIX = "/topic/dm/";
@@ -228,8 +231,10 @@ public class DirectMessageService {
         message.setDeleted(true);
         message.setBody("");
         messageRepository.save(message);
-        // A tombstone shows no reactions, so none are kept for it.
-        reactionService.removeAllFor(ChatType.DM, conversation.getId(), String.valueOf(messageId));
+        // A tombstone shows no reactions, so none are kept for it. They're removed after the delete
+        // commits: an error from the reactions table inside this transaction would undo the delete.
+        Long conversationId = conversation.getId();
+        afterCommit(() -> removeReactions(conversationId, messageId));
 
         DirectMessageEvent event = DirectMessageEvent.builder()
                 .id(message.getId())
@@ -282,6 +287,16 @@ public class DirectMessageService {
     }
 
     // Runs once the current transaction commits, or right away outside one.
+    /** Removes a deleted message's reactions. The delete is already done, so a failure is only logged. */
+    private void removeReactions(Long conversationId, Long messageId) {
+        try {
+            reactionService.removeAllFor(ChatType.DM, conversationId, String.valueOf(messageId));
+        } catch (DataAccessException e) {
+            log.warn("Could not remove the reactions of deleted message {} in conversation {}",
+                    messageId, conversationId, e);
+        }
+    }
+
     private static void afterCommit(Runnable action) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {

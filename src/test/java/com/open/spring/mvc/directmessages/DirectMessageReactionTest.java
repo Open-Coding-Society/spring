@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -20,6 +21,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -202,6 +204,29 @@ class DirectMessageReactionTest {
         service.deleteMessage(conversation, bob, 42L);
 
         verify(reactionService).removeAllFor(ChatType.DM, 7L, "42");
+    }
+
+    @Test
+    void aDeleteStillGoesThroughWhenItsReactionsCantBeRemoved() {
+        doThrow(new DataAccessResourceFailureException("no message_reaction table"))
+                .when(reactionService).removeAllFor(ChatType.DM, 7L, "42");
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.deleteMessage(conversation, bob, 42L);
+
+            // Nothing in the delete's own transaction touches the reactions, so they can't undo it.
+            verify(reactionService, never()).removeAllFor(any(), any(), any());
+            assertTrue(message.isDeleted());
+            ArgumentCaptor<DirectMessageEvent> frame = ArgumentCaptor.forClass(DirectMessageEvent.class);
+            verify(messagingTemplate).convertAndSend(eq("/topic/dm/7"), frame.capture());
+            assertEquals("deleted", frame.getValue().getType());
+
+            // Once it commits they're removed, and a failure there is logged, not thrown at the caller.
+            TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+            verify(reactionService).removeAllFor(ChatType.DM, 7L, "42");
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test
