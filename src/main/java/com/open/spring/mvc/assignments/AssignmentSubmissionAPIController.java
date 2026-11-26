@@ -63,6 +63,13 @@ public class AssignmentSubmissionAPIController {
     private static final String MANAGE_DENIED_MESSAGE =
             "You do not have permission to manage this submission";
 
+    /**
+     * What a file upload records about the stored file. Only the upload routes set these, and
+     * other code reads them to find the file, so a JSON submission's copy is dropped.
+     */
+    private static final Set<String> UPLOAD_ONLY_KEYS = Set.of(
+            "filename", "storedFilename", "storagePath", "contentType", "size", "uploadedBy");
+
     @Autowired
     private AssignmentSubmissionJPA submissionRepo;
 
@@ -210,14 +217,15 @@ public class AssignmentSubmissionAPIController {
         // }
 
         if (assignment != null) {
-            if (!hasSubmissionType(submissionInfo.content, assignment)) {
+            Map<String, Object> content = withoutUploadKeys(submissionInfo.content);
+            if (!hasSubmissionType(content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
             }
-            String linkValidationError = validateLinkContent(submissionInfo.content);
+            String linkValidationError = validateLinkContent(content);
             if (linkValidationError != null) {
                 return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
             }
-            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, submissionInfo.content, submissionInfo.comment, Boolean.TRUE.equals(submissionInfo.isLate));
+            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, content, submissionInfo.comment, Boolean.TRUE.equals(submissionInfo.isLate));
             submission.setTechnicalExcellence(submissionInfo.technicalExcellence);
             submission.setCommunication(submissionInfo.communication);
             submission.setWorkHabits(submissionInfo.workHabits);
@@ -289,15 +297,16 @@ public class AssignmentSubmissionAPIController {
             ResponseEntity<?> authorError = validateSubmissionAuthor(userDetails, submitter);
             if (authorError != null) return authorError;
 
-            if (!hasSubmissionType(requestData.content, assignment)) {
+            Map<String, Object> content = withoutUploadKeys(requestData.content);
+            if (!hasSubmissionType(content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
             }
-            String linkValidationError = validateLinkContent(requestData.content);
+            String linkValidationError = validateLinkContent(content);
             if (linkValidationError != null) {
                 return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
             }
 
-            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, requestData.content, requestData.comment, Boolean.TRUE.equals(requestData.isLate));
+            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, content, requestData.comment, Boolean.TRUE.equals(requestData.isLate));
             submission.setTechnicalExcellence(requestData.technicalExcellence);
             submission.setCommunication(requestData.communication);
             submission.setWorkHabits(requestData.workHabits);
@@ -975,6 +984,16 @@ public class AssignmentSubmissionAPIController {
         }
         return new ResponseEntity<>(new AssignmentSubmissionReturnDto(saved.submission()),
                 saved.replaced() ? HttpStatus.OK : HttpStatus.CREATED);
+    }
+
+    /** The client's content without the upload-only keys, as a copy (the request's map may be immutable). */
+    static Map<String, Object> withoutUploadKeys(Map<String, Object> content) {
+        if (content == null) {
+            return null;
+        }
+        Map<String, Object> kept = new java.util.LinkedHashMap<>(content);
+        kept.keySet().removeAll(UPLOAD_ONLY_KEYS);
+        return kept;
     }
 
     private Person getAuthenticatedPerson(UserDetails userDetails) {
