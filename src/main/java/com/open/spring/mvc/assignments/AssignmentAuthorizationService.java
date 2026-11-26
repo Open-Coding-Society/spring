@@ -64,6 +64,15 @@ public class AssignmentAuthorizationService {
             && submissionGraders.stream().anyMatch(grader -> isSamePerson(grader, user));
     }
 
+    /**
+     * Who picks a submission's graders: teachers, admins and the assignment's creators. Unlike
+     * {@link #canManageSubmission}, a grader isn't included, since grading a submission isn't
+     * the same as deciding who else grades it.
+     */
+    public boolean canChooseGraders(Person user, Assignment assignment) {
+        return user != null && (isTeacherOrAdmin(user) || isCreator(user, assignment));
+    }
+
     /** Whether the user made this submission, alone or as a member of the submitting group. */
     public boolean isSubmitter(Person user, AssignmentSubmission submission) {
         if (user == null || submission == null || submission.getSubmitter() == null) {

@@ -781,19 +781,27 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Assign persons as graders to a specific submission.
+     * Assign persons as graders to a specific submission. Only teachers, admins and the
+     * assignment's creators choose graders (AssignmentAuthorizationService.canChooseGraders).
      * @param id the ID of the submission to which graders are being assigned
      * @param personIds a list of person IDs to be assigned as graders
      * @return a ResponseEntity indicating success or failure
      */
     @PostMapping("/{id}/assigned-graders")
-    public ResponseEntity<?> assignGradersToSubmission(@PathVariable Long id, @RequestBody List<Long> personIds) {
+    @Transactional // open-in-view is off, and the check reads the assignment's creators
+    public ResponseEntity<?> assignGradersToSubmission(@PathVariable Long id, @RequestBody List<Long> personIds,
+            @AuthenticationPrincipal UserDetails userDetails) {
         Optional<AssignmentSubmission> submissionOptional = submissionRepo.findById(id);
         if (!submissionOptional.isPresent()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Submission not found");
         }
 
         AssignmentSubmission submission = submissionOptional.get();
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (!assignmentAuthorizationService.canChooseGraders(currentUser, submission.getAssignment())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Only a teacher, an admin or the assignment's creator can choose its graders");
+        }
         List<Person> persons = personRepo.findAllById(personIds);
 
         submission.setAssignedGraders(persons);
