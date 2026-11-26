@@ -160,6 +160,7 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 - **A shared file's bytes never go over the socket.** `sendFileServer` names the file and its size; a member downloads it from `/files/content`. Sending the bytes to every subscriber could overflow a session's 512 KB send buffer while another frame was queued, and Spring closes a session that overflows.
 - **A shared file whose write timed out may still be stored.** S3 can store a file and then fail to answer, and the AWS SDK's own retries can fail too. The upload then answers 503 without a "shared by" record or a `sendFileServer` frame, and sharing it again finds the path taken (409), which the page handles like any other taken name.
 - **A message whose save timed out may still be stored.** S3 can store the messages file and then fail to answer. The change then answers 503 and isn't broadcast, so a message stored that way shows only after a reload, and a send tried again shows up twice. An edit tried again makes the same change, so it lands once, and a delete tried again finds nothing and answers 404.
+- **A line that doesn't read as a message is kept.** Loading the chat leaves it out and logs a warning, and a send, edit or delete writes it back as it was (`MessagesLine` in `GroupChatService`), so one bad line isn't lost the next time the file is saved. A message that can't be written as JSON refuses the change, and the route gives its usual 400, instead of being saved as `{}`.
 
 ## Testing
 
@@ -173,6 +174,7 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 - `GroupChatSendTest` also covers an upload that fails after a good read, and `GroupChatEditDeleteTest` covers edits and deletes whose read or upload fails, both through the controller over a stand-in S3 client.
 - `GroupChatSendTest` and `GroupChatEditDeleteTest` also check that a send and an edit answer with the messages they saved, even when S3 fails right after.
 - `GroupChatEditDeleteTest` also checks that a delete of a message that isn't saved answers 404 and tells no one, with or without S3 settings.
+- `GroupChatMessagesFileTest` covers a line that doesn't read as a message, kept in place through a send, an edit and a delete and left out when the chat loads, and a message that can't be written.
 
 ## Known issues
 
