@@ -23,6 +23,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.open.spring.mvc.assignments.Assignment;
+import com.open.spring.mvc.assignments.AssignmentAuthorizationService;
+import com.open.spring.mvc.assignments.AssignmentJpaRepository;
+import com.open.spring.mvc.assignments.AssignmentSubmissionJPA;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.person.RolesJsonConverter;
@@ -49,6 +53,15 @@ public class GroupsApiController {
 
     @Autowired
     private MentorAccess mentorAccess;
+
+    @Autowired
+    private AssignmentJpaRepository assignmentRepository;
+
+    @Autowired
+    private AssignmentSubmissionJPA submissionRepository;
+
+    @Autowired
+    private AssignmentAuthorizationService assignmentAuthorizationService;
 
     private static final RolesJsonConverter ROLES = new RolesJsonConverter();
 
@@ -157,6 +170,54 @@ public class GroupsApiController {
 
     private static ResponseEntity<Object> slashInName() {
         return new ResponseEntity<>(Map.of("error", "A group name can't contain \"/\""), HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * Who grades a group on an assignment: teachers and admins, the assignment's creators and graders
+     * (AssignmentAuthorizationService.canManage), and the graders of the group's own submission to it.
+     */
+    private boolean gradesGroupOn(Person caller, Groups group, Object assignmentIdValue) {
+        if (isStaff(caller)) {
+            return true;
+        }
+        Long assignmentId = idOf(assignmentIdValue);
+        if (caller == null || assignmentId == null) {
+            return false;
+        }
+        Optional<Assignment> assignment = assignmentRepository.findById(assignmentId);
+        if (assignment.isPresent() && assignmentAuthorizationService.canManage(caller, assignment.get())) {
+            return true;
+        }
+        return submissionRepository.findBySubmitterId(group.getId()).stream()
+                .filter(submission -> submission.getAssignment() != null
+                        && assignmentId.equals(submission.getAssignment().getId()))
+                .anyMatch(submission -> assignmentAuthorizationService.canManageSubmission(caller, submission));
+    }
+
+    /** A grade entry's assignmentId as the upsert keys it (its text), or null when that isn't a whole number. */
+    private static Long idOf(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value.toString().trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static ResponseEntity<Object> notGroupGrader() {
+        return new ResponseEntity<>(
+            Map.of("error", "Only a teacher, an admin or someone who grades this group on that assignment can add its grade"),
+            HttpStatus.FORBIDDEN
+        );
+    }
+
+    private static ResponseEntity<Object> notStaffForGrades() {
+        return new ResponseEntity<>(
+            Map.of("error", "Only a teacher or an admin can replace or clear a group's grades"),
+            HttpStatus.FORBIDDEN
+        );
     }
 
     /** The people with these ids, in order, once each, leaving out ids that match no one. */
@@ -746,6 +807,10 @@ public class GroupsApiController {
         if (mentorRefusal != null) {
             return mentorRefusal;
         }
+        // Replacing the blob changes every assignment's entry at once
+        if (!isStaff(currentPerson())) {
+            return notStaffForGrades();
+        }
         Optional<Groups> groupOpt = groupsRepository.findById(id);
         if (groupOpt.isEmpty()) return new ResponseEntity<>(HttpStatus.NOT_FOUND);
 
@@ -773,6 +838,9 @@ public class GroupsApiController {
         if (groupOpt.isEmpty()) return new ResponseEntity<>(HttpStatus.NOT_FOUND);
 
         Groups group = groupOpt.get();
+        if (!gradesGroupOn(currentPerson(), group, gradeEntry == null ? null : gradeEntry.get("assignmentId"))) {
+            return notGroupGrader();
+        }
         if (group.getGradesJson() == null) group.setGradesJson(new ArrayList<>());
 
         // --- Build a canonical group-grade entry (so group + persons get same schema) ---
@@ -837,6 +905,10 @@ public class GroupsApiController {
         ResponseEntity<Object> mentorRefusal = mentorManageRefusal();
         if (mentorRefusal != null) {
             return mentorRefusal;
+        }
+        // Clearing the blob removes every assignment's entry at once
+        if (!isStaff(currentPerson())) {
+            return notStaffForGrades();
         }
         Optional<Groups> groupOpt = groupsRepository.findById(id);
         if (groupOpt.isEmpty()) return new ResponseEntity<>(HttpStatus.NOT_FOUND);
