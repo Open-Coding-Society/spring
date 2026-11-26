@@ -75,14 +75,15 @@ public class ChatApiController {
             return refusal;
         }
 
-        // String currentUsername = getCurrentUsername();
-        // if (currentUsername == null) {
-        //     return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
-        // }
-
-        // if (!isMember(groupOpt.get(), currentUsername)) {
-        //     return new ResponseEntity<>(HttpStatus.FORBIDDEN);
-        // }
+        // Only the group's members, teachers and admins read its chat.
+        String currentUsername = getCurrentUsername();
+        if (currentUsername == null) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+        if (!isMember(groupOpt.get(), currentUsername)
+                && !MentorRules.isStaff(personRepository.findByUid(currentUsername))) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
 
         return new ResponseEntity<>(chatService.getChatHistory(groupId), HttpStatus.OK);
     }

@@ -30,8 +30,8 @@ import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
 /**
- * The older /api/chat/{groupId} keeps its own chat file per group. A mentor uses it only where they may use the group's
- * chat (MentorRules); everyone else reads and posts as before.
+ * The older /api/chat/{groupId} keeps its own chat file per group. Only the group's members, teachers and admins read it,
+ * and only members post. A mentor uses it only where they may use the group's chat (MentorRules).
  */
 class LegacyChatMentorTest {
 
@@ -54,6 +54,8 @@ class LegacyChatMentorTest {
     private final Person teammate = person(2, "ROLE_USER", "ROLE_STUDENT");
     private final Person mentor = person(3, "ROLE_USER", "ROLE_MENTOR");
     private final Person outsider = person(5, "ROLE_USER", "ROLE_STUDENT");
+    private final Person teacher = person(8, "ROLE_USER", "ROLE_TEACHER");
+    private final Person admin = person(9, "ROLE_USER", "ROLE_ADMIN");
 
     private static final long OTHERS = 7L;
     private static final long SOLO = 8L;
@@ -77,7 +79,7 @@ class LegacyChatMentorTest {
         classGroups = mock(ClassGroupMembershipService.class);
         people = mock(PersonJpaRepository.class);
         controller = new ChatApiController(chat, groups, people, new MentorAccess(groups, classGroups));
-        for (Person person : List.of(student, teammate, mentor, outsider)) {
+        for (Person person : List.of(student, teammate, mentor, outsider, teacher, admin)) {
             when(people.findByUid(person.getUid())).thenReturn(person);
         }
         group(OTHERS, "Team Rocket", student, teammate);
@@ -129,9 +131,24 @@ class LegacyChatMentorTest {
     }
 
     @Test
-    void studentsReadAnyOlderChatAndPostInTheirOwnAsBefore() {
+    void someoneOutsideTheGroupCantReadItsOlderChat() {
         signIn(outsider);
-        assertEquals(HttpStatus.OK, controller.getChat(OTHERS).getStatusCode());
+        assertEquals(HttpStatus.FORBIDDEN, controller.getChat(OTHERS).getStatusCode());
+        verify(chat, never()).getChatHistory(anyLong());
+    }
+
+    @Test
+    void membersTeachersAndAdminsReadTheOlderChat() {
+        for (Person reader : List.of(student, teacher, admin)) {
+            signIn(reader);
+            assertEquals(HttpStatus.OK, controller.getChat(OTHERS).getStatusCode(), reader.getUid());
+        }
+        verify(groups, never()).findMembersOf(anyLong());
+    }
+
+    @Test
+    void onlyMembersPostAsBefore() {
+        signIn(outsider);
         assertEquals(HttpStatus.FORBIDDEN, controller.postChat(OTHERS, text("hi")).getStatusCode());
         signIn(student);
         assertEquals(HttpStatus.OK, controller.postChat(OTHERS, text("hi")).getStatusCode());
