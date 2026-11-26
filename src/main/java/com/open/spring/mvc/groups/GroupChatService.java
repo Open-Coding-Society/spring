@@ -65,14 +65,29 @@ public class GroupChatService {
         s3FileHandler.uploadFile(emptyBase64, SHARED_FILES_PREFIX, groupName);
     }
 
+    /**
+     * Creates the group's empty messages file and shared-files/ folder if they're missing.
+     * Strict for the messages file: only S3's 404 means missing, and a check that failed
+     * throws without writing, since an empty file written over the real one would erase the
+     * group's history.
+     */
     public void ensureGroupStorageExists(String groupName) {
-        // Check if messages.jsonl exists, if not, create it
-        if (!s3FileHandler.fileExists(groupName, MESSAGES_FILE)) {
-            String emptyBase64 = Base64.getEncoder().encodeToString(new byte[0]);
-            s3FileHandler.uploadFile(emptyBase64, MESSAGES_FILE, groupName);
+        // Without S3 settings nothing is stored, so there's nothing to check.
+        if (!s3FileHandler.isConfigured()) {
+            return;
         }
 
-        // Check if shared-files/ folder exists, if not, create it
+        // Check if messages.jsonl exists, if not, create it. Under the group's message lock,
+        // so a message sent between the check and the write isn't lost under the empty file.
+        synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
+            if (!s3FileHandler.fileExistsOrThrow(groupName, MESSAGES_FILE)) {
+                String emptyBase64 = Base64.getEncoder().encodeToString(new byte[0]);
+                s3FileHandler.uploadFile(emptyBase64, MESSAGES_FILE, groupName);
+            }
+        }
+
+        // Check if shared-files/ folder exists, if not, create it. Its placeholder is empty,
+        // so writing it again loses nothing.
         if (!s3FileHandler.fileExists(groupName, SHARED_FILES_PREFIX)) {
             String emptyBase64 = Base64.getEncoder().encodeToString(new byte[0]);
             s3FileHandler.uploadFile(emptyBase64, SHARED_FILES_PREFIX, groupName);

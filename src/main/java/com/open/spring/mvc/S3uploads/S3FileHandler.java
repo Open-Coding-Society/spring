@@ -79,6 +79,11 @@ public class S3FileHandler implements FileHandler {
         this.s3Client = builder.build();
     }
 
+    /** Whether this server has S3 settings (AWS credentials, region and bucket). Without them nothing is stored. */
+    public boolean isConfigured() {
+        return s3Client != null;
+    }
+
     @Override
     public String uploadFile(String base64Data, String filename, String uid) {
         if (s3Client == null) {
