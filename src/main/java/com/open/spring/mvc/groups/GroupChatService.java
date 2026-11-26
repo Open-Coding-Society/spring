@@ -230,9 +230,12 @@ public class GroupChatService {
         }
     }
 
-    /** Same ownership rule as {@link #editMessage}; throws {@link SecurityException} on mismatch. */
-    public void deleteMessage(String groupName, String messageId, String requesterUid) {
-        if (messageId == null) return;
+    /**
+     * Deletes a message and returns whether one with that id was in this group. Same ownership
+     * rule as {@link #editMessage}; throws {@link SecurityException} on mismatch.
+     */
+    public boolean deleteMessage(String groupName, String messageId, String requesterUid) {
+        if (messageId == null) return false;
         synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
             List<GroupChatMessage> messages = readMessagesOrThrow(groupName);
 
@@ -240,16 +243,14 @@ public class GroupChatService {
                     .filter(m -> messageId.equals(m.getId()))
                     .findFirst()
                     .orElse(null);
-            if (target == null) return;
+            if (target == null) return false;
             if (requesterUid == null || !requesterUid.equals(target.getAuthor_uid())) {
                 throw new SecurityException("Not the message sender");
             }
 
-            boolean removed = messages.remove(target);
-
-            if (removed) {
-                writeMessagesOrThrow(groupName, messages);
-            }
+            messages.remove(target);
+            writeMessagesOrThrow(groupName, messages);
+            return true;
         }
     }
 

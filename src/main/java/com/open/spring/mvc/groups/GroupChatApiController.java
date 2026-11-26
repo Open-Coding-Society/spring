@@ -252,8 +252,9 @@ public class GroupChatApiController {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
 
+        boolean deleted;
         try {
-            realtimeService.deleteMessage(groupId, messageId, identity.getUid());
+            deleted = realtimeService.deleteMessage(groupId, messageId, identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         } catch (MessagesStorageUnavailableException ex) {
@@ -261,7 +262,9 @@ public class GroupChatApiController {
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
-
+        if (!deleted) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
         return new ResponseEntity<>(HttpStatus.OK);
     }
 

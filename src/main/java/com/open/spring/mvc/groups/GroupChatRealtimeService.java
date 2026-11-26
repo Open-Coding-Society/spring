@@ -77,10 +77,17 @@ public class GroupChatRealtimeService {
         return saved;
     }
 
-    /** Throws {@link SecurityException} if the authenticated requester didn't send it. */
-    public void deleteMessage(Long groupId, String messageId, String requesterUid) {
+    /**
+     * Deletes the message and tells the group, or returns false and tells no one when the
+     * message isn't in this group. Throws {@link SecurityException} if the authenticated
+     * requester didn't send it.
+     */
+    public boolean deleteMessage(Long groupId, String messageId, String requesterUid) {
         Groups group = getGroupOrThrow(groupId);
-        groupChatService.deleteMessage(group.getName(), messageId, requesterUid);
+        if (!groupChatService.deleteMessage(group.getName(), messageId, requesterUid)) {
+            // Telling the group about a message that isn't saved would take it off everyone's screen.
+            return false;
+        }
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("deleteMessageServer")
@@ -90,6 +97,7 @@ public class GroupChatRealtimeService {
                 .build();
 
         broadcastToGroup(groupId, event);
+        return true;
     }
 
     /**
