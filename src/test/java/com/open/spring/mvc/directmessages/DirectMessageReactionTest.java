@@ -26,6 +26,8 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.security.core.userdetails.User;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.test.util.ReflectionTestUtils;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.open.spring.mvc.person.Person;
@@ -89,6 +91,7 @@ class DirectMessageReactionTest {
 
         summaries = List.of(new ReactionSummary("like", List.of(new Reactor("alice", "alice"))));
         when(reactionService.forMessage(ChatType.DM, 7L, "42")).thenReturn(summaries);
+        when(reactionService.forMessageNow(ChatType.DM, 7L, "42")).thenReturn(summaries);
     }
 
     @Test
@@ -103,6 +106,27 @@ class DirectMessageReactionTest {
         assertEquals(7L, frame.getValue().getConversationId());
         assertEquals(summaries, frame.getValue().getReactions());
         assertEquals(summaries, result);
+    }
+
+    @Test
+    void theFrameGoesOutAfterTheCommitWithReactionsReadThen() {
+        // Read after the commit, the list has a reaction someone else committed at the same time.
+        List<ReactionSummary> fresh = List.of(new ReactionSummary("like",
+                List.of(new Reactor("alice", "alice"), new Reactor("bob", "bob"))));
+        when(reactionService.forMessageNow(ChatType.DM, 7L, "42")).thenReturn(fresh);
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            service.setReaction(conversation, alice, 42L, Reaction.LIKE, true);
+            verify(messagingTemplate, never()).convertAndSend(eq("/topic/dm/7"), any(Object.class));
+
+            TransactionSynchronizationManager.getSynchronizations().forEach(TransactionSynchronization::afterCommit);
+
+            ArgumentCaptor<DirectMessageEvent> frame = ArgumentCaptor.forClass(DirectMessageEvent.class);
+            verify(messagingTemplate).convertAndSend(eq("/topic/dm/7"), frame.capture());
+            assertEquals(fresh, frame.getValue().getReactions());
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     @Test

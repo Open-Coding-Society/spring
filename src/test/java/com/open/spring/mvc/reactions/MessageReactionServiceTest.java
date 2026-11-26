@@ -91,6 +91,15 @@ class MessageReactionServiceTest {
     }
 
     @Test
+    void forMessageNowReadsTheSameSummary() {
+        when(repository.findByKeyChatTypeAndKeyChatIdAndKeyMessageId(ChatType.DM, 7L, "42")).thenReturn(List.of(
+                row(ChatType.DM, 7L, "42", 1L, Reaction.LIKE)));
+        when(repository.findReactorNames(any())).thenReturn(List.of(name(ada)));
+
+        assertEquals(service.forMessage(ChatType.DM, 7L, "42"), service.forMessageNow(ChatType.DM, 7L, "42"));
+    }
+
+    @Test
     void forChatKeysByMessageId() {
         when(repository.findByKeyChatTypeAndKeyChatId(ChatType.GROUP, 3L)).thenReturn(List.of(
                 row(ChatType.GROUP, 3L, "42", 1L, Reaction.LIKE),

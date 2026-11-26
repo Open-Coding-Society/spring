@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import com.open.spring.mvc.person.Person;
@@ -62,6 +63,15 @@ public class MessageReactionService {
     public List<ReactionSummary> forMessage(ChatType type, Long chatId, String messageId) {
         List<MessageReaction> rows = repository.findByKeyChatTypeAndKeyChatIdAndKeyMessageId(type, chatId, messageId);
         return summarize(rows, reactorsFor(rows));
+    }
+
+    /**
+     * One message's reactions, read in a transaction of its own: for the frame a DM sends once its
+     * change has committed, so the read sees what everyone else committed by then.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public List<ReactionSummary> forMessageNow(ChatType type, Long chatId, String messageId) {
+        return forMessage(type, chatId, messageId);
     }
 
     /** Every reacted-to message in a chat, by message id. A message left with no reactions isn't listed. */

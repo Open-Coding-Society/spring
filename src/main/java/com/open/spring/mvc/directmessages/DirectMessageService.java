@@ -12,6 +12,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.push.PushNotificationService;
@@ -266,14 +268,31 @@ public class DirectMessageService {
         List<MessageReactionService.ReactionSummary> reactions =
                 reactionService.forMessage(ChatType.DM, conversation.getId(), key);
 
-        DirectMessageEvent event = DirectMessageEvent.builder()
+        // The frame goes out once this commits, with the reactions read again then. Read here,
+        // inside this transaction, they could miss a reaction someone else saved at the same time,
+        // and that person's frame would miss this one.
+        Long conversationId = conversation.getId();
+        afterCommit(() -> messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + conversationId, DirectMessageEvent.builder()
                 .id(messageId)
-                .conversationId(conversation.getId())
+                .conversationId(conversationId)
                 .type("reactions")
-                .reactions(reactions)
-                .build();
-        messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + conversation.getId(), event);
+                .reactions(reactionService.forMessageNow(ChatType.DM, conversationId, key))
+                .build()));
         return reactions;
+    }
+
+    // Runs once the current transaction commits, or right away outside one.
+    private static void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 
     @Transactional(readOnly = true)
