@@ -38,7 +38,9 @@ public class MessageReactionTableInitializer {
             try {
                 jdbcTemplate.execute(CREATE_TABLE);
             } catch (DataAccessException e) {
-                logger.warn("Could not create the message_reaction table: {}", e.getMessage());
+                // The rest of Spring keeps running, as it does when another table can't be made;
+                // only the reaction routes fail, until the table exists.
+                logger.error("Could not create the message_reaction table, so reactions won't work: {}", e.getMessage());
             }
         };
     }
