@@ -100,7 +100,11 @@ class GroupChatEditDeleteTest {
         S3FileHandler storage = new S3FileHandler();
         ReflectionTestUtils.setField(storage, "s3Client", s3);
         ReflectionTestUtils.setField(storage, "bucketName", "chat-test");
+        wire(storage);
+    }
 
+    /** The edit and delete routes over this storage, with Grace Hopper signed in. */
+    private void wire(S3FileHandler storage) {
         GroupChatService chat = new GroupChatService(storage, new ObjectMapper());
         GroupsJpaRepository groups = mock(GroupsJpaRepository.class);
         messaging = mock(SimpMessagingTemplate.class);
@@ -197,6 +201,27 @@ class GroupChatEditDeleteTest {
         GroupChatMessage saved = (GroupChatMessage) answered.get(0);
         assertEquals("Meeting at 3", saved.getMessage());
         assertTrue(saved.isEdited());
+    }
+
+    @Test
+    void aDeleteOfAMessageThatIsntSavedAnswers404AndTellsNoOne() {
+        ResponseEntity<?> response = controller.deleteMessage(7L, "not-a-saved-id");
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        assertEquals(GRACE_LINE, storedMessages());
+        // Telling the group would take the message off everyone's screen.
+        verify(messaging, never()).convertAndSend(any(String.class), any(Object.class));
+    }
+
+    @Test
+    void withoutS3SettingsADeleteAnswers404AndTellsNoOne() {
+        // A local server without S3 saves nothing, so there's no message to delete, whoever sent it.
+        wire(new S3FileHandler());
+
+        ResponseEntity<?> response = delete();
+
+        assertEquals(HttpStatus.NOT_FOUND, response.getStatusCode());
+        verify(messaging, never()).convertAndSend(any(String.class), any(Object.class));
     }
 
     @Test
