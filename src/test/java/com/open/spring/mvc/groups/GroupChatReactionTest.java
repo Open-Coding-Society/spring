@@ -65,7 +65,8 @@ class GroupChatReactionTest {
         realtime = new GroupChatRealtimeService(chat, groups, messaging, reactionService);
         PersonJpaRepository people = mock(PersonJpaRepository.class);
         GroupChatReadService reads = new GroupChatReadService(mock(GroupChatReadStateJpaRepository.class), groups, chat);
-        controller = new GroupChatApiController(chat, realtime, reads, groups, people, reactionService);
+        controller = new GroupChatApiController(chat, realtime, reads, groups, people, reactionService,
+                new MentorAccess(groups, mock(ClassGroupMembershipService.class)));
 
         Groups group = spy(new Groups());
         when(group.getId()).thenReturn(3L);

@@ -60,7 +60,8 @@ class GroupChatRegressionTest {
         reads = new GroupChatReadService(readStates, groups, chat);
         realtime = new GroupChatRealtimeService(chat, groups, mock(SimpMessagingTemplate.class), mock(MessageReactionService.class));
         PersonJpaRepository people = mock(PersonJpaRepository.class);
-        controller = new GroupChatApiController(chat, realtime, reads, groups, people, mock(MessageReactionService.class));
+        controller = new GroupChatApiController(chat, realtime, reads, groups, people, mock(MessageReactionService.class),
+                new MentorAccess(groups, mock(ClassGroupMembershipService.class)));
 
         Groups group = spy(new Groups());
         when(group.getId()).thenReturn(7L);
