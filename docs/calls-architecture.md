@@ -176,6 +176,9 @@ On SQLite, Hibernate reports a unique-key failure as `JpaSystemException`; on My
 - `CallRoomTableInitializerTest`, `CallAttendanceTableInitializerTest`, `CallAttendanceServiceTest`:
   the tables and the nightly clean-up.
 - `CallPersistenceTest`: the entities through JPA on a SQLite file, against the initializers' tables.
+- `CallExceptionHandlerSliceTest`: the error advice in an MVC test slice (`@WebMvcTest`), which builds
+  every controller advice but none of the calls beans; with no `CallsProperties` it answers as if
+  calls were off.
 
 `api/calls.http` runs the routes against a local server with calls turned on.
 

@@ -47,7 +47,7 @@ class CallLiveHttpTest {
         group13 = live(store.service.openFor(nikoPerson, CallContextType.GROUP, "13", null), "id-niko");
         csa = store.service.openFor(adaPerson, CallContextType.COURSE, "csa", null);
         mvc = MockMvcBuilders.standaloneSetup(store.controller())
-                .setControllerAdvice(new CallExceptionHandler(store.properties))
+                .setControllerAdvice(store.exceptionHandler())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(Jackson2ObjectMapperBuilder.json().build()))
                 .build();
     }

@@ -52,7 +52,7 @@ class CallApiHttpTest {
         teacher = CallTestStore.login(store.person(4, "mort", "ROLE_USER", "ROLE_TEACHER"));
         store.group(12, "Binary Beasts", adaPerson, mentorPerson);
         mvc = MockMvcBuilders.standaloneSetup(store.controller())
-                .setControllerAdvice(new CallExceptionHandler(store.properties))
+                .setControllerAdvice(store.exceptionHandler())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(json))
                 .build();
     }

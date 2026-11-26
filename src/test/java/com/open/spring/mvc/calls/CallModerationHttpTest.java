@@ -49,7 +49,7 @@ class CallModerationHttpTest {
         adaId = CallIdentity.of("ada", CallTestStore.LIVEKIT_SECRET);
         mentorId = CallIdentity.of("grace", CallTestStore.LIVEKIT_SECRET);
         mvc = MockMvcBuilders.standaloneSetup(store.controller())
-                .setControllerAdvice(new CallExceptionHandler(store.properties))
+                .setControllerAdvice(store.exceptionHandler())
                 .setMessageConverters(new MappingJackson2HttpMessageConverter(Jackson2ObjectMapperBuilder.json().build()))
                 .build();
     }

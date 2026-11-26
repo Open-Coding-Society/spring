@@ -41,7 +41,7 @@ class CallWebhookHttpTest {
         store.group(12, "Binary Beasts", ada);
         room = store.service.openFor(ada, CallContextType.GROUP, "12", null);
         mvc = MockMvcBuilders.standaloneSetup(new CallWebhookController(store.properties, store.webhooks))
-                .setControllerAdvice(new CallExceptionHandler(store.properties))
+                .setControllerAdvice(store.exceptionHandler())
                 .build();
     }
 
