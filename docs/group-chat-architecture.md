@@ -132,8 +132,8 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 | Method | Route | Operation | Who |
 |---|---|---|---|
 | GET | `/api/groups/chat/{groupId}/messages` | The group's messages | Any signed-in account |
-| POST | `/api/groups/chat/{groupId}/messages` | Send `{message, image}`; broadcasts it and returns the history. 503 with `Retry-After` when S3 can't read or save the group's messages for now, and then it isn't broadcast (a save that timed out may still be stored, see Persistence) | Any signed-in account. The sender is the signed-in account. |
-| PATCH | `/api/groups/chat/{groupId}/messages/{messageId}` | Edit a message. 503 with `Retry-After` when S3 can't read or save the group's messages for now, and then it isn't broadcast (a save that timed out may still be stored, see Persistence) | Only its sender (403 otherwise) |
+| POST | `/api/groups/chat/{groupId}/messages` | Send `{message, image}`; broadcasts it and returns the history as it was saved. 503 with `Retry-After` when S3 can't read or save the group's messages for now, and then it isn't broadcast (a save that timed out may still be stored, see Persistence) | Any signed-in account. The sender is the signed-in account. |
+| PATCH | `/api/groups/chat/{groupId}/messages/{messageId}` | Edit a message; returns the history as it was saved, and 404 when no message has that id. 503 with `Retry-After` when S3 can't read or save the group's messages for now, and then it isn't broadcast (a save that timed out may still be stored, see Persistence) | Only its sender (403 otherwise) |
 | DELETE | `/api/groups/chat/{groupId}/messages/{messageId}` | Delete a message. 503 with `Retry-After` when S3 can't read or save the group's messages for now, and then it isn't broadcast (a save that timed out may still be stored, see Persistence) | Only its sender (403 otherwise) |
 | GET | `/api/groups/chat/unread` | `{total, unreadByGroup}` across your groups | You |
 | POST | `/api/groups/chat/{groupId}/read` | Mark a group read | You |
@@ -171,6 +171,7 @@ Every route needs a signed-in account (the JWT cookie from `POST /authenticate`)
 - `StartupServiceTest` runs the start-up check over a real `S3FileHandler` and a stand-in S3 client: checks that fail, a group that can't be checked among others, a group with no messages file yet, a group that has one, a server without S3, and a send during the check. Run it with `./mvnw test '-Dtest=StartupServiceTest'`.
 - `GroupChatFilesTest` also covers a write that fails, including sharing again once S3 is back, and `S3FileHandlerUploadTest` covers the strict write.
 - `GroupChatSendTest` also covers an upload that fails after a good read, and `GroupChatEditDeleteTest` covers edits and deletes whose read or upload fails, both through the controller over a stand-in S3 client.
+- `GroupChatSendTest` and `GroupChatEditDeleteTest` also check that a send and an edit answer with the messages they saved, even when S3 fails right after.
 
 ## Known issues
 

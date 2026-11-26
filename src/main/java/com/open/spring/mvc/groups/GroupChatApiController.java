@@ -191,17 +191,16 @@ public class GroupChatApiController {
             return new ResponseEntity<>("name and message are required", HttpStatus.BAD_REQUEST);
         }
 
+        // Answered from what was saved: a second read could fail and answer an empty chat.
+        List<GroupChatMessage> saved;
         try {
-            realtimeService.publishMessage(groupId, message.getMessage(), message.getImage(), identity);
+            saved = realtimeService.publishMessage(groupId, message.getMessage(), message.getImage(), identity);
         } catch (MessagesStorageUnavailableException ex) {
             return tryAgainLater(ex);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
-
-        String groupName = groupOpt.get().getName();
-        List<GroupChatMessage> updated = groupChatService.getMessages(groupName);
-        return new ResponseEntity<>(updated, HttpStatus.OK);
+        return new ResponseEntity<>(saved, HttpStatus.OK);
     }
 
     @PatchMapping("/{groupId}/messages/{messageId}")
@@ -223,9 +222,9 @@ public class GroupChatApiController {
             return new ResponseEntity<>("message is required", HttpStatus.BAD_REQUEST);
         }
 
-        boolean updated;
+        Optional<List<GroupChatMessage>> saved;
         try {
-            updated = realtimeService.editMessage(groupId, messageId, request.getMessage(), identity.getUid());
+            saved = realtimeService.editMessage(groupId, messageId, request.getMessage(), identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         } catch (MessagesStorageUnavailableException ex) {
@@ -233,13 +232,10 @@ public class GroupChatApiController {
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
-        if (!updated) {
+        if (saved.isEmpty()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
-
-        String groupName = groupOpt.get().getName();
-        List<GroupChatMessage> messages = groupChatService.getMessages(groupName);
-        return new ResponseEntity<>(messages, HttpStatus.OK);
+        return new ResponseEntity<>(saved.get(), HttpStatus.OK);
     }
 
     @DeleteMapping("/{groupId}/messages/{messageId}")

@@ -9,6 +9,7 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -199,12 +200,13 @@ public class GroupChatService {
     }
 
     /**
-     * Returns whether a message with that id was found (and updated) in this group.
-     * Throws {@link SecurityException} unless the authenticated requester's uid matches
-     * the stored author uid. Legacy messages without an author uid cannot be edited.
+     * Edits a message and returns the group's messages as saved, or nothing when no message
+     * with that id is in this group. Throws {@link SecurityException} unless the authenticated
+     * requester's uid matches the stored author uid. Legacy messages without an author uid
+     * cannot be edited.
      */
-    public boolean editMessage(String groupName, String messageId, String newMessage, String requesterUid) {
-        if (messageId == null) return false;
+    public Optional<List<GroupChatMessage>> editMessage(String groupName, String messageId, String newMessage, String requesterUid) {
+        if (messageId == null) return Optional.empty();
         synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
             List<GroupChatMessage> messages = readMessagesOrThrow(groupName);
             boolean found = false;
@@ -220,10 +222,11 @@ public class GroupChatService {
                 }
             }
 
-            if (found) {
-                writeMessagesOrThrow(groupName, messages);
+            if (!found) {
+                return Optional.empty();
             }
-            return found;
+            writeMessagesOrThrow(groupName, messages);
+            return Optional.of(messages);
         }
     }
 

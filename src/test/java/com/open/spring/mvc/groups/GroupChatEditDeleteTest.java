@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 import org.junit.jupiter.api.AfterEach;
@@ -173,6 +175,28 @@ class GroupChatEditDeleteTest {
 
         assertEquals(HttpStatus.OK, delete().getStatusCode());
         assertEquals("", storedMessages());
+    }
+
+    @Test
+    void anEditAnswersWithTheMessagesItSavedEvenWhenTheNextReadFails() {
+        // The first read of S3 works, and every read after it fails as a throttle.
+        AtomicInteger reads = new AtomicInteger();
+        doAnswer(call -> {
+            if (reads.incrementAndGet() > 1) {
+                throw S3Failures.unavailable().get(0);
+            }
+            byte[] bytes = objects.get(call.<GetObjectRequest>getArgument(0).key());
+            return ResponseBytes.fromByteArray(GetObjectResponse.builder().build(), bytes);
+        }).when(s3).getObjectAsBytes(any(GetObjectRequest.class));
+
+        ResponseEntity<?> response = edit();
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        List<?> answered = (List<?>) response.getBody();
+        assertEquals(1, answered.size(), "answered: " + answered);
+        GroupChatMessage saved = (GroupChatMessage) answered.get(0);
+        assertEquals("Meeting at 3", saved.getMessage());
+        assertTrue(saved.isEdited());
     }
 
     @Test
