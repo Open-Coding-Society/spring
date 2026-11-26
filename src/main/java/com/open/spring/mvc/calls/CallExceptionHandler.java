@@ -4,6 +4,7 @@ import java.util.Map;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
@@ -18,7 +19,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 /**
  * Every /api/calls refusal as {"reason": ...}, so the call page reads one field. It runs before the
- * app-wide advice and only for CallApiRestController. While calls.enabled is false every answer is
+ * app-wide advice and only for the calls controllers. While calls.enabled is false every answer is
  * the same 404 calls_disabled, even to a request the guard or the JSON parser would refuse.
  */
 @RestControllerAdvice(assignableTypes = {CallApiRestController.class, CallWebhookController.class})
@@ -27,9 +28,13 @@ public class CallExceptionHandler {
 
     private static final Logger logger = LoggerFactory.getLogger(CallExceptionHandler.class);
 
-    private final CallsProperties properties;
+    private final ObjectProvider<CallsProperties> properties;
 
-    public CallExceptionHandler(CallsProperties properties) {
+    /**
+     * The settings come through a provider because an MVC test slice (@WebMvcTest) builds every
+     * controller advice but none of the calls beans. With no settings, calls count as off.
+     */
+    public CallExceptionHandler(ObjectProvider<CallsProperties> properties) {
         this.properties = properties;
     }
 
@@ -67,7 +72,8 @@ public class CallExceptionHandler {
 
     // A 503 means something Spring depends on is down, so the page is told when to try again.
     private ResponseEntity<Map<String, String>> answer(HttpStatus status, String reason) {
-        if (!properties.isEnabled()) {
+        CallsProperties settings = properties.getIfAvailable();
+        if (settings == null || !settings.isEnabled()) {
             return disabled();
         }
         ResponseEntity.BodyBuilder response = ResponseEntity.status(status);

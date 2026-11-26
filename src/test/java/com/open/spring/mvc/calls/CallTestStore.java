@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import org.springframework.beans.factory.support.StaticListableBeanFactory;
 import org.springframework.dao.InvalidDataAccessResourceUsageException;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.orm.jpa.JpaSystemException;
@@ -150,6 +151,12 @@ final class CallTestStore {
     CallApiRestController controller() {
         return new CallApiRestController(properties, new CallRequestGuard(properties), service, tokens, moderation,
                 live, presence, people);
+    }
+
+    /** The calls advice, reading this store's settings through a provider as Spring hands them over. */
+    CallExceptionHandler exceptionHandler() {
+        return new CallExceptionHandler(new StaticListableBeanFactory(Map.of("callsProperties", properties))
+                .getBeanProvider(CallsProperties.class));
     }
 
     List<CallAttendanceEntity> attendanceRows() {
