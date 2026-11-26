@@ -3,6 +3,7 @@ package com.open.spring.mvc.groups;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -140,6 +141,26 @@ class GroupChatMentorTest {
         verify(chat, never()).getMessages(anyString());
         verify(chat, never()).sharedFileIndex(anyString());
         verify(chat, never()).readSharedFile(anyString(), anyString());
+    }
+
+    /** Reactions are part of a group's chat, so they follow the same mentor rules. */
+    @Test
+    void aMentorWhoIsNotAMemberCannotSeeOrChangeReactions() {
+        signIn(otherMentor);
+        String reason = "mentor_not_in_group";
+        String message = "0f8fad5b-d9cb-469f-a165-70867728950e";
+        assertRefused(reason, controller.getReactions(TEAM));
+        assertRefused(reason, controller.addReaction(TEAM, message, "like"));
+        assertRefused(reason, controller.removeReaction(TEAM, message, "like"));
+        verify(realtime, never()).setReaction(anyLong(), any(), anyString(), any(), anyBoolean());
+    }
+
+    @Test
+    void aMemberMentorWithATeamOfTwoReacts() {
+        signIn(mentor);
+        assertEquals(HttpStatus.OK, controller.getReactions(TEAM).getStatusCode());
+        assertEquals(HttpStatus.OK,
+                controller.addReaction(TEAM, "0f8fad5b-d9cb-469f-a165-70867728950e", "like").getStatusCode());
     }
 
     @Test

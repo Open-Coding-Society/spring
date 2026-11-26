@@ -2,6 +2,7 @@ package com.open.spring.mvc.directmessages;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -130,6 +131,16 @@ class DirectMessageMentorTest {
         assertRefused(controller.editMessage(signedIn(student), 12L, 5L,
                 new DirectMessageApiController.SendMessageRequest("changed", null)));
         verify(service, never()).editMessage(any(), any(), anyLong(), anyString());
+    }
+
+    /** Reacting is like sending, so it's refused in a conversation that includes a mentor; reading reactions still works. */
+    @Test
+    void reactingInAConversationWithAMentorIsRefused() {
+        conversation(16L, student, mentor);
+        assertRefused(controller.addReaction(signedIn(student), 16L, 5L, "like"));
+        assertRefused(controller.removeReaction(signedIn(mentor), 16L, 5L, "like"));
+        verify(service, never()).setReaction(any(), any(), anyLong(), any(), anyBoolean());
+        assertEquals(HttpStatus.OK, controller.getReactions(signedIn(student), 16L).getStatusCode());
     }
 
     @Test

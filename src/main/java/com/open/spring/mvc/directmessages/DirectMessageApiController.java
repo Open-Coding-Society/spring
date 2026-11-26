@@ -379,6 +379,12 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         }
 
+        // Reacting follows the send rule, like posting and editing
+        Optional<MentorRules.Refusal> refusal = MentorRules.shareDirectMessages(conversation.getParticipants());
+        if (refusal.isPresent()) {
+            return refusal.get().toResponse();
+        }
+
         Optional<Reaction> reaction = Reaction.fromKey(key);
         if (reaction.isEmpty()) {
             return new ResponseEntity<>(Map.of("error", "unknown reaction"), HttpStatus.BAD_REQUEST);

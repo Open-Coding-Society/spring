@@ -152,13 +152,13 @@ A mentor is an account with `ROLE_MENTOR` and no teacher or admin role. Flask ve
 
 | Route | A mentor | Everyone else |
 |---|---|---|
-| `/api/groups/chat/{id}/messages` (read, send, edit, delete), `/read`, `/files` (list, upload), `/files/index`, `/files/content`; `GET /api/groups/{id}`; the older `/api/chat/{groupId}` (read, post) | Only a group they are a member of, that isn't a class group and has at least 2 members who aren't mentors (`mentor_not_in_group`, `mentor_class_group`, `mentor_team_too_small`) | As before |
+| `/api/groups/chat/{id}/messages` (read, send, edit, delete) and their reactions (`/reactions`, adding or taking one back), `/read`, `/files` (list, upload), `/files/index`, `/files/content`; `GET /api/groups/{id}`; the older `/api/chat/{groupId}` (read, post) | Only a group they are a member of, that isn't a class group and has at least 2 members who aren't mentors (`mentor_not_in_group`, `mentor_class_group`, `mentor_team_too_small`) | As before |
 | `GET /api/groups/person/{personId}`, `GET /api/groups/chat/analytics/{personId}` | Only their own id (`mentor_cannot_manage`). Their own group list holds only the groups they may use | As before |
 | `GET /api/groups`, `/search`, `POST /api/groups`, `/bulk`, `PUT` and `DELETE /api/groups/{id}`, `/{id}/grades` | Refused (`mentor_cannot_manage`) | As before, except that a new group's `memberIds` may hold a mentor only if its maker could add them |
 | `PUT /api/groups/class-memberships` | Only an empty list, to leave every class group; any class is refused (`mentor_class_group`) | As before |
 | `POST /api/groups/{id}/members/{personId}` | Refused, themselves included (`mentor_cannot_manage`) | Adding a mentor needs a member who isn't a mentor, or a teacher (`team_manages_mentors`), and a group a mentor may use. Adding anyone else: as before |
 | `DELETE /api/groups/{id}/members/{personId}` | Only themselves, to leave (`mentor_cannot_manage`) | Removing a mentor needs a member who isn't a mentor, or a teacher (`team_manages_mentors`). Leaving: always |
-| `POST /api/dm/conversations`, `/api/dm/conversations/{id}/messages` (send, edit), and the UI Builder's `POST /api/ui-builder/published/{slug}/message-owner` | Refused (`mentor_no_direct_messages`) | Refused when the conversation would include a mentor. Reading old messages and deleting your own still work |
+| `POST /api/dm/conversations`, `/api/dm/conversations/{id}/messages` (send, edit, and adding or taking back a reaction), and the UI Builder's `POST /api/ui-builder/published/{slug}/message-owner` | Refused (`mentor_no_direct_messages`) | Refused when the conversation would include a mentor. Reading old messages and deleting your own still work |
 
 - A group response marks each member `"mentor": true` or `false`, so a page can list a team's mentors.
 - `POST /api/groups/bulk` makes the other groups when one breaks a mentor rule, and lists that one under `errors` with the refusal's message (one bad group doesn't stop a teacher's batch), so its answer stays 200.
