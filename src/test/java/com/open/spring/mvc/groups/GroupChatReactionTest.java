@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -172,6 +174,19 @@ class GroupChatReactionTest {
         assertFalse(realtime.deleteMessage(3L, MESSAGE_ID, "ada"));
 
         verify(reactionService, never()).removeAllFor(any(), any(), any());
+    }
+
+    @Test
+    void aDeleteStillTellsTheGroupWhenItsReactionsCantBeRemoved() {
+        doReturn(true).when(chat).deleteMessage("Team Three", MESSAGE_ID, "ada");
+        doThrow(new DataAccessResourceFailureException("no message_reaction table"))
+                .when(reactionService).removeAllFor(ChatType.GROUP, 3L, MESSAGE_ID);
+
+        assertTrue(realtime.deleteMessage(3L, MESSAGE_ID, "ada"));
+
+        ArgumentCaptor<GroupChatEvent> frame = ArgumentCaptor.forClass(GroupChatEvent.class);
+        verify(messaging).convertAndSend(eq("/topic/group/3"), frame.capture());
+        assertEquals("deleteMessageServer", frame.getValue().getContext());
     }
 
     @Test
