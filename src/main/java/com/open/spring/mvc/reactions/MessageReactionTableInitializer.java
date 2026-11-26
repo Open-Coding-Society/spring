@@ -38,8 +38,9 @@ public class MessageReactionTableInitializer {
             try {
                 jdbcTemplate.execute(CREATE_TABLE);
             } catch (DataAccessException e) {
-                // The rest of Spring keeps running, as it does when another table can't be made;
-                // only the reaction routes fail, until the table exists.
+                // The rest of Spring keeps running, as it does when another table can't be made.
+                // Until the table exists the reaction routes fail, and deleting a message still
+                // works but logs that its reactions couldn't be removed.
                 logger.error("Could not create the message_reaction table, so reactions won't work: {}", e.getMessage());
             }
         };

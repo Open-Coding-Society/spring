@@ -91,8 +91,12 @@ public class MessageReactionService {
         return result;
     }
 
-    /** Removes every reaction on a message, as when the message is deleted. */
-    @Transactional
+    /**
+     * Removes every reaction on a message, as when the message is deleted. The chats call it once
+     * their delete is done (a DM's after its transaction commits), so it runs in a transaction of
+     * its own: a transactional call made from inside a finished transaction never commits.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void removeAllFor(ChatType type, Long chatId, String messageId) {
         repository.deleteAllOnMessage(type, chatId, messageId);
     }
