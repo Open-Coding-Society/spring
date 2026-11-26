@@ -40,8 +40,14 @@ class GroupChatServiceTest {
         final Map<String, String> objects = new ConcurrentHashMap<>();
         final CountDownLatch bothReading = new CountDownLatch(2);
 
+        // A configured S3 whose writes never fail.
         @Override
-        public String uploadFile(String base64Data, String filename, String uid) {
+        public boolean isConfigured() {
+            return true;
+        }
+
+        @Override
+        public String uploadFileOrThrow(String base64Data, String filename, String uid) {
             objects.put(uid + "/" + filename, base64Data);
             return filename;
         }
@@ -58,7 +64,7 @@ class GroupChatServiceTest {
             return copy;
         }
 
-        // Its reads never fail, so a send's strict read is the same read.
+        // Its reads never fail, so the strict read a change makes is the same read.
         @Override
         public String decodeFileOrThrow(String uid, String filename) {
             return decodeFile(uid, filename);

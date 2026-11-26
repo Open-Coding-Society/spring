@@ -102,25 +102,54 @@ public class GroupChatService {
     }
 
     /**
-     * The group's messages for a send, which writes the whole file back. Strict: a read that
-     * failed throws rather than reading as an empty chat, which the send would save over the
-     * history. Only S3's 404 means no messages yet. S3 being unavailable for a moment (see
-     * isUnavailable) throws MessagesReadFailedException; anything else goes up as it is.
+     * The group's messages for a send, an edit or a delete, which write the whole file back.
+     * Strict: a read that failed throws rather than reading as an empty chat, which a send would
+     * save over the history and an edit or delete would answer as "not found". Only S3's 404
+     * means no messages yet. S3 being unavailable for a moment (see isUnavailable) throws
+     * MessagesStorageUnavailableException; anything else goes up as it is.
      */
     private List<GroupChatMessage> readMessagesOrThrow(String groupName) {
         String base64Data;
         try {
             base64Data = s3FileHandler.decodeFileOrThrow(groupName, MESSAGES_FILE);
-        } catch (SdkClientException | S3Exception e) {
-            // Logged for every failure: the route answers a refused read without logging it.
+        } catch (RuntimeException e) {
+            // Logged for every failure: the route answers a refused read or a bug without logging it.
             log.warn("Could not read the messages of group {}", groupName, e);
             if (!isUnavailable(e)) {
-                // S3 refused the request (no permission, a bad key): waiting won't fix that.
+                // S3 refused the request (no permission, a bad key) or a bug here: waiting won't fix that.
                 throw e;
             }
-            throw new MessagesReadFailedException(e);
+            throw new MessagesStorageUnavailableException(e);
         }
         return parseMessages(groupName, base64Data);
+    }
+
+    /**
+     * Saves the group's whole messages file. Strict: a write that failed throws, so a send, an
+     * edit or a delete isn't answered as saved when it wasn't. S3 being unavailable for a moment
+     * (see isUnavailable) throws MessagesStorageUnavailableException; anything else goes up as
+     * it is. Without S3 settings nothing is stored, and the chat still works live.
+     */
+    private void writeMessagesOrThrow(String groupName, List<GroupChatMessage> messages) {
+        if (!s3FileHandler.isConfigured()) {
+            return;
+        }
+        String jsonl = messages.stream()
+                .map(this::toJson)
+                .collect(Collectors.joining("\n"));
+        String base64Data = Base64.getEncoder().encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
+        try {
+            s3FileHandler.uploadFileOrThrow(base64Data, MESSAGES_FILE, groupName);
+        } catch (RuntimeException e) {
+            // A write that timed out may still be stored (S3 lost its answer), so a send tried
+            // again can show up twice. That's easier to see and fix than a message lost quietly.
+            log.warn("Could not save the messages of group {}", groupName, e);
+            if (!isUnavailable(e)) {
+                // S3 refused the request (no permission, a bad key) or a bug here: waiting won't fix that.
+                throw e;
+            }
+            throw new MessagesStorageUnavailableException(e);
+        }
     }
 
     private List<GroupChatMessage> parseMessages(String groupName, String base64Data) {
@@ -164,15 +193,7 @@ public class GroupChatService {
         synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
             List<GroupChatMessage> messages = readMessagesOrThrow(groupName);
             messages.add(message);
-
-            String jsonl = messages.stream()
-                    .map(this::toJson)
-                    .collect(Collectors.joining("\n"));
-
-            String base64Data = Base64.getEncoder()
-                    .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
-
-            s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+            writeMessagesOrThrow(groupName, messages);
             return messages;
         }
     }
@@ -185,7 +206,7 @@ public class GroupChatService {
     public boolean editMessage(String groupName, String messageId, String newMessage, String requesterUid) {
         if (messageId == null) return false;
         synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
-            List<GroupChatMessage> messages = getMessages(groupName);
+            List<GroupChatMessage> messages = readMessagesOrThrow(groupName);
             boolean found = false;
             for (GroupChatMessage m : messages) {
                 if (messageId.equals(m.getId())) {
@@ -200,14 +221,7 @@ public class GroupChatService {
             }
 
             if (found) {
-                String jsonl = messages.stream()
-                        .map(this::toJson)
-                        .collect(Collectors.joining("\n"));
-
-                String base64Data = Base64.getEncoder()
-                        .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
-
-                s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+                writeMessagesOrThrow(groupName, messages);
             }
             return found;
         }
@@ -217,7 +231,7 @@ public class GroupChatService {
     public void deleteMessage(String groupName, String messageId, String requesterUid) {
         if (messageId == null) return;
         synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
-            List<GroupChatMessage> messages = getMessages(groupName);
+            List<GroupChatMessage> messages = readMessagesOrThrow(groupName);
 
             GroupChatMessage target = messages.stream()
                     .filter(m -> messageId.equals(m.getId()))
@@ -231,14 +245,7 @@ public class GroupChatService {
             boolean removed = messages.remove(target);
 
             if (removed) {
-                String jsonl = messages.stream()
-                        .map(this::toJson)
-                        .collect(Collectors.joining("\n"));
-
-                String base64Data = Base64.getEncoder()
-                        .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
-
-                s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+                writeMessagesOrThrow(groupName, messages);
             }
         }
     }
