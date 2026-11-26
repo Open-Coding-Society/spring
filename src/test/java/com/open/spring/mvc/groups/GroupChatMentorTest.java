@@ -11,6 +11,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,6 +52,8 @@ class GroupChatMentorTest {
     private static final long SOLO = 8L;
     private static final long CLASS = 9L;
 
+    private final Map<Long, Groups> made = new HashMap<>();
+
     private void group(long id, String name, boolean classGroup, Person... members) {
         Groups group = new Groups();
         ReflectionTestUtils.setField(group, "id", id);
@@ -57,6 +61,12 @@ class GroupChatMentorTest {
         when(groups.findById(id)).thenReturn(Optional.of(group));
         when(groups.findMembersOf(id)).thenReturn(List.of(members));
         when(classGroups.isClassGroup(name)).thenReturn(classGroup);
+        made.put(id, group);
+    }
+
+    /** The groups person is in, as the repository lists them. */
+    private void groupsOf(Person person, long... ids) {
+        when(groups.findGroupsByPersonId(person.getId())).thenReturn(Arrays.stream(ids).mapToObj(made::get).toList());
     }
 
     @BeforeEach
@@ -66,7 +76,9 @@ class GroupChatMentorTest {
         groups = mock(GroupsJpaRepository.class);
         classGroups = mock(ClassGroupMembershipService.class);
         people = mock(PersonJpaRepository.class);
-        controller = new GroupChatApiController(chat, realtime, mock(GroupChatReadService.class), groups, people,
+        GroupChatReadService reads =
+                new GroupChatReadService(mock(GroupChatReadStateJpaRepository.class), groups, chat);
+        controller = new GroupChatApiController(chat, realtime, reads, groups, people,
                 new MentorAccess(groups, classGroups));
         for (Person person : List.of(student, teammate, mentor, otherMentor, outsider)) {
             when(people.findByUid(person.getUid())).thenReturn(person);
@@ -90,6 +102,16 @@ class GroupChatMentorTest {
     private static void assertRefused(String reason, ResponseEntity<?> response) {
         assertEquals(HttpStatus.FORBIDDEN, response.getStatusCode());
         assertEquals(reason, ((Map<?, ?>) response.getBody()).get("reason"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<Long, Long> unreadIn(ResponseEntity<?> response) {
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        return (Map<Long, Long>) ((Map<?, ?>) response.getBody()).get("unreadByGroup");
+    }
+
+    private GroupChatMessage fromTeammate() {
+        return new GroupChatMessage(teammate.getName(), teammate.getUid(), "hi", "2026-11-25T00:00:01Z", null);
     }
 
     private static GroupChatMessage text(String body) {
@@ -169,5 +191,21 @@ class GroupChatMentorTest {
         signIn(mentor);
         assertRefused("mentor_cannot_manage", controller.getUserAnalytics(1L));
         assertEquals(HttpStatus.OK, controller.getUserAnalytics(3L).getStatusCode());
+    }
+
+    @Test
+    void aMentorsUnreadCountLeavesOutTheGroupsTheyMayNotUse() {
+        groupsOf(mentor, TEAM, SOLO, CLASS);
+        when(chat.getMessages(anyString())).thenReturn(List.of(fromTeammate()));
+        signIn(mentor);
+        assertEquals(Map.of(TEAM, 1L), unreadIn(controller.getUnread()));
+    }
+
+    @Test
+    void everyoneElsesUnreadCountCoversAllTheirGroups() {
+        groupsOf(student, TEAM, SOLO, CLASS);
+        when(chat.getMessages(anyString())).thenReturn(List.of(fromTeammate()));
+        signIn(student);
+        assertEquals(Map.of(TEAM, 1L, SOLO, 1L, CLASS, 1L), unreadIn(controller.getUnread()));
     }
 }

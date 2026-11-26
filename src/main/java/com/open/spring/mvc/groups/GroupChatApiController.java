@@ -308,7 +308,10 @@ public class GroupChatApiController {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
 
-        Map<Long, Long> unreadByGroup = readService.unreadByGroup(person);
+        Map<Long, Long> unreadByGroup = new HashMap<>(readService.unreadByGroup(person));
+        // A mentor's count leaves out the groups their own list leaves out (MentorRules), so the bell never points
+        // at a group they can't open or mark read.
+        unreadByGroup.keySet().removeIf(groupId -> mentorAccess.refusesGroup(person, groupId));
         long total = unreadByGroup.values().stream().mapToLong(Long::longValue).sum();
 
         Map<String, Object> body = new HashMap<>();

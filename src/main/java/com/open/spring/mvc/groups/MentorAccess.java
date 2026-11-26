@@ -32,6 +32,14 @@ public class MentorAccess {
         return MentorRules.useGroup(person, isClassGroup(group), membersOf(group));
     }
 
+    /** True when the rules refuse person the group with this id. Only a mentor is refused, by a group that exists. */
+    public boolean refusesGroup(Person person, Long groupId) {
+        if (!MentorRules.isMentor(person) || groupId == null) {
+            return false;
+        }
+        return groups.findById(groupId).map(group -> toUse(person, group).isPresent()).orElse(false);
+    }
+
     /** Whether actor may add newMember to the group. */
     public Optional<MentorRules.Refusal> toAdd(Person actor, Groups group, Person newMember) {
         if (!MentorRules.isMentor(actor) && !MentorRules.isMentor(newMember)) {
