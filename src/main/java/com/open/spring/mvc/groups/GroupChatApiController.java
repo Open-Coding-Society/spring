@@ -38,8 +38,9 @@ import lombok.NoArgsConstructor;
 @CrossOrigin
 public class GroupChatApiController {
 
-    // How long to wait before trying again when S3 couldn't check a shared path or read a
-    // group's messages: a throttle or a short outage clears in seconds.
+    // How long to wait before trying again when S3 was unavailable for a moment, checking or
+    // writing a shared file or reading a group's messages: a throttle or a short outage clears
+    // in seconds.
     private static final int RETRY_AFTER_SECONDS = 5;
 
     private final GroupChatService groupChatService;
@@ -405,9 +406,9 @@ public class GroupChatApiController {
             response.put("message", ex.getMessage());
             response.put("filename", ex.getPath());
             return new ResponseEntity<>(response, HttpStatus.CONFLICT);
-        } catch (SharedFileCheckFailedException ex) {
-            // S3 couldn't say whether the path is taken, so nothing was written. That's S3 being
-            // unavailable for a moment, not a bug here: a 503, and when to try again.
+        } catch (SharedFileStorageUnavailableException ex) {
+            // S3 was unavailable for a moment, checking the path or writing the file, so the file
+            // isn't shared. That's not a bug here: a 503, and when to try again.
             Map<String, String> response = new HashMap<>();
             response.put("message", ex.getMessage());
             response.put("filename", ex.getPath());

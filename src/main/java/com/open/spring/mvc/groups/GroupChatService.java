@@ -21,6 +21,7 @@ import com.open.spring.mvc.S3uploads.S3FileHandler;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
@@ -31,6 +32,8 @@ public class GroupChatService {
     private static final String MESSAGES_FILE = "messages-images/messages.jsonl";
     private static final String SHARED_FILES_PREFIX = "shared-files/";
     private static final String SHARED_FILES_META = "shared-files-meta.json";
+    // S3's error code when a connection was too slow: a 400, but the AWS SDK retries it like a 5xx.
+    private static final String S3_REQUEST_TIMEOUT = "RequestTimeout";
 
     private final S3FileHandler s3FileHandler;
     private final ObjectMapper objectMapper;
@@ -101,9 +104,8 @@ public class GroupChatService {
     /**
      * The group's messages for a send, which writes the whole file back. Strict: a read that
      * failed throws rather than reading as an empty chat, which the send would save over the
-     * history. Only S3's 404 means no messages yet. S3 out of reach or answering a 5xx is
-     * something to wait out, so that throws MessagesReadFailedException; anything else goes up
-     * as it is.
+     * history. Only S3's 404 means no messages yet. S3 being unavailable for a moment (see
+     * isUnavailable) throws MessagesReadFailedException; anything else goes up as it is.
      */
     private List<GroupChatMessage> readMessagesOrThrow(String groupName) {
         String base64Data;
@@ -112,7 +114,7 @@ public class GroupChatService {
         } catch (SdkClientException | S3Exception e) {
             // Logged for every failure: the route answers a refused read without logging it.
             log.warn("Could not read the messages of group {}", groupName, e);
-            if (e instanceof S3Exception answered && answered.statusCode() < 500) {
+            if (!isUnavailable(e)) {
                 // S3 refused the request (no permission, a bad key): waiting won't fix that.
                 throw e;
             }
@@ -306,7 +308,8 @@ public class GroupChatService {
 
     /**
      * Stores a shared file, never over one already there: that throws SharedFileExistsException.
-     * When S3 can't say for now whether the path is taken, it throws SharedFileCheckFailedException.
+     * When S3 is unavailable for a moment, checking the path or writing the file, it throws
+     * SharedFileStorageUnavailableException.
      */
     public String uploadSharedFile(String groupName, String filename, String base64Data, String uploadedBy) {
         List<String> key = List.of(groupName, filename);
@@ -317,10 +320,7 @@ public class GroupChatService {
             if (isAlreadyShared(groupName, filename)) {
                 throw new SharedFileExistsException(filename);
             }
-            String result = s3FileHandler.uploadFile(base64Data, SHARED_FILES_PREFIX + filename, groupName);
-            if (result == null) {
-                return null;
-            }
+            String result = store(groupName, filename, base64Data);
             recordFileMeta(groupName, filename, uploadedBy);
             return result;
         } finally {
@@ -330,20 +330,55 @@ public class GroupChatService {
 
     /**
      * Whether a file is stored at this path. Strict: a check that failed throws, rather than
-     * reading as a free path. S3 out of reach or answering a 5xx is something to wait out, so
-     * that throws SharedFileCheckFailedException; anything else goes up as it is.
+     * reading as a free path. S3 being unavailable throws SharedFileStorageUnavailableException;
+     * anything else goes up as it is.
      */
     private boolean isAlreadyShared(String groupName, String path) {
         try {
             return s3FileHandler.fileExistsOrThrow(groupName, SHARED_FILES_PREFIX + path);
         } catch (SdkClientException | S3Exception e) {
-            if (e instanceof S3Exception answered && answered.statusCode() < 500) {
-                // S3 refused the request (no permission, a bad key): waiting won't fix that.
+            if (!isUnavailable(e)) {
                 throw e;
             }
             log.warn("Could not check whether {} is shared in group {}", path, groupName, e);
-            throw new SharedFileCheckFailedException(path, e);
+            throw new SharedFileStorageUnavailableException(path, e);
         }
+    }
+
+    /**
+     * Writes a shared file's bytes. S3 being unavailable throws
+     * SharedFileStorageUnavailableException; any other failure fails the upload as it always has.
+     */
+    private String store(String groupName, String path, String base64Data) {
+        try {
+            return s3FileHandler.uploadFileOrThrow(base64Data, SHARED_FILES_PREFIX + path, groupName);
+        } catch (RuntimeException e) {
+            // A write that timed out may still be stored (S3 lost its answer). Sharing it again
+            // then gets a 409, which the page handles like any other taken name.
+            log.warn("Could not store {} in group {}", path, groupName, e);
+            if (isUnavailable(e)) {
+                throw new SharedFileStorageUnavailableException(path, e);
+            }
+            throw new IllegalStateException("Upload failed", e);
+        }
+    }
+
+    /**
+     * S3 out of reach (a timeout, no connection), answering a 5xx (a throttle, an outage) or
+     * timing out the request itself (RequestTimeout, which comes as a 400): something to wait
+     * out. Any other 4xx is S3 refusing the request (no permission, a bad key), which waiting
+     * won't fix, and anything else is a fault here.
+     */
+    private static boolean isUnavailable(RuntimeException e) {
+        if (e instanceof SdkClientException) {
+            return true;
+        }
+        if (e instanceof S3Exception answered) {
+            AwsErrorDetails details = answered.awsErrorDetails();
+            return answered.statusCode() >= 500
+                    || (details != null && S3_REQUEST_TIMEOUT.equals(details.errorCode()));
+        }
+        return false;
     }
 
     // ---------------------------------------------------------------------------

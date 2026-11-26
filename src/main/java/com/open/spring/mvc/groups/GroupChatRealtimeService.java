@@ -101,10 +101,7 @@ public class GroupChatRealtimeService {
             throw new IllegalArgumentException("Invalid file path");
         }
 
-        String uploadResult = groupChatService.uploadSharedFile(group.getName(), path, base64Data, sender);
-        if (uploadResult == null) {
-            throw new IllegalStateException("Upload failed");
-        }
+        groupChatService.uploadSharedFile(group.getName(), path, base64Data, sender);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("sendFileServer")

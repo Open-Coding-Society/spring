@@ -110,6 +110,23 @@ public class S3FileHandler implements FileHandler {
         }
     }
 
+    /**
+     * Like uploadFile, but a write that fails throws instead of answering null, so a caller can
+     * tell S3 being unavailable for a moment (a throttle, a 5xx, no connection) from a request
+     * S3 refused.
+     */
+    public String uploadFileOrThrow(String base64Data, String filename, String uid) {
+        if (s3Client == null) {
+            throw new IllegalStateException("S3 client is not configured");
+        }
+        s3Client.putObject(PutObjectRequest.builder()
+                        .bucket(bucketName)
+                        .key(generateKey(uid, filename))
+                        .build(),
+                RequestBody.fromBytes(Base64.getDecoder().decode(base64Data)));
+        return filename;
+    }
+
     @Override
     public String decodeFile(String uid, String filename) {
         if (s3Client == null) {
