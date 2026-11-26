@@ -7,6 +7,9 @@ import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.stereotype.Controller;
 
+import com.open.spring.mvc.person.Person;
+import com.open.spring.mvc.person.PersonJpaRepository;
+
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -23,6 +26,9 @@ public class GroupChatWebSocketController {
     private final GroupChatIdentityService identityService;
     private final GroupChatRealtimeService realtimeService;
     private final GroupChatPresenceService presenceService;
+    private final MentorAccess mentorAccess;
+    private final PersonJpaRepository personRepository;
+    private final GroupsJpaRepository groupsRepository;
 
     @MessageMapping("/groups.chat")
     public void handleGroupEvent(@Payload GroupChatEvent event,
@@ -40,6 +46,12 @@ public class GroupChatWebSocketController {
         Long groupId = event.getGroupId();
         String sender = resolveSender(event, principal); // deprecated, remove later
         String uid = principal.getName();
+
+        // The mentor rules hold on the socket as over REST: a mentor sends, joins and types only in a group they may
+        // use. Leaving always works.
+        if (groupId != null && !"leaveGroup".equals(event.getContext()) && mentorRefuses(uid, groupId)) {
+            return;
+        }
 
         switch (event.getContext()) {
             case "joinGroup" -> {
@@ -105,6 +117,17 @@ public class GroupChatWebSocketController {
                 }
             }
         }
+    }
+
+    /** True when the mentor rules refuse this account the group. Only a mentor can be refused (see MentorRules). */
+    private boolean mentorRefuses(String uid, Long groupId) {
+        Person person = personRepository.findByUid(uid);
+        if (!MentorRules.isMentor(person)) {
+            return false;
+        }
+        return groupsRepository.findById(groupId)
+                .map(group -> mentorAccess.toUse(person, group).isPresent())
+                .orElse(false);
     }
 
     private void ensureJoined(String sessionId, Long groupId, String sender) {
