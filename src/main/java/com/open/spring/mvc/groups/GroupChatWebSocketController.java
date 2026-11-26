@@ -1,13 +1,15 @@
 package com.open.spring.mvc.groups;
 
 import java.security.Principal;
+import java.util.List;
 
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Controller;
 
-import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
 import lombok.RequiredArgsConstructor;
@@ -28,7 +30,6 @@ public class GroupChatWebSocketController {
     private final GroupChatPresenceService presenceService;
     private final MentorAccess mentorAccess;
     private final PersonJpaRepository personRepository;
-    private final GroupsJpaRepository groupsRepository;
 
     @MessageMapping("/groups.chat")
     public void handleGroupEvent(@Payload GroupChatEvent event,
@@ -49,7 +50,7 @@ public class GroupChatWebSocketController {
 
         // The mentor rules hold on the socket as over REST: a mentor sends, joins and types only in a group they may
         // use. Leaving always works.
-        if (groupId != null && !"leaveGroup".equals(event.getContext()) && mentorRefuses(uid, groupId)) {
+        if (groupId != null && !"leaveGroup".equals(event.getContext()) && mentorRefuses(principal, groupId)) {
             return;
         }
 
@@ -119,15 +120,20 @@ public class GroupChatWebSocketController {
         }
     }
 
-    /** True when the mentor rules refuse this account the group. Only a mentor can be refused (see MentorRules). */
-    private boolean mentorRefuses(String uid, Long groupId) {
-        Person person = personRepository.findByUid(uid);
-        if (!MentorRules.isMentor(person)) {
+    /**
+     * True when the mentor rules refuse this account the group. Only a mentor can be refused (see MentorRules). A
+     * socket from Spring's own pages carries the roles of its sign-in, so an event from anyone that sign-in doesn't
+     * call a mentor is answered without loading them; a role given since counts from the next sign-in.
+     */
+    private boolean mentorRefuses(Principal principal, Long groupId) {
+        if (principal instanceof Authentication signIn && !MentorRules.isMentorRoles(roleNames(signIn))) {
             return false;
         }
-        return groupsRepository.findById(groupId)
-                .map(group -> mentorAccess.toUse(person, group).isPresent())
-                .orElse(false);
+        return mentorAccess.refusesGroup(personRepository.findByUid(principal.getName()), groupId);
+    }
+
+    private static List<String> roleNames(Authentication signIn) {
+        return signIn.getAuthorities().stream().map(GrantedAuthority::getAuthority).toList();
     }
 
     private void ensureJoined(String sessionId, Long groupId, String sender) {

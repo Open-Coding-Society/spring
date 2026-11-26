@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -16,6 +17,8 @@ import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.open.spring.mvc.person.Person;
@@ -24,7 +27,7 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 /**
  * Group events on the chat socket follow the mentor rules, as REST does: a socket with a signed-in mentor sends,
  * joins and types only in groups the mentor may use (MentorRules). Leaving always works, and everyone else's events
- * work as before.
+ * work as before. A socket from Spring's own pages carries its sign-in's roles, so only a mentor's events load anyone.
  */
 class GroupChatSocketMentorTest {
 
@@ -59,7 +62,7 @@ class GroupChatSocketMentorTest {
         classGroups = mock(ClassGroupMembershipService.class);
         people = mock(PersonJpaRepository.class);
         controller = new GroupChatWebSocketController(mock(GroupChatIdentityService.class), realtime, presence,
-                new MentorAccess(groups, classGroups), people, groups);
+                new MentorAccess(groups, classGroups), people);
         for (Person person : List.of(student, teammate, mentor)) {
             when(people.findByUid(person.getUid())).thenReturn(person);
         }
@@ -73,6 +76,14 @@ class GroupChatSocketMentorTest {
                 .message("hi").filename("notes.txt").base64Data("aGk=").build();
         Principal principal = person::getUid;
         controller.handleGroupEvent(event, principal, "session-" + person.getId());
+    }
+
+    /** The same event from a socket whose sign-in carries the person's roles, as Spring's form login gives it. */
+    private void sendSignedIn(Person person, String context, long groupId) {
+        GroupChatEvent event = GroupChatEvent.builder().context(context).groupId(groupId).message("hi").build();
+        List<SimpleGrantedAuthority> roles = person.getRoles().stream().map(SimpleGrantedAuthority::new).toList();
+        controller.handleGroupEvent(event, new UsernamePasswordAuthenticationToken(person.getUid(), null, roles),
+                "session-" + person.getId());
     }
 
     @Test
@@ -101,6 +112,26 @@ class GroupChatSocketMentorTest {
         verify(realtime, times(1)).publishMessage(anyLong(), anyString(), any(), any());
         send(mentor, "leaveGroup", OTHERS);
         verify(presence).leaveGroup("session-3", OTHERS);
+    }
+
+    @Test
+    void aSignInThatIsntAMentorsLoadsNoOne() {
+        Person mentoringTeacher = MentorRulesTest.person(6, "ROLE_USER", MentorRules.ROLE_MENTOR, "ROLE_TEACHER");
+        for (String context : List.of("typingStart", "heartbeat", "sendMessage")) {
+            sendSignedIn(student, context, OTHERS);
+            sendSignedIn(mentoringTeacher, context, OTHERS);
+        }
+        verify(people, never()).findByUid(anyString());
+        verify(groups, never()).findById(anyLong());
+        verify(realtime, times(2)).publishMessage(eq(OTHERS), anyString(), any(), any());
+    }
+
+    @Test
+    void aMentorsSignInIsStillCheckedAgainstTheGroup() {
+        sendSignedIn(mentor, "sendMessage", OTHERS);
+        sendSignedIn(mentor, "sendMessage", TEAM);
+        verify(realtime, never()).publishMessage(eq(OTHERS), anyString(), any(), any());
+        verify(realtime, times(1)).publishMessage(eq(TEAM), anyString(), any(), any());
     }
 
     @Test
