@@ -2,6 +2,9 @@ package com.open.spring.mvc.groups;
 
 import java.util.List;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.open.spring.mvc.reactions.MessageReactionService;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -29,4 +32,10 @@ public class GroupChatEvent {
     private String error;
     private List<String> participants;
     private boolean edited;
+    /**
+     * On a reactionsServer frame, the message's reactions after the change. Left out of every
+     * other frame, so those stay exactly as they were.
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private List<MessageReactionService.ReactionSummary> reactions;
 }

@@ -133,6 +133,22 @@ Content-Type: application/json
 
 {"filename": "notes/hello.txt", "base64Data": "Z29vZGJ5ZQ=="}
 
+### 13g. React to a message with a Like -> 200 with {messageId, reactions}, and a reactionsServer frame on /topic/group/{id}
+# Any UUID is accepted: Spring doesn't read the S3 file to check the message, and a reaction
+# on a message that doesn't exist is never shown.
+PUT {{baseUrl}}/api/groups/chat/{{createGroup.response.body.$.id}}/messages/3f2c8a8e-5b1d-4c7e-9a52-8f0e6d4b2a10/reactions/like
+
+### 13h. List the chat's reactions -> 200 with {"3f2c8a8e-...": [{"reaction": "like", "people": [{uid, name}]}]}
+GET {{baseUrl}}/api/groups/chat/{{createGroup.response.body.$.id}}/reactions
+
+### 13i. Take the Like back -> 200 with an empty reactions list
+DELETE {{baseUrl}}/api/groups/chat/{{createGroup.response.body.$.id}}/messages/3f2c8a8e-5b1d-4c7e-9a52-8f0e6d4b2a10/reactions/like
+
+### 13j. A key that isn't one of the six is refused -> 400
+# Direct messages have the same three routes under /api/dm/conversations/{id}: GET .../reactions,
+# and PUT or DELETE .../messages/{messageId}/reactions/{reaction}, for participants only.
+PUT {{baseUrl}}/api/groups/chat/{{createGroup.response.body.$.id}}/messages/3f2c8a8e-5b1d-4c7e-9a52-8f0e6d4b2a10/reactions/thumbsup
+
 ### 14. Remove yourself from the test group -> 200
 
 DELETE {{baseUrl}}/api/groups/{{createGroup.response.body.$.id}}/members/{{me.response.body.$.id}}

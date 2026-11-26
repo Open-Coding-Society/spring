@@ -21,6 +21,7 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.open.spring.mvc.push.PushNotificationService;
 import com.open.spring.mvc.push.PushSubscriptionJpaRepository;
+import com.open.spring.mvc.reactions.MessageReactionService;
 import org.springframework.test.util.ReflectionTestUtils;
 
 import com.open.spring.mvc.person.Person;
@@ -144,7 +145,8 @@ class DirectMessageServiceTest {
                 }),
                 new ObjectMapper(), "", "", "");
         service = new DirectMessageService(conversationRepository, messageRepository, readStateRepository,
-                new SimpMessagingTemplate((message, timeout) -> true), pushNotificationService);
+                new SimpMessagingTemplate((message, timeout) -> true), pushNotificationService,
+                org.mockito.Mockito.mock(MessageReactionService.class));
     }
 
     @Test

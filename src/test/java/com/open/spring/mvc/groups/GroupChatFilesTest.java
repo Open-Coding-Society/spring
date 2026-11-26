@@ -40,6 +40,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.open.spring.mvc.S3uploads.S3FileHandler;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.reactions.MessageReactionService;
 
 import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.core.exception.SdkClientException;
@@ -141,10 +142,10 @@ class GroupChatFilesTest {
         GroupChatService chat = new GroupChatService(storage, new ObjectMapper());
         GroupsJpaRepository groups = mock(GroupsJpaRepository.class);
         messaging = mock(SimpMessagingTemplate.class);
-        GroupChatRealtimeService realtime = new GroupChatRealtimeService(chat, groups, messaging);
+        GroupChatRealtimeService realtime = new GroupChatRealtimeService(chat, groups, messaging, mock(MessageReactionService.class));
         GroupChatReadService reads = new GroupChatReadService(mock(GroupChatReadStateJpaRepository.class), groups, chat);
         PersonJpaRepository people = mock(PersonJpaRepository.class);
-        controller = new GroupChatApiController(chat, realtime, reads, groups, people);
+        controller = new GroupChatApiController(chat, realtime, reads, groups, people, mock(MessageReactionService.class));
 
         Groups group = new Groups();
         group.setName("CSA");
