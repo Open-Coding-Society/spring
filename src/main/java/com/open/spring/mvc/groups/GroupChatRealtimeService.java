@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -14,6 +15,7 @@ import com.open.spring.mvc.reactions.MessageReactionService;
 import com.open.spring.mvc.reactions.Reaction;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Service to handle the real-time publishing of group chat messages and presence events.
@@ -21,6 +23,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class GroupChatRealtimeService {
 
     public static final String GROUP_TOPIC_PREFIX = "/topic/group/";
@@ -93,7 +96,14 @@ public class GroupChatRealtimeService {
             // Telling the group about a message that isn't saved would take it off everyone's screen.
             return false;
         }
-        reactionService.removeAllFor(ChatType.GROUP, groupId, messageId);
+        try {
+            reactionService.removeAllFor(ChatType.GROUP, groupId, messageId);
+        } catch (DataAccessException e) {
+            // The message is already gone from S3, so the group still has to hear about it, and a
+            // retry would find nothing to delete. Its reactions stay in the table, where no message
+            // shows them.
+            log.warn("Could not remove the reactions of deleted message {} in group {}", messageId, groupId, e);
+        }
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("deleteMessageServer")
