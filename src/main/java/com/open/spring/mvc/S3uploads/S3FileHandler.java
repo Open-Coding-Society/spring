@@ -264,6 +264,31 @@ public class S3FileHandler implements FileHandler {
         }
     }
 
+    /**
+     * Like decodeFile, but only "not found" (404) reads as nothing stored: any other failure to
+     * read (a throttle, a 5xx, no connection) throws. For a caller that writes back what it read,
+     * a read that failed is not an empty file. With no S3 client there is nothing to read and
+     * nothing can be written, so that reads as nothing stored, as in decodeFile.
+     */
+    public String decodeFileOrThrow(String uid, String filename) {
+        if (s3Client == null) {
+            log.warn("S3 download attempted but S3 client is not configured.");
+            return null;
+        }
+        try {
+            ResponseBytes<GetObjectResponse> objectBytes = s3Client.getObjectAsBytes(GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(generateKey(uid, filename))
+                    .build());
+            return Base64.getEncoder().encodeToString(objectBytes.asByteArray());
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
     private String generateKey(String uid, String filename) {
         return uid + "/" + filename;
     }

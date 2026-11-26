@@ -57,6 +57,12 @@ class GroupChatServiceTest {
             }
             return copy;
         }
+
+        // Its reads never fail, so a send's strict read is the same read.
+        @Override
+        public String decodeFileOrThrow(String uid, String filename) {
+            return decodeFile(uid, filename);
+        }
     }
 
     private final ObjectMapper json = new ObjectMapper();

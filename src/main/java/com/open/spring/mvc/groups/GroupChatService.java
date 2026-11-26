@@ -80,7 +80,33 @@ public class GroupChatService {
     }
 
     public List<GroupChatMessage> getMessages(String groupName) {
-        String base64Data = s3FileHandler.decodeFile(groupName, MESSAGES_FILE);
+        return parseMessages(groupName, s3FileHandler.decodeFile(groupName, MESSAGES_FILE));
+    }
+
+    /**
+     * The group's messages for a send, which writes the whole file back. Strict: a read that
+     * failed throws rather than reading as an empty chat, which the send would save over the
+     * history. Only S3's 404 means no messages yet. S3 out of reach or answering a 5xx is
+     * something to wait out, so that throws MessagesReadFailedException; anything else goes up
+     * as it is.
+     */
+    private List<GroupChatMessage> readMessagesOrThrow(String groupName) {
+        String base64Data;
+        try {
+            base64Data = s3FileHandler.decodeFileOrThrow(groupName, MESSAGES_FILE);
+        } catch (SdkClientException | S3Exception e) {
+            // Logged for every failure: the route answers a refused read without logging it.
+            log.warn("Could not read the messages of group {}", groupName, e);
+            if (e instanceof S3Exception answered && answered.statusCode() < 500) {
+                // S3 refused the request (no permission, a bad key): waiting won't fix that.
+                throw e;
+            }
+            throw new MessagesReadFailedException(e);
+        }
+        return parseMessages(groupName, base64Data);
+    }
+
+    private List<GroupChatMessage> parseMessages(String groupName, String base64Data) {
         if (base64Data == null || base64Data.isBlank()) {
             return new ArrayList<>();
         }
@@ -119,7 +145,7 @@ public class GroupChatService {
 
     public List<GroupChatMessage> addMessage(String groupName, GroupChatMessage message) {
         synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
-            List<GroupChatMessage> messages = getMessages(groupName);
+            List<GroupChatMessage> messages = readMessagesOrThrow(groupName);
             messages.add(message);
 
             String jsonl = messages.stream()

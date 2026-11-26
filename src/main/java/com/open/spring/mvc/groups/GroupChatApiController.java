@@ -38,9 +38,9 @@ import lombok.NoArgsConstructor;
 @CrossOrigin
 public class GroupChatApiController {
 
-    // How long to wait before sharing again when S3 couldn't check a path: a throttle or a
-    // short outage clears in seconds.
-    private static final int SHARE_RETRY_AFTER_SECONDS = 5;
+    // How long to wait before trying again when S3 couldn't check a shared path or read a
+    // group's messages: a throttle or a short outage clears in seconds.
+    private static final int RETRY_AFTER_SECONDS = 5;
 
     private final GroupChatService groupChatService;
     private final GroupChatRealtimeService realtimeService;
@@ -192,6 +192,12 @@ public class GroupChatApiController {
 
         try {
             realtimeService.publishMessage(groupId, message.getMessage(), message.getImage(), identity);
+        } catch (MessagesReadFailedException ex) {
+            // S3 couldn't read the history, so nothing was saved or broadcast: saving would have
+            // replaced it. That's S3 being unavailable for a moment, not a bug here: a 503, and when.
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(RETRY_AFTER_SECONDS))
+                    .body(ex.getMessage());
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
@@ -406,7 +412,7 @@ public class GroupChatApiController {
             response.put("message", ex.getMessage());
             response.put("filename", ex.getPath());
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(SHARE_RETRY_AFTER_SECONDS))
+                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(RETRY_AFTER_SECONDS))
                     .body(response);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>("Upload failed", HttpStatus.INTERNAL_SERVER_ERROR);
