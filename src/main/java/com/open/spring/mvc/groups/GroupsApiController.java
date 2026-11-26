@@ -105,6 +105,60 @@ public class GroupsApiController {
         return MentorRules.manageGroups(currentPerson()).map(MentorRules.Refusal::toResponse).orElse(null);
     }
 
+    /**
+     * Who manages a group's members. A group has no owner, so its members do, as the Messages
+     * page's Members dialog lets them, and so do teachers and admins. A class group's members come
+     * from the classes on each student's Profile, so on these routes only teachers and admins
+     * change one.
+     */
+    private boolean managesGroup(Person caller, Groups group) {
+        if (caller == null) {
+            return false;
+        }
+        if (isStaff(caller)) {
+            return true;
+        }
+        if (classGroupMembershipService.isClassGroup(group.getName())) {
+            return false;
+        }
+        return groupsRepository.findMembersOf(group.getId()).stream()
+                .anyMatch(member -> java.util.Objects.equals(member.getId(), caller.getId()));
+    }
+
+    /** Joining and leaving: anyone adds or removes themselves, except in a class group. */
+    private boolean joinsOrLeaves(Person caller, Groups group, Person person) {
+        return caller != null && person != null && java.util.Objects.equals(caller.getId(), person.getId())
+                && !classGroupMembershipService.isClassGroup(group.getName());
+    }
+
+    /** True for a teacher or an admin. */
+    private static boolean isStaff(Person caller) {
+        return caller != null && (caller.hasRole("ROLE_TEACHER") || caller.hasRole("ROLE_ADMIN"));
+    }
+
+    private static ResponseEntity<Object> notStaff() {
+        return new ResponseEntity<>(
+            Map.of("error", "Only a teacher or an admin can change a group's name, period or course"),
+            HttpStatus.FORBIDDEN
+        );
+    }
+
+    private static ResponseEntity<Object> notYourGroup() {
+        return new ResponseEntity<>(
+            Map.of("error", "Only the group's members, a teacher or an admin can change this group"),
+            HttpStatus.FORBIDDEN
+        );
+    }
+
+    /** Group chat keeps a group's files in S3 under its name, so a name can't add a folder. */
+    private static boolean hasSlash(String groupName) {
+        return groupName != null && groupName.contains("/");
+    }
+
+    private static ResponseEntity<Object> slashInName() {
+        return new ResponseEntity<>(Map.of("error", "A group name can't contain \"/\""), HttpStatus.BAD_REQUEST);
+    }
+
     /** The people with these ids, in order, once each, leaving out ids that match no one. */
     private List<Person> findPeople(List<Long> personIds) {
         List<Person> found = new ArrayList<>();
@@ -274,6 +328,9 @@ public class GroupsApiController {
         if (mentorRefusal != null) {
             return mentorRefusal;
         }
+        if (hasSlash(dto.getName())) {
+            return slashInName();
+        }
         try {
             if (dto.getName() == null || dto.getName().isEmpty()) {
                 return new ResponseEntity<>(
@@ -349,6 +406,10 @@ public class GroupsApiController {
 
             for (GroupCreateDto groupDto : dto.getGroups()) {
                 try {
+                    if (hasSlash(groupDto.getName())) {
+                        errors.add("Group name '" + groupDto.getName() + "' can't contain \"/\"");
+                        continue;
+                    }
                     if (groupsRepository.findByName(groupDto.getName()).isPresent()) {
                         errors.add("Group with name '" + groupDto.getName() + "' already exists");
                         continue;
@@ -459,6 +520,26 @@ public class GroupsApiController {
             }
 
             Groups group = groupOpt.get();
+            // Nothing in pages edits a group, and anyone can join a group that isn't a class group and then counts as a member
+            if (!isStaff(currentPerson())) {
+                return notStaff();
+            }
+            if (hasSlash(dto.getName())) {
+                return slashInName();
+            }
+            boolean renames = dto.getName() != null && !dto.getName().isEmpty() && !dto.getName().equals(group.getName());
+            if (renames && classGroupMembershipService.isClassGroup(group.getName())) {
+                return new ResponseEntity<>(Map.of("error", "A class group can't be renamed"), HttpStatus.FORBIDDEN);
+            }
+            // Profile's class sync, a course's video call room and the assignment course sync find a group by name, so names stay unique
+            if (renames
+                    && (groupsRepository.findByName(dto.getName()).isPresent()
+                        || classGroupMembershipService.isClassGroup(dto.getName()))) {
+                return new ResponseEntity<>(
+                    Map.of("error", "A group named '" + dto.getName() + "' already exists"),
+                    HttpStatus.CONFLICT
+                );
+            }
 
             if (dto.getName() != null && !dto.getName().isEmpty()) {
                 group.setName(dto.getName());
@@ -491,6 +572,10 @@ public class GroupsApiController {
         if (refusal != null) {
             return refusal;
         }
+        Person caller = currentPerson();
+        if (caller == null || !caller.hasRole("ROLE_ADMIN")) {
+            return new ResponseEntity<>(Map.of("error", "Only an admin can delete a group"), HttpStatus.FORBIDDEN);
+        }
         try {
             Optional<Groups> groupOpt = groupsRepository.findById(id);
             if (groupOpt.isEmpty()) {
@@ -498,6 +583,10 @@ public class GroupsApiController {
                     Map.of("error", "Group not found"),
                     HttpStatus.NOT_FOUND
                 );
+            }
+            // A class group's members come from the classes on each student's Profile; the Messages page never offers to delete one
+            if (classGroupMembershipService.isClassGroup(groupOpt.get().getName())) {
+                return new ResponseEntity<>(Map.of("error", "A class group can't be deleted"), HttpStatus.FORBIDDEN);
             }
 
             groupsRepository.deleteById(id);
@@ -547,6 +636,11 @@ public class GroupsApiController {
             Optional<MentorRules.Refusal> refusal = mentorAccess.toRemove(currentPerson(), group, person);
             if (refusal.isPresent()) {
                 return refusal.get().toResponse();
+            }
+
+            Person caller = currentPerson();
+            if (!managesGroup(caller, group) && !joinsOrLeaves(caller, group, person)) {
+                return notYourGroup();
             }
 
             if (!group.getGroupMembers().contains(person)) {
@@ -600,6 +694,11 @@ public class GroupsApiController {
             Optional<MentorRules.Refusal> refusal = mentorAccess.toAdd(currentPerson(), group, person);
             if (refusal.isPresent()) {
                 return refusal.get().toResponse();
+            }
+
+            Person caller = currentPerson();
+            if (!managesGroup(caller, group) && !joinsOrLeaves(caller, group, person)) {
+                return notYourGroup();
             }
 
             if (group.getGroupMembers().contains(person)) {

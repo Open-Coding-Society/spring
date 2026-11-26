@@ -30,8 +30,9 @@ import com.open.spring.mvc.person.PersonJpaRepository;
 
 /**
  * The team manages its mentors: a member of a group (or a teacher) adds and removes its mentor, a mentor adds no one,
- * and a mentor never ends up alone with one student. Mentors can't look through or change groups either. Students
- * manage everyone else as before.
+ * and a mentor never ends up alone with one student. Mentors can't look through or change groups either. Everyone
+ * else is added and removed by the group's members, teachers and admins, or joins and leaves on their own (see
+ * GroupMembershipAccessTest).
  */
 class GroupMembersMentorTest {
 
@@ -160,8 +161,8 @@ class GroupMembersMentorTest {
     }
 
     @Test
-    void studentsStillAddStudentsAsBefore() {
-        signIn(outsider);
+    void membersStillAddStudentsAsBefore() {
+        signIn(student);
         assertEquals(HttpStatus.OK, controller.addPersonToGroup(TEAM, thirdStudent.getId()).getStatusCode());
     }
 
