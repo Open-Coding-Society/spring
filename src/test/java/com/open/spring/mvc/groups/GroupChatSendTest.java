@@ -103,10 +103,12 @@ class GroupChatSendTest {
         GroupChatService chat = new GroupChatService(storage, new ObjectMapper());
         GroupsJpaRepository groups = mock(GroupsJpaRepository.class);
         messaging = mock(SimpMessagingTemplate.class);
-        GroupChatRealtimeService realtime = new GroupChatRealtimeService(chat, groups, messaging);
-        GroupChatReadService reads = new GroupChatReadService(mock(GroupChatReadStateJpaRepository.class), groups, chat);
+        // Built from whatever their constructors take, so a new dependency elsewhere doesn't break this test.
+        GroupChatRealtimeService realtime = TestBeans.build(GroupChatRealtimeService.class, chat, groups, messaging);
+        GroupChatReadService reads = TestBeans.build(GroupChatReadService.class,
+                mock(GroupChatReadStateJpaRepository.class), groups, chat);
         PersonJpaRepository people = mock(PersonJpaRepository.class);
-        controller = new GroupChatApiController(chat, realtime, reads, groups, people);
+        controller = TestBeans.build(GroupChatApiController.class, chat, realtime, reads, groups, people);
 
         Groups group = new Groups();
         group.setName("CSA");
