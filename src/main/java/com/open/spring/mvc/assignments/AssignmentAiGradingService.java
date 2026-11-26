@@ -15,6 +15,7 @@ import java.util.regex.Pattern;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.hibernate.Hibernate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -24,6 +25,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.open.spring.mvc.S3uploads.FileHandler;
 import com.open.spring.mvc.aiconnections.AiGradingRouter;
 import com.open.spring.mvc.aiconnections.AiProviderFailure;
+import com.open.spring.mvc.groups.Submitter;
+import com.open.spring.mvc.person.Person;
 
 @Service
 public class AssignmentAiGradingService {
@@ -119,7 +122,7 @@ public class AssignmentAiGradingService {
         } else if ("code".equalsIgnoreCase(contentType)) {
             submissionText = fetchGistText(content);
         } else if ("file".equalsIgnoreCase(contentType)) {
-            submissionText = fetchNotebookText(content);
+            submissionText = fetchNotebookText(content, storageFolder(submission.getSubmitter()));
         } else if (content != null) {
             submissionText = fetchInlineText(content);
         } else {
@@ -422,7 +425,7 @@ public class AssignmentAiGradingService {
     private record GistFiles(String text, List<String> reflectionFiles, String selectionGuidance) {
     }
 
-    private SubmissionText fetchNotebookText(Map<String, Object> content) {
+    private SubmissionText fetchNotebookText(Map<String, Object> content, String storageFolder) {
         String filename = String.valueOf(content.getOrDefault("filename", ""));
         String lowerFilename = filename.toLowerCase(java.util.Locale.ROOT);
         boolean notebook = lowerFilename.endsWith(".ipynb");
@@ -431,7 +434,9 @@ public class AssignmentAiGradingService {
         }
         String uploadedBy = String.valueOf(content.getOrDefault("uploadedBy", ""));
         String storedFilename = String.valueOf(content.getOrDefault("storedFilename", ""));
-        if (uploadedBy.isBlank() || storedFilename.isBlank()) {
+        // The content names the folder and file, so only the submitter's own folder is read
+        if (uploadedBy.isBlank() || storedFilename.isBlank()
+                || !uploadedBy.equals(storageFolder) || !staysInFolder(storedFilename)) {
             return SubmissionText.notGradeable("The notebook file could not be located, so no score was assigned.");
         }
         String base64 = fileHandler.decodeFile(uploadedBy, storedFilename);
@@ -455,6 +460,28 @@ public class AssignmentAiGradingService {
             return SubmissionText.notGradeable("The notebook had no gradable content.");
         }
         return SubmissionText.of("JUPYTER NOTEBOOK", extracted);
+    }
+
+    /**
+     * Where the upload routes keep a submitter's handed-in files: a person's uid, or a group's id. The
+     * submitter can arrive as a Hibernate proxy, so it's unwrapped first, as GradebookService does.
+     */
+    private static String storageFolder(Submitter submitter) {
+        Object unproxied = Hibernate.unproxy(submitter);
+        if (unproxied instanceof Person person) {
+            return person.getUid();
+        }
+        return unproxied instanceof Submitter other && other.getId() != null ? String.valueOf(other.getId()) : null;
+    }
+
+    /** A stored name stays inside its folder: no ".", ".." or empty part between slashes, so nothing absolute either. */
+    private static boolean staysInFolder(String storedFilename) {
+        for (String part : storedFilename.split("/", -1)) {
+            if (part.isEmpty() || part.equals(".") || part.equals("..")) {
+                return false;
+            }
+        }
+        return true;
     }
 
     private SubmissionText fetchInlineText(Map<String, Object> content) {
