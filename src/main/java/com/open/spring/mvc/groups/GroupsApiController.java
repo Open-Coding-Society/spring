@@ -194,6 +194,30 @@ public class GroupsApiController {
                 .anyMatch(submission -> assignmentAuthorizationService.canManageSubmission(caller, submission));
     }
 
+    /**
+     * Who sees a group's grades: its members, teachers and admins, and whoever grades one of its
+     * submissions (AssignmentAuthorizationService.canManageSubmission).
+     */
+    private boolean seesGroupGrades(Person caller, Groups group) {
+        if (caller == null) {
+            return false;
+        }
+        if (isStaff(caller)) {
+            return true;
+        }
+        boolean member = groupsRepository.findMembersOf(group.getId()).stream()
+                .anyMatch(person -> java.util.Objects.equals(person.getId(), caller.getId()));
+        return member || submissionRepository.findBySubmitterId(group.getId()).stream()
+                .anyMatch(submission -> assignmentAuthorizationService.canManageSubmission(caller, submission));
+    }
+
+    private static ResponseEntity<Object> notAllowedToSeeGrades() {
+        return new ResponseEntity<>(
+            Map.of("error", "Only the group's members, its graders, a teacher or an admin can see its grades"),
+            HttpStatus.FORBIDDEN
+        );
+    }
+
     /** A grade entry's assignmentId as the upsert keys it (its text), or null when that isn't a whole number. */
     private static Long idOf(Object value) {
         if (value == null) {
@@ -791,6 +815,9 @@ public class GroupsApiController {
         }
         Optional<Groups> groupOpt = groupsRepository.findById(id);
         if (groupOpt.isEmpty()) return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        if (!seesGroupGrades(currentPerson(), groupOpt.get())) {
+            return notAllowedToSeeGrades();
+        }
 
         return new ResponseEntity<>(groupOpt.get().getGradesJson(), HttpStatus.OK);
     }

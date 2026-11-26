@@ -32,9 +32,11 @@ import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
 /**
- * Who may change a group's grades. Replacing or clearing all of them is for teachers and admins. Adding one
- * assignment's entry, which also copies it into each member's own grades, is for them and for whoever already
- * grades the group on that assignment: its creators and graders, and the graders of the group's submission to it.
+ * Who may see and change a group's grades. Its members, its graders, teachers and admins read
+ * them. Replacing or clearing all of them is for teachers and admins. Adding one assignment's
+ * entry, which also copies it into each member's own grades, is for them and for whoever already
+ * grades the group on that assignment: its creators and graders, and the graders of the group's
+ * submission to it.
  */
 class GroupGradesAccessTest {
 
@@ -78,6 +80,7 @@ class GroupGradesAccessTest {
         team.setName("Team Rocket");
         team.getGroupMembers().addAll(List.of(member, teammate));
         when(groups.findById(TEAM)).thenReturn(Optional.of(team));
+        when(groups.findMembersOf(TEAM)).thenReturn(List.of(member, teammate));
         when(groups.save(any(Groups.class))).thenAnswer(call -> call.getArgument(0));
         when(groups.findGroupMembersRaw(TEAM)).thenReturn(List.of(
                 new Object[] {1L, member.getUid(), member.getName(), null},
@@ -168,6 +171,24 @@ class GroupGradesAccessTest {
 
         signIn(teacher);
         assertEquals(HttpStatus.OK, controller.addGroupGrade(TEAM, new HashMap<>(Map.of("score", 90))).getStatusCode());
+    }
+
+    /** A group's grades are read by its members, whoever grades one of its submissions, teachers and admins. */
+    @Test
+    void membersGradersAndStaffReadAGroupsGrades() {
+        for (Person reader : List.of(member, teammate, assignmentGrader, creator, submissionGrader, teacher, admin)) {
+            signIn(reader);
+            assertEquals(HttpStatus.OK, controller.getGroupGrades(TEAM).getStatusCode());
+        }
+    }
+
+    @Test
+    void someoneOutsideTheGroupCannotReadItsGrades() {
+        signIn(outsider);
+        assertEquals(HttpStatus.FORBIDDEN, controller.getGroupGrades(TEAM).getStatusCode());
+
+        SecurityContextHolder.clearContext();
+        assertEquals(HttpStatus.FORBIDDEN, controller.getGroupGrades(TEAM).getStatusCode());
     }
 
     @Test
