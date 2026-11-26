@@ -114,14 +114,17 @@ public class S3FileApiController {
                     byte[] data = java.util.Base64.getDecoder().decode(base64Data);
                     ByteArrayResource resource = new ByteArrayResource(data);
 
-                    MediaType mediaType = MediaType.APPLICATION_OCTET_STREAM;
-                    org.springframework.util.MimeType mimeType = org.springframework.http.MediaTypeFactory.getMediaType(filename).orElse(null);
-                    if (mimeType != null) {
-                        mediaType = MediaType.parseMediaType(mimeType.toString());
-                    }
+                    // A handed-in file opens on this site, so only a type that can't run anything
+                    // opens in the browser. Everything else downloads as plain bytes.
+                    MediaType mediaType = org.springframework.http.MediaTypeFactory.getMediaType(filename)
+                            .filter(S3FileApiController::opensInTheBrowser)
+                            .orElse(MediaType.APPLICATION_OCTET_STREAM);
+                    ContentDisposition.Builder disposition = MediaType.APPLICATION_OCTET_STREAM.equals(mediaType)
+                            ? ContentDisposition.attachment()
+                            : ContentDisposition.inline();
 
                     HttpHeaders headers = new HttpHeaders();
-                    headers.setContentDisposition(ContentDisposition.inline()
+                    headers.setContentDisposition(disposition
                             .filename(filename, StandardCharsets.UTF_8)
                             .build());
 
@@ -166,5 +169,12 @@ public class S3FileApiController {
             e.printStackTrace();
             return new ResponseEntity<>("Error deleting files: " + e.getMessage(), HttpStatus.BAD_REQUEST);
         }
+    }
+
+    /** PDFs, plain images and plain text. HTML, SVG and scripts never open on this site. */
+    private static boolean opensInTheBrowser(MediaType type) {
+        return MediaType.APPLICATION_PDF.equals(type) || MediaType.IMAGE_PNG.equals(type)
+                || MediaType.IMAGE_JPEG.equals(type) || MediaType.IMAGE_GIF.equals(type)
+                || MediaType.TEXT_PLAIN.equals(type);
     }
 }
