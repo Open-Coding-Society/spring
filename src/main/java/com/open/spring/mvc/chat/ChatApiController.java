@@ -103,12 +103,13 @@ public class ChatApiController {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
 
-        if (!isMember(groupOpt.get(), currentUsername)) {
-            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
-        }
+        // A mentor hears why (MentorRules) before anyone outside the group gets a plain 403.
         ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
         if (refusal != null) {
             return refusal;
+        }
+        if (!isMember(groupOpt.get(), currentUsername)) {
+            return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         }
 
         if (request == null || request.getContent() == null || request.getContent().isBlank()) {

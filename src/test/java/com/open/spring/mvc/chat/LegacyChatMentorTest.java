@@ -116,6 +116,13 @@ class LegacyChatMentorTest {
     }
 
     @Test
+    void aMentorWhoIsNotInTheGroupIsToldWhyTheyCantPostToItsOlderChat() {
+        signIn(mentor);
+        assertRefused("mentor_not_in_group", controller.postChat(OTHERS, text("hi")));
+        verify(chat, never()).addMessage(anyLong(), any());
+    }
+
+    @Test
     void aMentorWithATeamOfOneCantUseItsOlderChat() {
         signIn(mentor);
         assertRefused("mentor_team_too_small", controller.getChat(SOLO));
