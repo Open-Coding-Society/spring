@@ -39,8 +39,8 @@ import lombok.NoArgsConstructor;
 public class GroupChatApiController {
 
     // How long to wait before trying again when S3 was unavailable for a moment, checking or
-    // writing a shared file or reading a group's messages: a throttle or a short outage clears
-    // in seconds.
+    // writing a shared file or reading or saving a group's messages: a throttle or a short
+    // outage clears in seconds.
     private static final int RETRY_AFTER_SECONDS = 5;
 
     private final GroupChatService groupChatService;
@@ -193,12 +193,8 @@ public class GroupChatApiController {
 
         try {
             realtimeService.publishMessage(groupId, message.getMessage(), message.getImage(), identity);
-        } catch (MessagesReadFailedException ex) {
-            // S3 couldn't read the history, so nothing was saved or broadcast: saving would have
-            // replaced it. That's S3 being unavailable for a moment, not a bug here: a 503, and when.
-            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(RETRY_AFTER_SECONDS))
-                    .body(ex.getMessage());
+        } catch (MessagesStorageUnavailableException ex) {
+            return tryAgainLater(ex);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
@@ -232,6 +228,8 @@ public class GroupChatApiController {
             updated = realtimeService.editMessage(groupId, messageId, request.getMessage(), identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        } catch (MessagesStorageUnavailableException ex) {
+            return tryAgainLater(ex);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
@@ -262,11 +260,24 @@ public class GroupChatApiController {
             realtimeService.deleteMessage(groupId, messageId, identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        } catch (MessagesStorageUnavailableException ex) {
+            return tryAgainLater(ex);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
 
         return new ResponseEntity<>(HttpStatus.OK);
+    }
+
+    /**
+     * S3 couldn't read or save the group's messages, so the change isn't broadcast (a save that
+     * timed out may still be stored). That's S3 being unavailable for a moment, not a bug here:
+     * a 503, and when to try again.
+     */
+    private static ResponseEntity<String> tryAgainLater(MessagesStorageUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(RETRY_AFTER_SECONDS))
+                .body(ex.getMessage());
     }
 
     /**

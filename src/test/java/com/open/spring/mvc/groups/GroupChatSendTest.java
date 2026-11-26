@@ -37,9 +37,7 @@ import com.open.spring.mvc.S3uploads.S3FileHandler;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 
-import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.core.ResponseBytes;
-import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
@@ -47,7 +45,6 @@ import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.PutObjectResponse;
-import software.amazon.awssdk.services.s3.model.S3Exception;
 
 /**
  * Sending a message reads the group's whole messages file, adds the message and writes the
@@ -133,18 +130,10 @@ class GroupChatSendTest {
         return bytes == null ? null : new String(bytes, StandardCharsets.UTF_8);
     }
 
+
     @Test
     void aReadThatFailsRefusesTheSendWithA503AndKeepsTheHistory() {
-        // S3 throttled (503 Slow Down), out of reach, or timing out the request (its RequestTimeout
-        // comes as a 400): failures that clear if you wait.
-        List<RuntimeException> failures = List.of(
-                (S3Exception) S3Exception.builder().statusCode(503).message("Slow Down").build(),
-                SdkClientException.create("Unable to execute HTTP request: Read timed out"),
-                (S3Exception) S3Exception.builder().statusCode(400)
-                        .awsErrorDetails(AwsErrorDetails.builder().errorCode("RequestTimeout").build())
-                        .message("Your socket connection to the server was not read from or written to within the timeout period.")
-                        .build());
-        for (RuntimeException failure : failures) {
+        for (RuntimeException failure : S3Failures.unavailable()) {
             useFreshStorage();
             objects.put(MESSAGES_KEY, ADA_LINE.getBytes(StandardCharsets.UTF_8));
             doThrow(failure).when(s3).getObjectAsBytes(any(GetObjectRequest.class));
@@ -162,14 +151,46 @@ class GroupChatSendTest {
 
     @Test
     void aReadS3RefusesOrABugHereIsNotOfferedARetryAndWritesNothing() {
-        // No permission, a bad key, or a fault in this server: waiting won't fix these.
-        List<RuntimeException> faults = List.of(
-                (S3Exception) S3Exception.builder().statusCode(403).message("Access Denied").build(),
-                new NullPointerException("a bug here, not S3"));
-        for (RuntimeException fault : faults) {
+        for (RuntimeException fault : S3Failures.refusalsAndBugs()) {
             useFreshStorage();
             objects.put(MESSAGES_KEY, ADA_LINE.getBytes(StandardCharsets.UTF_8));
             doThrow(fault).when(s3).getObjectAsBytes(any(GetObjectRequest.class));
+
+            ResponseEntity<?> response = send("Works for me");
+
+            assertFalse(response.getStatusCode().is2xxSuccessful(), fault.toString());
+            assertNotEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode(), fault.toString());
+            assertNull(response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER), fault.toString());
+            assertEquals(ADA_LINE, storedMessages(), fault.toString());
+            verify(messaging, never()).convertAndSend(any(String.class), any(Object.class));
+        }
+    }
+
+    @Test
+    void anUploadThatFailsForAMomentRefusesTheSendWithA503AndKeepsTheHistory() {
+        // The read works, and then S3 can't take the upload for a moment.
+        for (RuntimeException failure : S3Failures.unavailable()) {
+            useFreshStorage();
+            objects.put(MESSAGES_KEY, ADA_LINE.getBytes(StandardCharsets.UTF_8));
+            doThrow(failure).when(s3).putObject(any(PutObjectRequest.class), any(RequestBody.class));
+
+            ResponseEntity<?> response = send("Works for me");
+
+            assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode(), failure.toString());
+            String retryAfter = response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+            assertTrue(retryAfter != null && retryAfter.matches("[1-9][0-9]*"), "Retry-After: " + retryAfter);
+            assertEquals(ADA_LINE, storedMessages(), failure.toString());
+            // A message that wasn't saved isn't shown to the group as sent.
+            verify(messaging, never()).convertAndSend(any(String.class), any(Object.class));
+        }
+    }
+
+    @Test
+    void anUploadS3RefusesOrABugHereIsNotOfferedARetryAndIsNotShown() {
+        for (RuntimeException fault : S3Failures.refusalsAndBugs()) {
+            useFreshStorage();
+            objects.put(MESSAGES_KEY, ADA_LINE.getBytes(StandardCharsets.UTF_8));
+            doThrow(fault).when(s3).putObject(any(PutObjectRequest.class), any(RequestBody.class));
 
             ResponseEntity<?> response = send("Works for me");
 
