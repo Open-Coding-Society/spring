@@ -211,6 +211,11 @@ public class GroupsApiController {
             }
 
             List<Groups> groups = groupsRepository.findGroupsByPersonId(personId);
+            // A mentor's own list holds only the groups they may use (MentorRules), so no page offers a group Spring
+            // would refuse them, and they never see the members of one.
+            if (MentorRules.isMentor(viewer)) {
+                groups = groups.stream().filter(group -> mentorAccess.toUse(viewer, group).isEmpty()).toList();
+            }
             List<Map<String, Object>> result = new ArrayList<>();
 
             for (Groups group : groups) {
@@ -412,7 +417,9 @@ public class GroupsApiController {
             );
         }
 
-        if (MentorRules.isMentor(personRepository.findByUid(userDetails.getUsername()))) {
+        // A mentor may leave every class group (an empty list) but join none.
+        boolean joins = dto != null && dto.getClasses() != null && !dto.getClasses().isEmpty();
+        if (joins && MentorRules.isMentor(personRepository.findByUid(userDetails.getUsername()))) {
             return MentorRules.Refusal.CLASS_GROUP.toResponse();
         }
 

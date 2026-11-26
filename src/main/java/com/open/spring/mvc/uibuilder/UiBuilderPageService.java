@@ -39,6 +39,7 @@ import com.open.spring.mvc.directmessages.DirectMessageService;
 import com.open.spring.mvc.groups.CourseGroupProperties;
 import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
+import com.open.spring.mvc.groups.MentorRules;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.uibuilder.UiBuilderPageApiRestController.BulkResult;
@@ -110,7 +111,9 @@ public class UiBuilderPageService {
         NOT_FOUND, FORBIDDEN, VERSION_CONFLICT,
         INVALID_SPEC, INVALID_GROUP, INVALID_VISIBILITY, INVALID_UNTIL, INVALID_COURSE, INVALID_SCOPE,
         SLUG_REQUIRED, INVALID_SLUG, SLUG_RESERVED, SLUG_TAKEN, SLUG_LOCKED,
-        LOOPBACK_SOURCE, NOT_PUBLISHED, PUBLISHED_CHANGED, OWN_PAGE, TOO_MANY_PAGES
+        LOOPBACK_SOURCE, NOT_PUBLISHED, PUBLISHED_CHANGED, OWN_PAGE, TOO_MANY_PAGES,
+        // A mentor would be in the conversation, and MentorRules allows no direct message that includes one.
+        MENTOR_NO_DIRECT_MESSAGES
     }
 
     /**
@@ -846,6 +849,9 @@ public class UiBuilderPageService {
         Optional<Person> me = people.findById(caller.personId());
         if (owner.isEmpty() || me.isEmpty()) {
             return Result.refused(Outcome.NOT_FOUND);
+        }
+        if (MentorRules.shareDirectMessages(List.of(me.get(), owner.get())).isPresent()) {
+            return Result.refused(Outcome.MENTOR_NO_DIRECT_MESSAGES);
         }
         DirectMessageConversation conversation = directMessages.getOrCreateConversation(me.get(), List.of(owner.get()));
         return Result.ok(new ConversationRef(conversation.getId()));

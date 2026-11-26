@@ -19,6 +19,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import com.open.spring.mvc.groups.Groups;
 import com.open.spring.mvc.groups.GroupsJpaRepository;
+import com.open.spring.mvc.groups.MentorAccess;
+import com.open.spring.mvc.groups.MentorRules;
+import com.open.spring.mvc.person.Person;
+import com.open.spring.mvc.person.PersonJpaRepository;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -31,10 +35,25 @@ public class ChatApiController {
 
     private final ChatService chatService;
     private final GroupsJpaRepository groupsRepository;
+    private final PersonJpaRepository personRepository;
+    private final MentorAccess mentorAccess;
 
-    public ChatApiController(ChatService chatService, GroupsJpaRepository groupsRepository) {
+    public ChatApiController(ChatService chatService, GroupsJpaRepository groupsRepository,
+            PersonJpaRepository personRepository, MentorAccess mentorAccess) {
         this.chatService = chatService;
         this.groupsRepository = groupsRepository;
+        this.personRepository = personRepository;
+        this.mentorAccess = mentorAccess;
+    }
+
+    /**
+     * A mentor rule's refusal for the signed-in account and this group, or null when it may go on. This older chat
+     * follows the same rule as the group chat (MentorRules): only a mentor can be refused.
+     */
+    private ResponseEntity<Object> mentorRefusal(Groups group) {
+        String uid = getCurrentUsername();
+        Person person = uid == null ? null : personRepository.findByUid(uid);
+        return mentorAccess.toUse(person, group).map(MentorRules.Refusal::toResponse).orElse(null);
     }
 
     @Data
@@ -46,10 +65,14 @@ public class ChatApiController {
 
     @GetMapping("/{groupId}")
     @Transactional(readOnly = true)
-    public ResponseEntity<List<ChatMessage>> getChat(@PathVariable Long groupId) {
+    public ResponseEntity<?> getChat(@PathVariable Long groupId) {
         Optional<Groups> groupOpt = groupsRepository.findById(groupId);
         if (groupOpt.isEmpty()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
         }
 
         // String currentUsername = getCurrentUsername();
@@ -66,7 +89,7 @@ public class ChatApiController {
 
     @PostMapping("/{groupId}")
     @Transactional
-    public ResponseEntity<List<ChatMessage>> postChat(
+    public ResponseEntity<?> postChat(
             @PathVariable Long groupId,
             @RequestBody ChatMessageRequest request) {
         Optional<Groups> groupOpt = groupsRepository.findById(groupId);
@@ -81,6 +104,10 @@ public class ChatApiController {
 
         if (!isMember(groupOpt.get(), currentUsername)) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+        ResponseEntity<Object> refusal = mentorRefusal(groupOpt.get());
+        if (refusal != null) {
+            return refusal;
         }
 
         if (request == null || request.getContent() == null || request.getContent().isBlank()) {

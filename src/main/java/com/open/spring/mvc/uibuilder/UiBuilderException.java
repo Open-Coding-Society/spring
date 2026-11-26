@@ -55,7 +55,7 @@ public class UiBuilderException extends RuntimeException {
             case NO_CONTENT -> HttpStatus.NO_CONTENT;
             case INVALID_SPEC, INVALID_GROUP, INVALID_VISIBILITY, INVALID_UNTIL, INVALID_COURSE, INVALID_SCOPE,
                     SLUG_REQUIRED, INVALID_SLUG, SLUG_RESERVED, LOOPBACK_SOURCE, OWN_PAGE -> HttpStatus.BAD_REQUEST;
-            case FORBIDDEN -> HttpStatus.FORBIDDEN;
+            case FORBIDDEN, MENTOR_NO_DIRECT_MESSAGES -> HttpStatus.FORBIDDEN;
             case NOT_FOUND -> HttpStatus.NOT_FOUND;
             case VERSION_CONFLICT, SLUG_TAKEN, SLUG_LOCKED, NOT_PUBLISHED, PUBLISHED_CHANGED, TOO_MANY_PAGES -> HttpStatus.CONFLICT;
         };

@@ -712,6 +712,20 @@ class UiBuilderPageServiceTest {
         assertEquals(Outcome.NOT_FOUND, service.messageOwner(ada, "draft-page").outcome());
     }
 
+    @Test
+    void messagingTheOwnerIsRefusedWhenAMentorWouldBeInTheConversation() {
+        publish(hop, create(hop, "Flood Watch"), "flood-watch");
+        Person patPerson = store.person(9, "pat", "Pat Mentor");
+        patPerson.setRoles(new java.util.ArrayList<>(List.of("ROLE_USER", "ROLE_MENTOR")));
+
+        assertEquals(Outcome.MENTOR_NO_DIRECT_MESSAGES, service.messageOwner(UiBuilderTestStore.student(patPerson), "flood-watch").outcome());
+        hopPerson.setRoles(new java.util.ArrayList<>(List.of("ROLE_USER", "ROLE_MENTOR")));
+        assertEquals(Outcome.MENTOR_NO_DIRECT_MESSAGES, service.messageOwner(ada, "flood-watch").outcome());
+        verify(store.directMessages, never()).getOrCreateConversation(any(), anyList());
+        assertEquals(HttpStatus.FORBIDDEN, UiBuilderException.statusOf(Outcome.MENTOR_NO_DIRECT_MESSAGES));
+        assertEquals("mentor_no_direct_messages", UiBuilderException.codeOf(Outcome.MENTOR_NO_DIRECT_MESSAGES));
+    }
+
     // ---- leases ----
 
     @Test

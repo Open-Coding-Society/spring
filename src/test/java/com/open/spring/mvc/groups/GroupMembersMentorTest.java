@@ -261,4 +261,39 @@ class GroupMembersMentorTest {
         assertEquals(HttpStatus.OK, controller.searchGroupsByName("Team").getStatusCode());
         assertEquals(HttpStatus.OK, controller.getGroupById(SOLO).getStatusCode());
     }
+
+    @Test
+    void aMentorsOwnListHasOnlyTheGroupsTheyMayUse() {
+        Groups team = group(20L, "Team Plasma", student, teammate, mentor);
+        Groups solo = group(21L, "Pat And Ana", student, mentor);
+        Groups csa = group(22L, "CSA", student, teammate, thirdStudent, mentor);
+        when(classGroups.isClassGroup("CSA")).thenReturn(true);
+        when(groups.findGroupsByPersonId(mentor.getId())).thenReturn(List.of(team, solo, csa));
+        when(groups.findGroupsByPersonId(student.getId())).thenReturn(List.of(team, solo, csa));
+
+        signIn(mentor);
+        assertEquals(List.of(20L), groupIds(controller.getGroupsByPersonId(mentor.getId())));
+        signIn(student);
+        assertEquals(List.of(20L, 21L, 22L), groupIds(controller.getGroupsByPersonId(student.getId())));
+    }
+
+    @Test
+    void aMentorMayLeaveEveryClassGroupButJoinNone() {
+        org.springframework.security.core.userdetails.UserDetails login = org.springframework.security.core.userdetails.User
+                .withUsername(mentor.getUid()).password("unused").authorities("ROLE_USER").build();
+        when(classGroups.syncMemberships(mentor.getUid(), List.of())).thenReturn(List.of());
+
+        assertEquals(HttpStatus.OK, controller.syncClassMemberships(login,
+                new GroupsApiController.ClassMembershipSyncDto(List.of())).getStatusCode());
+        assertRefused("mentor_class_group", controller.syncClassMemberships(login,
+                new GroupsApiController.ClassMembershipSyncDto(List.of("CSA"))));
+        verify(classGroups, never()).syncMemberships(mentor.getUid(), List.of("CSA"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Long> groupIds(ResponseEntity<?> response) {
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        return ((List<Map<String, Object>>) response.getBody()).stream()
+                .map(group -> ((Number) group.get("id")).longValue()).toList();
+    }
 }
