@@ -160,10 +160,10 @@ A mentor is an account with `ROLE_MENTOR` and no teacher or admin role. Flask ve
 - A group response marks each member `"mentor": true` or `false`, so a page can list a team's mentors.
 - `POST /api/groups/bulk` makes the other groups when one breaks a mentor rule, and lists that one under `errors` with the refusal's message (one bad group doesn't stop a teacher's batch), so its answer stays 200.
 - Members are counted once each: a new group's `memberIds` may repeat an id, and the team size counts different people.
-- If a team drops below 2 members who aren't mentors, its mentor loses the group until it is back to 2. Nobody is stopped from leaving.
-- The socket follows the same rule: `GroupChatWebSocketController` drops a signed-in mentor's group events (send, file, join, typing, heartbeat) for a group they may not use. Leaving always works.
+- If a team drops below 2 members who aren't mentors, its mentor loses the group until it is back to 2. Nobody is stopped from leaving. The mentor's unread count (`GET /api/groups/chat/unread`) leaves that group out too, as their own group list does, so the bell never points at a group they can't open.
+- The socket follows the same rule: `GroupChatWebSocketController` drops a signed-in mentor's group events (send, file, join, typing, heartbeat) for a group they may not use. Leaving always works. A socket from Spring's own pages carries the roles of its sign-in, so only a mentor's events load their account; a role given after that sign-in counts from the next one.
 - Not covered yet: anyone can still subscribe to `/topic/group/{id}` and read what is posted there live (see Known issues). A direct message topic already admits only that conversation's participants (`DirectMessageTopicGuard`).
-- Tests: `./mvnw test -Dtest='Mentor*Test,GroupChatMentorTest,GroupMembersMentorTest,DirectMessageMentorTest'`.
+- Tests: `./mvnw test -Dtest='*Mentor*Test'`.
 
 ## Persistence
 
