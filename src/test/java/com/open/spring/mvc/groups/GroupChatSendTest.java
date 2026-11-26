@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -125,6 +127,18 @@ class GroupChatSendTest {
         return controller.postMessage(7L, request);
     }
 
+    /** The first read of S3 works, and every read after it fails as a throttle. */
+    private void failReadsAfterTheFirst() {
+        AtomicInteger reads = new AtomicInteger();
+        doAnswer(call -> {
+            if (reads.incrementAndGet() > 1) {
+                throw S3Failures.unavailable().get(0);
+            }
+            byte[] bytes = objects.get(call.<GetObjectRequest>getArgument(0).key());
+            return ResponseBytes.fromByteArray(GetObjectResponse.builder().build(), bytes);
+        }).when(s3).getObjectAsBytes(any(GetObjectRequest.class));
+    }
+
     private String storedMessages() {
         byte[] bytes = objects.get(MESSAGES_KEY);
         return bytes == null ? null : new String(bytes, StandardCharsets.UTF_8);
@@ -200,6 +214,20 @@ class GroupChatSendTest {
             assertEquals(ADA_LINE, storedMessages(), fault.toString());
             verify(messaging, never()).convertAndSend(any(String.class), any(Object.class));
         }
+    }
+
+    @Test
+    void aSendAnswersWithTheMessagesItSavedEvenWhenTheNextReadFails() {
+        objects.put(MESSAGES_KEY, ADA_LINE.getBytes(StandardCharsets.UTF_8));
+        failReadsAfterTheFirst();
+
+        ResponseEntity<?> response = send("Works for me");
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        List<String> texts = ((List<?>) response.getBody()).stream()
+                .map(saved -> ((GroupChatMessage) saved).getMessage())
+                .toList();
+        assertEquals(List.of("Meeting at 3", "Works for me"), texts);
     }
 
     @Test

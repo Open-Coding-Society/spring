@@ -1,6 +1,7 @@
 package com.open.spring.mvc.groups;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -24,7 +25,8 @@ public class GroupChatRealtimeService {
     private final GroupsJpaRepository groupsRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
-    public GroupChatEvent publishMessage(Long groupId, String message, String image, AuthenticatedIdentity identity) {
+    /** Saves the message, tells the group, and returns the group's messages as saved. */
+    public List<GroupChatMessage> publishMessage(Long groupId, String message, String image, AuthenticatedIdentity identity) {
         Groups group = getGroupOrThrow(groupId);
 
         if ((message == null || message.isBlank()) && (image == null || image.isBlank())) {
@@ -34,7 +36,7 @@ public class GroupChatRealtimeService {
         String date = Instant.now().toString();
 
         GroupChatMessage persisted = new GroupChatMessage(identity.getDisplayName(), identity.getUid(), message, date, image);
-        groupChatService.addMessage(group.getName(), persisted);
+        List<GroupChatMessage> saved = groupChatService.addMessage(group.getName(), persisted);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("sendMessageServer")
@@ -47,18 +49,19 @@ public class GroupChatRealtimeService {
                 .build();
 
         broadcastToGroup(groupId, event);
-        return event;
+        return saved;
     }
 
     /**
-     * Returns whether the message existed (and was broadcast as edited). Throws
-     * {@link SecurityException} if the authenticated requester's uid is not the author uid.
+     * Edits the message, tells the group, and returns the group's messages as saved, or nothing
+     * when the message isn't in this group. Throws {@link SecurityException} if the
+     * authenticated requester's uid is not the author uid.
      */
-    public boolean editMessage(Long groupId, String messageId, String newMessage, String requesterUid) {
+    public Optional<List<GroupChatMessage>> editMessage(Long groupId, String messageId, String newMessage, String requesterUid) {
         Groups group = getGroupOrThrow(groupId);
-        boolean updated = groupChatService.editMessage(group.getName(), messageId, newMessage, requesterUid);
-        if (!updated) {
-            return false;
+        Optional<List<GroupChatMessage>> saved = groupChatService.editMessage(group.getName(), messageId, newMessage, requesterUid);
+        if (saved.isEmpty()) {
+            return saved;
         }
 
         GroupChatEvent event = GroupChatEvent.builder()
@@ -71,7 +74,7 @@ public class GroupChatRealtimeService {
                 .build();
 
         broadcastToGroup(groupId, event);
-        return true;
+        return saved;
     }
 
     /** Throws {@link SecurityException} if the authenticated requester didn't send it. */
