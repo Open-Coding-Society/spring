@@ -53,7 +53,7 @@ public class JwtRequestFilter extends OncePerRequestFilter {
 		Optional<String> jwtToken = getJwtTokenFromCookies(request.getCookies());
 	
 		if (!jwtToken.isPresent()) {
-			logger.warn("No JWT cookie: " + buildRequestLogMessage(request));
+			logger.debug("No JWT cookie: " + buildRequestLogMessage(request));
 			chain.doFilter(request, response);
 			return;
 		}
@@ -69,7 +69,7 @@ public class JwtRequestFilter extends OncePerRequestFilter {
 					UsernamePasswordAuthenticationToken usernamePasswordAuthenticationToken = new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
 					usernamePasswordAuthenticationToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
 					SecurityContextHolder.getContext().setAuthentication(usernamePasswordAuthenticationToken);
-					logger.warn("Cookie: " + userDetails.getUsername() + " " + userDetails.getAuthorities());
+					logger.debug("Cookie: " + userDetails.getUsername() + " " + userDetails.getAuthorities());
 				}
 			}
 		} catch (IllegalArgumentException e) {
@@ -109,14 +109,17 @@ public class JwtRequestFilter extends OncePerRequestFilter {
 			return;
 		}
 
+		// Every request passes through here, so the routine lines are debug. The app logs at
+		// WARN (logging.level.root), where a line per request would fill the console. A login
+		// cookie that can't be read, has expired or is rejected still logs a warning.
 		String requestUri = request.getRequestURI();
 		if (requestUri != null && requestUri.startsWith("/api/")) {
-			logger.warn("API request: " + buildRequestLogMessage(request));
+			logger.debug("API request: " + buildRequestLogMessage(request));
 			handleClientRequest(request, response, chain);
 			return;
 		}
 
-		logger.warn("Session request: " + buildRequestLogMessage(request));
+		logger.debug("Session request: " + buildRequestLogMessage(request));
 		chain.doFilter(request, response);
 	}
 	
