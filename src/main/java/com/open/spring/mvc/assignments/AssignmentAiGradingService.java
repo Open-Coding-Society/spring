@@ -432,14 +432,12 @@ public class AssignmentAiGradingService {
         if (!notebook && TEXT_FILE_EXTENSIONS.stream().noneMatch(lowerFilename::endsWith)) {
             return SubmissionText.notGradeable("Automatic grading is not available for this file type yet.");
         }
-        String uploadedBy = String.valueOf(content.getOrDefault("uploadedBy", ""));
         String storedFilename = String.valueOf(content.getOrDefault("storedFilename", ""));
-        // The content names the folder and file, so only the submitter's own folder is read
-        if (uploadedBy.isBlank() || storedFilename.isBlank()
-                || !uploadedBy.equals(storageFolder) || !staysInFolder(storedFilename)) {
+        // The upload routes store the file in the submitter's folder whoever uploads it (uploadedBy), so that's the one read
+        if (storageFolder == null || storedFilename.isBlank() || !staysInFolder(storedFilename)) {
             return SubmissionText.notGradeable("The notebook file could not be located, so no score was assigned.");
         }
-        String base64 = fileHandler.decodeFile(uploadedBy, storedFilename);
+        String base64 = fileHandler.decodeFile(storageFolder, storedFilename);
         if (base64 == null || base64.isBlank()) {
             return SubmissionText.notGradeable("The notebook file could not be downloaded, so no score was assigned.");
         }

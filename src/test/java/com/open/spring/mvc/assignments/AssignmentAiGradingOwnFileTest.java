@@ -38,9 +38,9 @@ import com.open.spring.mvc.groups.Submitter;
 import com.open.spring.mvc.person.Person;
 
 /**
- * AI grading reads a handed-in file only from the submitter's own storage folder (a person's uid,
- * or a group's id), which is where the upload routes put it. A submission's content names the
- * folder and the file itself, so a key that points anywhere else is never read.
+ * AI grading reads a handed-in file from the submitter's own storage folder (a person's uid, or a
+ * group's id), which is where the upload routes put it, whoever uploaded it. The uploadedBy in a
+ * submission's content never picks the folder, and a stored name can't leave the folder.
  */
 class AssignmentAiGradingOwnFileTest {
 
@@ -98,11 +98,21 @@ class AssignmentAiGradingOwnFileTest {
         verify(files).decodeFile("student", STORED);
     }
 
+    /** The content's uploadedBy names whoever uploaded, so it never picks the folder that's read. */
     @Test
-    void neverReadsAFileFromSomeoneElsesFolder() throws Exception {
-        assertEquals("not_gradeable", grader.grade(fileSubmission(author, "classmate", STORED)).status());
-        verifyNoInteractions(files);
-        verify(router, never()).generate(anyString(), any(), anyInt());
+    void neverReadsTheFolderUploadedByNames() throws Exception {
+        grader.grade(fileSubmission(author, "classmate", STORED));
+        verify(files, never()).decodeFile(eq("classmate"), anyString());
+        verify(files).decodeFile("student", STORED);
+    }
+
+    /** A teacher can upload a file for a student, and the upload route still stores it in the student's folder. */
+    @Test
+    void gradesAFileATeacherUploadedForTheStudent() throws Exception {
+        when(files.decodeFile("student", STORED)).thenReturn(encode(WORK));
+
+        assertEquals("graded", grader.grade(fileSubmission(author, "teacher", STORED)).status());
+        verify(router).generate(contains(WORK), same(author), eq(2));
     }
 
     @ParameterizedTest
@@ -119,14 +129,15 @@ class AssignmentAiGradingOwnFileTest {
         verifyNoInteractions(files);
     }
 
-    /** A group's handed-in files live under the group's id, so a member's own folder is never read for it. */
+    /** A file added to a group submission is stored under the group's id, whichever member added it. */
     @Test
-    void aGroupSubmissionNeverReadsAMembersOwnFolder() throws Exception {
+    void gradesAFileAddedToAGroupSubmission() throws Exception {
         Groups team = new Groups();
         ReflectionTestUtils.setField(team, "id", 42L);
         team.getGroupMembers().add(author);
+        when(files.decodeFile("42", STORED)).thenReturn(encode(WORK));
 
-        assertEquals("not_gradeable", grader.grade(fileSubmission(team, "student", STORED)).status());
+        assertEquals("graded", grader.grade(fileSubmission(team, "student", STORED)).status());
         verify(files, never()).decodeFile(eq("student"), anyString());
     }
 
