@@ -145,7 +145,8 @@ class GroupChatFilesTest {
         GroupChatRealtimeService realtime = new GroupChatRealtimeService(chat, groups, messaging, mock(MessageReactionService.class));
         GroupChatReadService reads = new GroupChatReadService(mock(GroupChatReadStateJpaRepository.class), groups, chat);
         PersonJpaRepository people = mock(PersonJpaRepository.class);
-        controller = new GroupChatApiController(chat, realtime, reads, groups, people, mock(MessageReactionService.class));
+        controller = new GroupChatApiController(chat, realtime, reads, groups, people, mock(MessageReactionService.class),
+                new MentorAccess(groups, mock(ClassGroupMembershipService.class)));
 
         Groups group = new Groups();
         group.setName("CSA");

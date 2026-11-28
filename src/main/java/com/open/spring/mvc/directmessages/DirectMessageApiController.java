@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Stream;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.open.spring.mvc.groups.MentorRules;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
 import com.open.spring.mvc.reactions.ChatType;
@@ -155,6 +157,12 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(Map.of("error", "No valid recipients found"), HttpStatus.BAD_REQUEST);
         }
 
+        Optional<MentorRules.Refusal> refusal = MentorRules.shareDirectMessages(
+                Stream.concat(Stream.of(person), others.stream()).toList());
+        if (refusal.isPresent()) {
+            return refusal.get().toResponse();
+        }
+
         // Must run before a new conversation is persisted: a query afterwards auto-flushes it, and the
         // commit-time flush then compares its participants by Person.hashCode(), which recurses forever
         // through Person <-> Bank (both Lombok @Data).
@@ -211,6 +219,11 @@ public class DirectMessageApiController {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
         }
 
+        Optional<MentorRules.Refusal> refusal = MentorRules.shareDirectMessages(conversation.getParticipants());
+        if (refusal.isPresent()) {
+            return refusal.get().toResponse();
+        }
+
         if (request == null) {
             return new ResponseEntity<>(Map.of("error", "body is required"), HttpStatus.BAD_REQUEST);
         }
@@ -251,6 +264,11 @@ public class DirectMessageApiController {
         DirectMessageConversation conversation = conversationOpt.get();
         if (!directMessageService.isParticipant(conversation, person)) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        Optional<MentorRules.Refusal> refusal = MentorRules.shareDirectMessages(conversation.getParticipants());
+        if (refusal.isPresent()) {
+            return refusal.get().toResponse();
         }
 
         if (request == null || request.getBody() == null || request.getBody().isBlank()) {
@@ -359,6 +377,12 @@ public class DirectMessageApiController {
         DirectMessageConversation conversation = conversationOpt.get();
         if (!directMessageService.isParticipant(conversation, person)) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        }
+
+        // Reacting follows the send rule, like posting and editing
+        Optional<MentorRules.Refusal> refusal = MentorRules.shareDirectMessages(conversation.getParticipants());
+        if (refusal.isPresent()) {
+            return refusal.get().toResponse();
         }
 
         Optional<Reaction> reaction = Reaction.fromKey(key);
