@@ -79,7 +79,7 @@ final class ProbeContext implements AutoCloseable {
     enum Caller {
         ANONYMOUS(null), INVALID_TOKEN(null), EXPIRED_TOKEN("ROLE_USER"), NO_ROLE(null),
         USER("ROLE_USER"), STUDENT("ROLE_STUDENT"), MENTOR("ROLE_MENTOR"), TEACHER("ROLE_TEACHER"),
-        ADMIN("ROLE_ADMIN"), ASSIGNMENT_SYNC("ROLE_ASSIGNMENT_SYNC");
+        ADMIN("ROLE_ADMIN"), ASSIGNMENT_SYNC("ROLE_ASSIGNMENT_SYNC"), CALLS_WEBHOOK("ROLE_CALLS_WEBHOOK");
 
         final String role;
 
@@ -98,7 +98,7 @@ final class ProbeContext implements AutoCloseable {
     private static final String JWT_COOKIE = "jwt_java_spring";
 
     static {
-        // the JWT filter writes a warning for every request: thousands of lines that say nothing here
+        // the JWT filter warns about every bad or expired token, and the probes send both to every route
         if (org.slf4j.LoggerFactory.getLogger(JwtRequestFilter.class) instanceof ch.qos.logback.classic.Logger logger) {
             logger.setLevel(ch.qos.logback.classic.Level.ERROR);
         }

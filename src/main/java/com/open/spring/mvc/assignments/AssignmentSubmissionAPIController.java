@@ -63,6 +63,13 @@ public class AssignmentSubmissionAPIController {
     private static final String MANAGE_DENIED_MESSAGE =
             "You do not have permission to manage this submission";
 
+    /**
+     * What a file upload records about the stored file. Only the upload routes set these, and
+     * other code reads them to find the file, so a JSON submission's copy is dropped.
+     */
+    private static final Set<String> UPLOAD_ONLY_KEYS = Set.of(
+            "filename", "storedFilename", "storagePath", "contentType", "size", "uploadedBy");
+
     @Autowired
     private AssignmentSubmissionJPA submissionRepo;
 
@@ -119,23 +126,27 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Get all submissions for a specific student.
+     * Get a student's submissions, only the ones the caller may see
+     * (AssignmentAuthorizationService.canSeeSubmission).
      * 
      * @param studentId the ID of the student whose submissions are to be fetched
      * @return a ResponseEntity containing a list of submissions for the given student ID
      */
     @Transactional
     @GetMapping("/getSubmissions/{studentId}")
-    public ResponseEntity<?> getSubmissions(@PathVariable Long studentId) {
+    public ResponseEntity<?> getSubmissions(@PathVariable Long studentId,
+            @AuthenticationPrincipal UserDetails userDetails) {
         if (personRepo.findById(studentId).isEmpty()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Student not found");
         }
 
+        Person currentUser = getAuthenticatedPerson(userDetails);
         List<AssignmentSubmissionReturnDto> dtos = Stream.concat(
             submissionRepo.findBySubmitterId(studentId).stream(),
             groupRepo.findGroupsByPersonId(studentId).stream()
                 .flatMap(group -> submissionRepo.findBySubmitterId(group.getId()).stream())
         )
+        .filter(submission -> assignmentAuthorizationService.canSeeSubmission(currentUser, submission))
         .map(AssignmentSubmissionReturnDto::new)
         .toList();
 
@@ -206,14 +217,15 @@ public class AssignmentSubmissionAPIController {
         // }
 
         if (assignment != null) {
-            if (!hasSubmissionType(submissionInfo.content, assignment)) {
+            Map<String, Object> content = withoutUploadKeys(submissionInfo.content);
+            if (!hasSubmissionType(content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
             }
-            String linkValidationError = validateLinkContent(submissionInfo.content);
+            String linkValidationError = validateLinkContent(content);
             if (linkValidationError != null) {
                 return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
             }
-            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, submissionInfo.content, submissionInfo.comment, Boolean.TRUE.equals(submissionInfo.isLate));
+            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, content, submissionInfo.comment, Boolean.TRUE.equals(submissionInfo.isLate));
             submission.setTechnicalExcellence(submissionInfo.technicalExcellence);
             submission.setCommunication(submissionInfo.communication);
             submission.setWorkHabits(submissionInfo.workHabits);
@@ -285,15 +297,16 @@ public class AssignmentSubmissionAPIController {
             ResponseEntity<?> authorError = validateSubmissionAuthor(userDetails, submitter);
             if (authorError != null) return authorError;
 
-            if (!hasSubmissionType(requestData.content, assignment)) {
+            Map<String, Object> content = withoutUploadKeys(requestData.content);
+            if (!hasSubmissionType(content, assignment)) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Submission content type does not match the assignment type"));
             }
-            String linkValidationError = validateLinkContent(requestData.content);
+            String linkValidationError = validateLinkContent(content);
             if (linkValidationError != null) {
                 return ResponseEntity.badRequest().body(Map.of("error", linkValidationError));
             }
 
-            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, requestData.content, requestData.comment, Boolean.TRUE.equals(requestData.isLate));
+            AssignmentSubmission submission = new AssignmentSubmission(assignment, submitter, content, requestData.comment, Boolean.TRUE.equals(requestData.isLate));
             submission.setTechnicalExcellence(requestData.technicalExcellence);
             submission.setCommunication(requestData.communication);
             submission.setWorkHabits(requestData.workHabits);
@@ -781,19 +794,27 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Assign persons as graders to a specific submission.
+     * Assign persons as graders to a specific submission. Only teachers, admins and the
+     * assignment's creators choose graders (AssignmentAuthorizationService.canChooseGraders).
      * @param id the ID of the submission to which graders are being assigned
      * @param personIds a list of person IDs to be assigned as graders
      * @return a ResponseEntity indicating success or failure
      */
     @PostMapping("/{id}/assigned-graders")
-    public ResponseEntity<?> assignGradersToSubmission(@PathVariable Long id, @RequestBody List<Long> personIds) {
+    @Transactional // open-in-view is off, and the check reads the assignment's creators
+    public ResponseEntity<?> assignGradersToSubmission(@PathVariable Long id, @RequestBody List<Long> personIds,
+            @AuthenticationPrincipal UserDetails userDetails) {
         Optional<AssignmentSubmission> submissionOptional = submissionRepo.findById(id);
         if (!submissionOptional.isPresent()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("Submission not found");
         }
 
         AssignmentSubmission submission = submissionOptional.get();
+        Person currentUser = getAuthenticatedPerson(userDetails);
+        if (!assignmentAuthorizationService.canChooseGraders(currentUser, submission.getAssignment())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body("Only a teacher, an admin or the assignment's creator can choose its graders");
+        }
         List<Person> persons = personRepo.findAllById(personIds);
 
         submission.setAssignedGraders(persons);
@@ -828,14 +849,16 @@ public class AssignmentSubmissionAPIController {
     }
 
     /**
-     * Extract all submissions for a specific assignment.
+     * Extract an assignment's submissions, only the ones the caller may see
+     * (AssignmentAuthorizationService.canSeeSubmission).
      * 
      * @param assignmentId the ID of the assignment whose submissions are to be extracted
      * @return a ResponseEntity containing a list of all submissions for the assignment
      */
     @GetMapping("/extract/{assignmentId}")
     @Transactional
-    public ResponseEntity<?> extractSubmissionsByAssignment(@PathVariable Long assignmentId) {
+    public ResponseEntity<?> extractSubmissionsByAssignment(@PathVariable Long assignmentId,
+            @AuthenticationPrincipal UserDetails userDetails) {
         Assignment assignment = assignmentRepo.findById(assignmentId).orElse(null);
         if (assignment == null) {
             return new ResponseEntity<>(
@@ -844,8 +867,10 @@ public class AssignmentSubmissionAPIController {
             );
         }
 
+        Person currentUser = getAuthenticatedPerson(userDetails);
         List<AssignmentSubmission> submissions = submissionRepo.findByAssignmentId(assignmentId);
         List<AssignmentSubmissionReturnDto> submissionDtos = submissions.stream()
+            .filter(submission -> assignmentAuthorizationService.canSeeSubmission(currentUser, submission))
             .map(AssignmentSubmissionReturnDto::new)
             .collect(Collectors.toList());
 
@@ -959,6 +984,16 @@ public class AssignmentSubmissionAPIController {
         }
         return new ResponseEntity<>(new AssignmentSubmissionReturnDto(saved.submission()),
                 saved.replaced() ? HttpStatus.OK : HttpStatus.CREATED);
+    }
+
+    /** The client's content without the upload-only keys, as a copy (the request's map may be immutable). */
+    static Map<String, Object> withoutUploadKeys(Map<String, Object> content) {
+        if (content == null) {
+            return null;
+        }
+        Map<String, Object> kept = new java.util.LinkedHashMap<>(content);
+        kept.keySet().removeAll(UPLOAD_ONLY_KEYS);
+        return kept;
     }
 
     private Person getAuthenticatedPerson(UserDetails userDetails) {

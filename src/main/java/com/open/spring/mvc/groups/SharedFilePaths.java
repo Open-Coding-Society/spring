@@ -5,9 +5,10 @@ package com.open.spring.mvc.groups;
  * place in that folder ("project/src/Main.java"), so a path may have folders, but it always
  * stays inside the group's shared-files folder: no "..", no "." and no empty folder names,
  * nothing absolute, no backslashes and no control characters. A path is refused rather than
- * rewritten, so what a member sees in the chat is exactly what was stored.
+ * rewritten, so what a member sees in the chat is exactly what was stored. /api/files
+ * (UserFileAccess) checks its names with the same rule.
  */
-final class SharedFilePaths {
+public final class SharedFilePaths {
     static final int MAX_PATH_LENGTH = 512;
     static final int MAX_NAME_LENGTH = 255;
 
@@ -15,7 +16,7 @@ final class SharedFilePaths {
     }
 
     /** The path as given when it is a safe place to store a file, otherwise null. */
-    static String clean(String path) {
+    public static String clean(String path) {
         if (path == null || path.isBlank() || path.length() > MAX_PATH_LENGTH) {
             return null;
         }

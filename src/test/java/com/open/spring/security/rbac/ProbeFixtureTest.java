@@ -43,13 +43,13 @@ class ProbeFixtureTest {
 
     @Test
     void anOpenRequestIsReachedByEveryKindOfCaller() {
-        only(asked("GET", "/api/open/x"), "ANONYMOUS", "INVALID_TOKEN", "EXPIRED_TOKEN", "NO_ROLE", "USER", "STUDENT", "MENTOR", "TEACHER", "ADMIN", "ASSIGNMENT_SYNC");
+        only(asked("GET", "/api/open/x"), "ANONYMOUS", "INVALID_TOKEN", "EXPIRED_TOKEN", "NO_ROLE", "USER", "STUDENT", "MENTOR", "TEACHER", "ADMIN", "ASSIGNMENT_SYNC", "CALLS_WEBHOOK");
     }
 
     @Test
     void aSignedInRequestIsReachedByAnyAccountEvenOneWithNoRole() {
         Map<Caller, String> answers = asked("GET", "/api/signed/x");
-        only(answers, "NO_ROLE", "USER", "STUDENT", "MENTOR", "TEACHER", "ADMIN", "ASSIGNMENT_SYNC");
+        only(answers, "NO_ROLE", "USER", "STUDENT", "MENTOR", "TEACHER", "ADMIN", "ASSIGNMENT_SYNC", "CALLS_WEBHOOK");
         assertEquals("401", answers.get(Caller.ANONYMOUS));
     }
 
@@ -84,7 +84,7 @@ class ProbeFixtureTest {
         Map<Caller, String> answers = asked("GET", "/page/anything");
         assertEquals("redirect:/login", answers.get(Caller.ANONYMOUS));
         assertEquals("redirect:/login", answers.get(Caller.EXPIRED_TOKEN));
-        only(answers, "NO_ROLE", "USER", "STUDENT", "MENTOR", "TEACHER", "ADMIN", "ASSIGNMENT_SYNC");
+        only(answers, "NO_ROLE", "USER", "STUDENT", "MENTOR", "TEACHER", "ADMIN", "ASSIGNMENT_SYNC", "CALLS_WEBHOOK");
     }
 
     @Test
@@ -96,7 +96,7 @@ class ProbeFixtureTest {
 
     @Test
     void anOpenPageIsOpenOnTheMvcChain() {
-        only(asked("GET", "/page/open"), "ANONYMOUS", "INVALID_TOKEN", "EXPIRED_TOKEN", "NO_ROLE", "USER", "STUDENT", "MENTOR", "TEACHER", "ADMIN", "ASSIGNMENT_SYNC");
+        only(asked("GET", "/page/open"), "ANONYMOUS", "INVALID_TOKEN", "EXPIRED_TOKEN", "NO_ROLE", "USER", "STUDENT", "MENTOR", "TEACHER", "ADMIN", "ASSIGNMENT_SYNC", "CALLS_WEBHOOK");
     }
 
     @Test

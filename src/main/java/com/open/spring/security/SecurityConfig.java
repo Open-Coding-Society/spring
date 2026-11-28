@@ -3,6 +3,7 @@ package com.open.spring.security;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -19,6 +20,9 @@ import org.springframework.security.web.util.matcher.RegexRequestMatcher;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import com.open.spring.mvc.calls.CallsProperties;
+import com.open.spring.mvc.calls.LiveKitWebhookAuthenticationFilter;
 
 import jakarta.servlet.http.HttpServletResponse;
 
@@ -67,6 +71,10 @@ public class SecurityConfig {
 
     @Autowired
     private RateLimitFilter rateLimitFilter;
+
+    // A provider, so this config also starts where there are no calls beans (test slices, the RBAC probe).
+    @Autowired
+    private ObjectProvider<CallsProperties> callsProperties;
 
     @Bean
     @Order(1)
@@ -249,9 +257,10 @@ public class SecurityConfig {
                         // ================================================
 
                         // ========== VIDEO CALL WEBHOOK ==========
-                        // LiveKit's server reports who joined and left a call. It has no login cookie, so
-                        // CallWebhookController checks LiveKit's signature over the body instead.
-                        .requestMatchers(HttpMethod.POST, "/api/calls/webhook").permitAll()
+                        // LiveKit's server reports who joined and left a call. It has no account, so
+                        // LiveKitWebhookAuthenticationFilter gives a request that carries LiveKit's signature
+                        // this role, which no account holds. CallWebhookController checks the signature again.
+                        .requestMatchers(HttpMethod.POST, "/api/calls/webhook").hasAuthority("ROLE_CALLS_WEBHOOK")
                         // ========================================
 
                         // ========== DEFAULT: ALL OTHER API ENDPOINTS ==========
@@ -273,6 +282,9 @@ public class SecurityConfig {
 
                 // Session related configuration
                 .addFilterBefore(jwtRequestFilter, UsernamePasswordAuthenticationFilter.class)
+                // LiveKit's webhook signs in by its signature, before the JWT filter, which signs in only
+                // a request nothing has signed in yet
+                .addFilterBefore(new LiveKitWebhookAuthenticationFilter(callsProperties), JwtRequestFilter.class)
                 // Rate limit after the JWT filter so logged-in users are limited per user, not per IP
                 .addFilterAfter(rateLimitFilter, JwtRequestFilter.class);
 
@@ -317,7 +329,7 @@ public class SecurityConfig {
         policy.put("/api/imports/**", "ROLE_ADMIN");
         policy.put("GET /api/ui-builder/published", "permitAll");
         policy.put("GET /api/ui-builder/published/*", "permitAll");
-        policy.put("POST /api/calls/webhook", "permitAll");
+        policy.put("POST /api/calls/webhook", "ROLE_CALLS_WEBHOOK");
         policy.put("/api/**", "ROLE_USER|ROLE_ADMIN|ROLE_TEACHER|ROLE_STUDENT");
         return Map.copyOf(policy);
     }

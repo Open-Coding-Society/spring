@@ -11,9 +11,10 @@ import org.springframework.web.bind.annotation.RestController;
 import jakarta.servlet.http.HttpServletRequest;
 
 /**
- * POST /api/calls/webhook: LiveKit's reports of who joined and left. LiveKit has no login cookie
- * (SecurityConfig permits this one route), so every request must carry LiveKit's signature over
- * its exact body. The answer is 200 at once; pausing anyone happens on CallSupervisor's thread.
+ * POST /api/calls/webhook: LiveKit's reports of who joined and left. LiveKit has no account, so
+ * SecurityConfig lets in only a request LiveKitWebhookAuthenticationFilter signed in by LiveKit's
+ * signature over its exact body, and this controller checks that signature again. The answer is
+ * 200 at once; pausing anyone happens on CallSupervisor's thread.
  */
 @RestController
 public class CallWebhookController {
@@ -45,7 +46,7 @@ public class CallWebhookController {
         return ResponseEntity.ok().build();
     }
 
-    // Anyone can post here before the signature is checked, so read no more than LiveKit would send.
+    // A second check behind LiveKitWebhookAuthenticationFilter's, so read no more than LiveKit would send.
     private static byte[] readAtMost(HttpServletRequest request, int limit) throws IOException {
         if (request.getContentLengthLong() > limit) {
             throw new CallException(HttpStatus.PAYLOAD_TOO_LARGE, "body_too_large");

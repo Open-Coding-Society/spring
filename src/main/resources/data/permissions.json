@@ -2,6 +2,7 @@
   "role_names" : [
     "ROLE_ADMIN",
     "ROLE_ASSIGNMENT_SYNC",
+    "ROLE_CALLS_WEBHOOK",
     "ROLE_MENTOR",
     "ROLE_STUDENT",
     "ROLE_TEACHER",
@@ -14,7 +15,6 @@
       "owner" : "misc",
       "requests" : [
         "POST /api/assignment-submissions/upload",
-        "POST /api/calls/webhook",
         "POST /api/cs-pathway/setup-report/{pairingCode}",
         "POST /api/face/register/public",
         "GET /api/grades/read-gist/{id}",
@@ -221,6 +221,14 @@
         "GET /mvc/person/update/{id}",
         "POST /mvc/quests/create",
         "POST /mvc/quests/delete/{id}"
+      ]
+    },
+    {
+      "roles" : [
+        "ROLE_CALLS_WEBHOOK"
+      ],
+      "requests" : [
+        "POST /api/calls/webhook"
       ]
     },
     {

@@ -24,7 +24,8 @@ final class Reading {
     static final String ANONYMOUS = "anonymous";
     static final String NO_ROLE = "no_role";
     /** Every role the application's code uses. */
-    static final List<String> ROLES = List.of("ROLE_ADMIN", "ROLE_ASSIGNMENT_SYNC", "ROLE_MENTOR", "ROLE_STUDENT", "ROLE_TEACHER", "ROLE_USER");
+    static final List<String> ROLES = List.of("ROLE_ADMIN", "ROLE_ASSIGNMENT_SYNC", "ROLE_CALLS_WEBHOOK", "ROLE_MENTOR",
+            "ROLE_STUDENT", "ROLE_TEACHER", "ROLE_USER");
 
     private static final Pattern CALL = Pattern.compile("^(hasRole|hasAnyRole|hasAuthority|hasAnyAuthority)\\(\\s*((?:'[^']*'|\"[^\"]*\")(?:\\s*,\\s*(?:'[^']*'|\"[^\"]*\"))*)\\s*\\)$");
     private static final Pattern QUOTED = Pattern.compile("'([^']*)'|\"([^\"]*)\"");
