@@ -79,6 +79,11 @@ public class S3FileHandler implements FileHandler {
         this.s3Client = builder.build();
     }
 
+    /** Whether this server has S3 settings (AWS credentials, region and bucket). Without them nothing is stored. */
+    public boolean isConfigured() {
+        return s3Client != null;
+    }
+
     @Override
     public String uploadFile(String base64Data, String filename, String uid) {
         if (s3Client == null) {
@@ -103,6 +108,23 @@ public class S3FileHandler implements FileHandler {
             e.printStackTrace();
             return null;
         }
+    }
+
+    /**
+     * Like uploadFile, but a write that fails throws instead of answering null, so a caller can
+     * tell S3 being unavailable for a moment (a throttle, a 5xx, no connection) from a request
+     * S3 refused.
+     */
+    public String uploadFileOrThrow(String base64Data, String filename, String uid) {
+        if (s3Client == null) {
+            throw new IllegalStateException("S3 client is not configured");
+        }
+        s3Client.putObject(PutObjectRequest.builder()
+                        .bucket(bucketName)
+                        .key(generateKey(uid, filename))
+                        .build(),
+                RequestBody.fromBytes(Base64.getDecoder().decode(base64Data)));
+        return filename;
     }
 
     @Override
@@ -259,6 +281,31 @@ public class S3FileHandler implements FileHandler {
         } catch (S3Exception e) {
             if (e.statusCode() == 404) {
                 return false;
+            }
+            throw e;
+        }
+    }
+
+    /**
+     * Like decodeFile, but only "not found" (404) reads as nothing stored: any other failure to
+     * read (a throttle, a 5xx, no connection) throws. For a caller that writes back what it read,
+     * a read that failed is not an empty file. With no S3 client there is nothing to read and
+     * nothing can be written, so that reads as nothing stored, as in decodeFile.
+     */
+    public String decodeFileOrThrow(String uid, String filename) {
+        if (s3Client == null) {
+            log.warn("S3 download attempted but S3 client is not configured.");
+            return null;
+        }
+        try {
+            ResponseBytes<GetObjectResponse> objectBytes = s3Client.getObjectAsBytes(GetObjectRequest.builder()
+                    .bucket(bucketName)
+                    .key(generateKey(uid, filename))
+                    .build());
+            return Base64.getEncoder().encodeToString(objectBytes.asByteArray());
+        } catch (S3Exception e) {
+            if (e.statusCode() == 404) {
+                return null;
             }
             throw e;
         }

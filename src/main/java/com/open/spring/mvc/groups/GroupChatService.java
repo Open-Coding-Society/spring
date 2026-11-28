@@ -9,6 +9,8 @@ import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
@@ -21,6 +23,7 @@ import com.open.spring.mvc.S3uploads.S3FileHandler;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
@@ -31,9 +34,17 @@ public class GroupChatService {
     private static final String MESSAGES_FILE = "messages-images/messages.jsonl";
     private static final String SHARED_FILES_PREFIX = "shared-files/";
     private static final String SHARED_FILES_META = "shared-files-meta.json";
+    // S3's error code when a connection was too slow: a 400, but the AWS SDK retries it like a 5xx.
+    private static final String S3_REQUEST_TIMEOUT = "RequestTimeout";
 
     private final S3FileHandler s3FileHandler;
     private final ObjectMapper objectMapper;
+
+    // One lock per group for its messages file. Sending, editing and deleting each read the
+    // whole file, change it and write it back, so two at once would both change the same old
+    // copy and the later write would drop the other's change. This keeps them apart within
+    // this server only; several servers would need S3's conditional writes instead.
+    private final Map<String, Object> messageLocks = new ConcurrentHashMap<>();
 
     // One lock per group for the "shared by" sidecar, which is read, changed and written
     // back on every upload: a folder shared from the page uploads several files at once,
@@ -59,14 +70,29 @@ public class GroupChatService {
         s3FileHandler.uploadFile(emptyBase64, SHARED_FILES_PREFIX, groupName);
     }
 
+    /**
+     * Creates the group's empty messages file and shared-files/ folder if they're missing.
+     * Strict for the messages file: only S3's 404 means missing, and a check that failed
+     * throws without writing, since an empty file written over the real one would erase the
+     * group's history.
+     */
     public void ensureGroupStorageExists(String groupName) {
-        // Check if messages.jsonl exists, if not, create it
-        if (!s3FileHandler.fileExists(groupName, MESSAGES_FILE)) {
-            String emptyBase64 = Base64.getEncoder().encodeToString(new byte[0]);
-            s3FileHandler.uploadFile(emptyBase64, MESSAGES_FILE, groupName);
+        // Without S3 settings nothing is stored, so there's nothing to check.
+        if (!s3FileHandler.isConfigured()) {
+            return;
         }
 
-        // Check if shared-files/ folder exists, if not, create it
+        // Check if messages.jsonl exists, if not, create it. Under the group's message lock,
+        // so a message sent between the check and the write isn't lost under the empty file.
+        synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
+            if (!s3FileHandler.fileExistsOrThrow(groupName, MESSAGES_FILE)) {
+                String emptyBase64 = Base64.getEncoder().encodeToString(new byte[0]);
+                s3FileHandler.uploadFile(emptyBase64, MESSAGES_FILE, groupName);
+            }
+        }
+
+        // Check if shared-files/ folder exists, if not, create it. Its placeholder is empty,
+        // so writing it again loses nothing.
         if (!s3FileHandler.fileExists(groupName, SHARED_FILES_PREFIX)) {
             String emptyBase64 = Base64.getEncoder().encodeToString(new byte[0]);
             s3FileHandler.uploadFile(emptyBase64, SHARED_FILES_PREFIX, groupName);
@@ -74,7 +100,90 @@ public class GroupChatService {
     }
 
     public List<GroupChatMessage> getMessages(String groupName) {
-        String base64Data = s3FileHandler.decodeFile(groupName, MESSAGES_FILE);
+        return parseMessages(groupName, s3FileHandler.decodeFile(groupName, MESSAGES_FILE));
+    }
+
+    /**
+     * One line of a group's messages file: a message, or a line that didn't read as one, kept
+     * as it was so that saving the file again doesn't drop it.
+     */
+    private record MessagesLine(GroupChatMessage message, String unreadable) {
+        static MessagesLine of(GroupChatMessage message) {
+            return new MessagesLine(message, null);
+        }
+    }
+
+    /**
+     * The group's messages file, line by line, for a send, an edit or a delete, which write the
+     * whole file back. Strict: a read that failed throws rather than reading as an empty chat,
+     * which a send would save over the history and an edit or delete would answer as "not
+     * found". Only S3's 404 means no messages yet. S3 being unavailable for a moment (see
+     * isUnavailable) throws MessagesStorageUnavailableException; anything else goes up as it is.
+     */
+    private List<MessagesLine> readMessagesOrThrow(String groupName) {
+        String base64Data;
+        try {
+            base64Data = s3FileHandler.decodeFileOrThrow(groupName, MESSAGES_FILE);
+        } catch (RuntimeException e) {
+            // Logged for every failure: the route answers a refused read or a bug without logging it.
+            log.warn("Could not read the messages of group {}", groupName, e);
+            if (!isUnavailable(e)) {
+                // S3 refused the request (no permission, a bad key) or a bug here: waiting won't fix that.
+                throw e;
+            }
+            throw new MessagesStorageUnavailableException(e);
+        }
+        return parseLines(groupName, base64Data);
+    }
+
+    /**
+     * Saves the group's whole messages file: each message as JSON, and each line that didn't
+     * read as a message as it was. Strict: a write that failed throws, so a send, an edit or a
+     * delete isn't answered as saved when it wasn't. S3 being unavailable for a moment (see
+     * isUnavailable) throws MessagesStorageUnavailableException; anything else goes up as it is.
+     * Without S3 settings nothing is stored, and the chat still works live.
+     */
+    private void writeMessagesOrThrow(String groupName, List<MessagesLine> lines) {
+        if (!s3FileHandler.isConfigured()) {
+            return;
+        }
+        String jsonl = lines.stream()
+                .map(line -> line.message() != null ? toJson(line.message()) : line.unreadable())
+                .collect(Collectors.joining("\n"));
+        String base64Data = Base64.getEncoder().encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
+        try {
+            s3FileHandler.uploadFileOrThrow(base64Data, MESSAGES_FILE, groupName);
+        } catch (RuntimeException e) {
+            // A write that timed out may still be stored (S3 lost its answer), so a send tried
+            // again can show up twice. That's easier to see and fix than a message lost quietly.
+            log.warn("Could not save the messages of group {}", groupName, e);
+            if (!isUnavailable(e)) {
+                // S3 refused the request (no permission, a bad key) or a bug here: waiting won't fix that.
+                throw e;
+            }
+            throw new MessagesStorageUnavailableException(e);
+        }
+    }
+
+    private List<GroupChatMessage> parseMessages(String groupName, String base64Data) {
+        return messagesOf(parseLines(groupName, base64Data));
+    }
+
+    private static List<GroupChatMessage> messagesOf(List<MessagesLine> lines) {
+        return lines.stream()
+                .map(MessagesLine::message)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toCollection(ArrayList::new));
+    }
+
+    private static GroupChatMessage find(List<MessagesLine> lines, String messageId) {
+        return messagesOf(lines).stream()
+                .filter(m -> messageId.equals(m.getId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<MessagesLine> parseLines(String groupName, String base64Data) {
         if (base64Data == null || base64Data.isBlank()) {
             return new ArrayList<>();
         }
@@ -92,99 +201,76 @@ public class GroupChatService {
             return new ArrayList<>();
         }
 
-        List<GroupChatMessage> messages = new ArrayList<>();
+        List<MessagesLine> lines = new ArrayList<>();
         try (BufferedReader reader = new BufferedReader(new StringReader(jsonl))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 if (line.isBlank()) continue;
                 try {
-                    GroupChatMessage msg = objectMapper.readValue(line, GroupChatMessage.class);
-                    messages.add(msg);
+                    lines.add(MessagesLine.of(objectMapper.readValue(line, GroupChatMessage.class)));
                 } catch (Exception e) {
-                    log.warn("Skipping invalid message line for group {}: {}", groupName, line, e);
+                    // Left out of the chat, but kept in the file: a save writes it back as it is.
+                    log.warn("Keeping an unreadable message line of group {} as it is: {}", groupName, line, e);
+                    lines.add(new MessagesLine(null, line));
                 }
             }
         } catch (Exception e) {
             log.warn("Failed reading messages for group {}", groupName, e);
         }
 
-        return messages;
+        return lines;
     }
 
     public List<GroupChatMessage> addMessage(String groupName, GroupChatMessage message) {
-        List<GroupChatMessage> messages = getMessages(groupName);
-        messages.add(message);
-
-        String jsonl = messages.stream()
-                .map(this::toJson)
-                .collect(Collectors.joining("\n"));
-
-        String base64Data = Base64.getEncoder()
-                .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
-
-        s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
-        return messages;
+        synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
+            List<MessagesLine> lines = readMessagesOrThrow(groupName);
+            lines.add(MessagesLine.of(message));
+            writeMessagesOrThrow(groupName, lines);
+            return messagesOf(lines);
+        }
     }
 
     /**
-     * Returns whether a message with that id was found (and updated) in this group.
-     * Throws {@link SecurityException} unless the authenticated requester's uid matches
-     * the stored author uid. Legacy messages without an author uid cannot be edited.
+     * Edits a message and returns the group's messages as saved, or nothing when no message
+     * with that id is in this group. Throws {@link SecurityException} unless the authenticated
+     * requester's uid matches the stored author uid. Legacy messages without an author uid
+     * cannot be edited.
      */
-    public boolean editMessage(String groupName, String messageId, String newMessage, String requesterUid) {
-        if (messageId == null) return false;
-        List<GroupChatMessage> messages = getMessages(groupName);
-        boolean found = false;
-        for (GroupChatMessage m : messages) {
-            if (messageId.equals(m.getId())) {
-                if (requesterUid == null || !requesterUid.equals(m.getAuthor_uid())) {
-                    throw new SecurityException("Not the message sender");
-                }
-                m.setMessage(newMessage);
-                m.setEdited(true);
-                found = true;
-                break;
+    public Optional<List<GroupChatMessage>> editMessage(String groupName, String messageId, String newMessage, String requesterUid) {
+        if (messageId == null) return Optional.empty();
+        synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
+            List<MessagesLine> lines = readMessagesOrThrow(groupName);
+            GroupChatMessage target = find(lines, messageId);
+            if (target == null) {
+                return Optional.empty();
             }
+            if (requesterUid == null || !requesterUid.equals(target.getAuthor_uid())) {
+                throw new SecurityException("Not the message sender");
+            }
+            target.setMessage(newMessage);
+            target.setEdited(true);
+            writeMessagesOrThrow(groupName, lines);
+            return Optional.of(messagesOf(lines));
         }
-
-        if (found) {
-            String jsonl = messages.stream()
-                    .map(this::toJson)
-                    .collect(Collectors.joining("\n"));
-
-            String base64Data = Base64.getEncoder()
-                    .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
-
-            s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
-        }
-        return found;
     }
 
-    /** Same ownership rule as {@link #editMessage}; throws {@link SecurityException} on mismatch. */
-    public void deleteMessage(String groupName, String messageId, String requesterUid) {
-        if (messageId == null) return;
-        List<GroupChatMessage> messages = getMessages(groupName);
+    /**
+     * Deletes a message and returns whether one with that id was in this group. Same ownership
+     * rule as {@link #editMessage}; throws {@link SecurityException} on mismatch.
+     */
+    public boolean deleteMessage(String groupName, String messageId, String requesterUid) {
+        if (messageId == null) return false;
+        synchronized (messageLocks.computeIfAbsent(groupName, name -> new Object())) {
+            List<MessagesLine> lines = readMessagesOrThrow(groupName);
+            GroupChatMessage target = find(lines, messageId);
+            if (target == null) return false;
+            if (requesterUid == null || !requesterUid.equals(target.getAuthor_uid())) {
+                throw new SecurityException("Not the message sender");
+            }
 
-        GroupChatMessage target = messages.stream()
-                .filter(m -> messageId.equals(m.getId()))
-                .findFirst()
-                .orElse(null);
-        if (target == null) return;
-        if (requesterUid == null || !requesterUid.equals(target.getAuthor_uid())) {
-            throw new SecurityException("Not the message sender");
-        }
-
-        boolean removed = messages.remove(target);
-
-        if (removed) {
-            String jsonl = messages.stream()
-                    .map(this::toJson)
-                    .collect(Collectors.joining("\n"));
-
-            String base64Data = Base64.getEncoder()
-                    .encodeToString(jsonl.getBytes(StandardCharsets.UTF_8));
-
-            s3FileHandler.uploadFile(base64Data, MESSAGES_FILE, groupName);
+            lines.removeIf(line -> line.message() == target);
+            writeMessagesOrThrow(groupName, lines);
+            return true;
         }
     }
 
@@ -253,7 +339,8 @@ public class GroupChatService {
 
     /**
      * Stores a shared file, never over one already there: that throws SharedFileExistsException.
-     * When S3 can't say for now whether the path is taken, it throws SharedFileCheckFailedException.
+     * When S3 is unavailable for a moment, checking the path or writing the file, it throws
+     * SharedFileStorageUnavailableException.
      */
     public String uploadSharedFile(String groupName, String filename, String base64Data, String uploadedBy) {
         List<String> key = List.of(groupName, filename);
@@ -264,10 +351,7 @@ public class GroupChatService {
             if (isAlreadyShared(groupName, filename)) {
                 throw new SharedFileExistsException(filename);
             }
-            String result = s3FileHandler.uploadFile(base64Data, SHARED_FILES_PREFIX + filename, groupName);
-            if (result == null) {
-                return null;
-            }
+            String result = store(groupName, filename, base64Data);
             recordFileMeta(groupName, filename, uploadedBy);
             return result;
         } finally {
@@ -277,20 +361,55 @@ public class GroupChatService {
 
     /**
      * Whether a file is stored at this path. Strict: a check that failed throws, rather than
-     * reading as a free path. S3 out of reach or answering a 5xx is something to wait out, so
-     * that throws SharedFileCheckFailedException; anything else goes up as it is.
+     * reading as a free path. S3 being unavailable throws SharedFileStorageUnavailableException;
+     * anything else goes up as it is.
      */
     private boolean isAlreadyShared(String groupName, String path) {
         try {
             return s3FileHandler.fileExistsOrThrow(groupName, SHARED_FILES_PREFIX + path);
         } catch (SdkClientException | S3Exception e) {
-            if (e instanceof S3Exception answered && answered.statusCode() < 500) {
-                // S3 refused the request (no permission, a bad key): waiting won't fix that.
+            if (!isUnavailable(e)) {
                 throw e;
             }
             log.warn("Could not check whether {} is shared in group {}", path, groupName, e);
-            throw new SharedFileCheckFailedException(path, e);
+            throw new SharedFileStorageUnavailableException(path, e);
         }
+    }
+
+    /**
+     * Writes a shared file's bytes. S3 being unavailable throws
+     * SharedFileStorageUnavailableException; any other failure fails the upload as it always has.
+     */
+    private String store(String groupName, String path, String base64Data) {
+        try {
+            return s3FileHandler.uploadFileOrThrow(base64Data, SHARED_FILES_PREFIX + path, groupName);
+        } catch (RuntimeException e) {
+            // A write that timed out may still be stored (S3 lost its answer). Sharing it again
+            // then gets a 409, which the page handles like any other taken name.
+            log.warn("Could not store {} in group {}", path, groupName, e);
+            if (isUnavailable(e)) {
+                throw new SharedFileStorageUnavailableException(path, e);
+            }
+            throw new IllegalStateException("Upload failed", e);
+        }
+    }
+
+    /**
+     * S3 out of reach (a timeout, no connection), answering a 5xx (a throttle, an outage) or
+     * timing out the request itself (RequestTimeout, which comes as a 400): something to wait
+     * out. Any other 4xx is S3 refusing the request (no permission, a bad key), which waiting
+     * won't fix, and anything else is a fault here.
+     */
+    private static boolean isUnavailable(RuntimeException e) {
+        if (e instanceof SdkClientException) {
+            return true;
+        }
+        if (e instanceof S3Exception answered) {
+            AwsErrorDetails details = answered.awsErrorDetails();
+            return answered.statusCode() >= 500
+                    || (details != null && S3_REQUEST_TIMEOUT.equals(details.errorCode()));
+        }
+        return false;
     }
 
     // ---------------------------------------------------------------------------
@@ -397,8 +516,9 @@ public class GroupChatService {
         try {
             return objectMapper.writeValueAsString(message);
         } catch (Exception e) {
-            log.warn("Failed to serialize message: {}", message, e);
-            return "{}";
+            // Writing "{}" instead would replace the message in the file with nothing.
+            log.warn("Could not write message {} of a group chat", message.getId(), e);
+            throw new IllegalStateException("Could not write message " + message.getId(), e);
         }
     }
 }

@@ -4,14 +4,19 @@ import java.nio.charset.StandardCharsets;
 import java.security.Security;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.http.HttpResponse;
 import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.jsoup.Jsoup;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -49,6 +54,13 @@ public class PushNotificationService {
     private static final Logger log = LoggerFactory.getLogger(PushNotificationService.class);
     private static final int TTL_SECONDS = 60 * 60 * 24; // keep undelivered pushes for a day
     private static final int MAX_BODY_CHARS = 140;
+    // The markers Messages puts in a body for the page to read: a reply's quote, shared files,
+    // a code block, a pin, and the course chats' events and lessons. A phone shouldn't show them.
+    // Pages lists the same names in ANY_MARKER_PATTERN (assets/js/chat/chat-reply.js), so a
+    // marker added there needs adding here too, or its raw text shows up in DM notifications.
+    // No marker Pages writes has a bracket inside it (it escapes or URL-encodes them), so the
+    // payload leaves out "[" as well: that keeps matching linear when a body is full of "[[".
+    private static final Pattern CHAT_MARKER = Pattern.compile("\\[\\[(reply|event|lesson|files|code|pin|unpin):[^\\[\\]]*\\]\\]");
     /** How long an unchanged subscription goes before a re-send refreshes last_used_at. */
     private static final Duration RESEEN_AFTER = Duration.ofDays(1);
 
@@ -174,7 +186,7 @@ public class PushNotificationService {
         }
         Map<String, Object> payload = Map.of(
                 "title", title == null ? "New message" : title,
-                "body", snippet(body),
+                "body", pushText(body),
                 "url", url == null ? "/dm" : url,
                 "tag", tag == null ? "ocs" : tag);
         Long personId = person.getId();
@@ -188,6 +200,17 @@ public class PushNotificationService {
             });
         } else {
             queue.run();
+        }
+    }
+
+    // notifyPerson never throws, and it runs inside the message's transaction, so a body the
+    // text can't be made from still sends the message and its notification, without text.
+    private static String pushText(String body) {
+        try {
+            return snippet(body);
+        } catch (RuntimeException ex) {
+            log.warn("Web push: could not make the notification's text ({})", ex.getMessage());
+            return "";
         }
     }
 
@@ -236,12 +259,47 @@ public class PushNotificationService {
         }
     }
 
+    /**
+     * The notification's text: the message as a reader sees it in the chat, cut to
+     * {@value #MAX_BODY_CHARS} characters. The chat's markers are left out, and the rich
+     * composer's HTML becomes plain text (tags gone, entities decoded, {@code &nbsp;} a space).
+     * If no words are left, the text says what the message did instead, such as "pinned a
+     * message", or just "sent a message".
+     */
     static String snippet(String body) {
-        if (body == null) {
+        if (body == null || body.isBlank()) {
             return "";
         }
-        String oneLine = body.replaceAll("\\s+", " ").trim();
-        return oneLine.length() <= MAX_BODY_CHARS ? oneLine : oneLine.substring(0, MAX_BODY_CHARS - 1) + "…";
+        Set<String> markers = new HashSet<>();
+        Matcher marker = CHAT_MARKER.matcher(body);
+        StringBuilder words = new StringBuilder();
+        while (marker.find()) {
+            markers.add(marker.group(1));
+            marker.appendReplacement(words, " ");
+        }
+        marker.appendTail(words);
+        String text = Jsoup.parse(words.toString()).text().replace('\u00A0', ' ').replaceAll("\\s+", " ").trim();
+        if (text.isEmpty()) {
+            text = onlyMarkers(markers);
+        }
+        return text.length() <= MAX_BODY_CHARS ? text : text.substring(0, MAX_BODY_CHARS - 1) + "…";
+    }
+
+    // What a message that was only markers did, said after the sender's name (the title).
+    private static String onlyMarkers(Set<String> markers) {
+        if (markers.contains("pin")) {
+            return "pinned a message";
+        }
+        if (markers.contains("unpin")) {
+            return "unpinned a message";
+        }
+        if (markers.contains("code")) {
+            return "sent code";
+        }
+        if (markers.contains("files")) {
+            return "shared files";
+        }
+        return "sent a message";
     }
 
     @PreDestroy

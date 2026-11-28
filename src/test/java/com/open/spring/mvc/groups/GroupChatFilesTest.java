@@ -40,7 +40,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.open.spring.mvc.S3uploads.S3FileHandler;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.reactions.MessageReactionService;
 
+import software.amazon.awssdk.awscore.exception.AwsErrorDetails;
 import software.amazon.awssdk.core.exception.SdkClientException;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
@@ -59,6 +61,12 @@ class GroupChatFilesTest {
         public String uploadFile(String base64Data, String filename, String uid) {
             objects.put(uid + "/" + filename, Base64.getDecoder().decode(base64Data));
             return filename;
+        }
+
+        // Stores the same way, so a test that slows uploadFile slows this too.
+        @Override
+        public String uploadFileOrThrow(String base64Data, String filename, String uid) {
+            return uploadFile(base64Data, filename, uid);
         }
 
         @Override
@@ -90,6 +98,36 @@ class GroupChatFilesTest {
         }
     }
 
+    /**
+     * S3 that answers the check but fails the write of a shared file's bytes while `failure` is
+     * set, the way S3FileHandler sees it: uploadFile swallows the failure and answers null, and
+     * uploadFileOrThrow throws it. Other writes, like the "shared by" record, still go through.
+     */
+    static class SharedFileWritesFail extends InMemoryStorage {
+        RuntimeException failure;
+
+        SharedFileWritesFail(RuntimeException failure) {
+            this.failure = failure;
+        }
+
+        private boolean failing(String filename) {
+            return failure != null && filename.startsWith("shared-files/");
+        }
+
+        @Override
+        public String uploadFile(String base64Data, String filename, String uid) {
+            return failing(filename) ? null : super.uploadFile(base64Data, filename, uid);
+        }
+
+        @Override
+        public String uploadFileOrThrow(String base64Data, String filename, String uid) {
+            if (failing(filename)) {
+                throw failure;
+            }
+            return super.uploadFileOrThrow(base64Data, filename, uid);
+        }
+    }
+
     private InMemoryStorage storage;
     private SimpMessagingTemplate messaging;
     private GroupChatApiController controller;
@@ -104,10 +142,10 @@ class GroupChatFilesTest {
         GroupChatService chat = new GroupChatService(storage, new ObjectMapper());
         GroupsJpaRepository groups = mock(GroupsJpaRepository.class);
         messaging = mock(SimpMessagingTemplate.class);
-        GroupChatRealtimeService realtime = new GroupChatRealtimeService(chat, groups, messaging);
+        GroupChatRealtimeService realtime = new GroupChatRealtimeService(chat, groups, messaging, mock(MessageReactionService.class));
         GroupChatReadService reads = new GroupChatReadService(mock(GroupChatReadStateJpaRepository.class), groups, chat);
         PersonJpaRepository people = mock(PersonJpaRepository.class);
-        controller = new GroupChatApiController(chat, realtime, reads, groups, people);
+        controller = new GroupChatApiController(chat, realtime, reads, groups, people, mock(MessageReactionService.class));
 
         Groups group = new Groups();
         group.setName("CSA");
@@ -321,6 +359,67 @@ class GroupChatFilesTest {
 
             assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, upload("notes.md", "Grace's notes").getStatusCode(), fault.toString());
         }
+    }
+
+    @Test
+    void aWriteThatFailsForAMomentIsA503AndSharesNothing() {
+        // The path is free, but S3 throttled the write (503 Slow Down), couldn't be reached, or
+        // timed out the request (its RequestTimeout comes as a 400).
+        List<RuntimeException> failures = List.of(
+                (S3Exception) S3Exception.builder().statusCode(503).message("Slow Down").build(),
+                SdkClientException.create("Unable to execute HTTP request: Read timed out"),
+                (S3Exception) S3Exception.builder().statusCode(400)
+                        .awsErrorDetails(AwsErrorDetails.builder().errorCode("RequestTimeout").build())
+                        .message("Your socket connection to the server was not read from or written to within the timeout period.")
+                        .build());
+        for (RuntimeException failure : failures) {
+            useStorage(new SharedFileWritesFail(failure));
+
+            ResponseEntity<?> response = upload("notes.md", "Grace's notes");
+
+            assertEquals(HttpStatus.SERVICE_UNAVAILABLE, response.getStatusCode(), failure.toString());
+            String retryAfter = response.getHeaders().getFirst(HttpHeaders.RETRY_AFTER);
+            assertTrue(retryAfter != null && retryAfter.matches("[1-9][0-9]*"), "Retry-After: " + retryAfter);
+            @SuppressWarnings("unchecked")
+            Map<String, String> body = (Map<String, String>) response.getBody();
+            assertEquals("notes.md", body.get("filename"));
+            // No file, no "shared by" record, and no frame telling the group a file arrived.
+            assertTrue(storage.objects.isEmpty(), "stored: " + storage.objects.keySet());
+            verify(messaging, never()).convertAndSend(any(String.class), any(Object.class));
+        }
+    }
+
+    @Test
+    void aWriteS3RefusesOrABugIsStillA500() {
+        // S3 refusing the write (no permission, a bad request) or a fault in this server: trying
+        // again won't help, so none is a 503.
+        List<RuntimeException> faults = List.of(
+                new NullPointerException("a bug here, not S3"),
+                (S3Exception) S3Exception.builder().statusCode(403).message("Access Denied").build(),
+                (S3Exception) S3Exception.builder().statusCode(400)
+                        .awsErrorDetails(AwsErrorDetails.builder().errorCode("InvalidRequest").build())
+                        .message("Invalid Request")
+                        .build());
+        for (RuntimeException fault : faults) {
+            useStorage(new SharedFileWritesFail(fault));
+
+            assertEquals(HttpStatus.INTERNAL_SERVER_ERROR, upload("notes.md", "Grace's notes").getStatusCode(), fault.toString());
+        }
+    }
+
+    @Test
+    void aShareThatFailedForAMomentGoesThroughWhenTriedAgain() {
+        // What the 503 promises: once S3 takes writes again, the same share works, instead of
+        // finding the path still held by the upload that failed.
+        SharedFileWritesFail s3 = new SharedFileWritesFail(
+                SdkClientException.create("Unable to execute HTTP request: Connect timed out"));
+        useStorage(s3);
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, upload("notes.md", "Grace's notes").getStatusCode());
+
+        s3.failure = null;
+
+        assertEquals(HttpStatus.OK, upload("notes.md", "Grace's notes").getStatusCode());
+        assertArrayEquals("Grace's notes".getBytes(StandardCharsets.UTF_8), storage.objects.get("CSA/shared-files/notes.md"));
     }
 
     @Test

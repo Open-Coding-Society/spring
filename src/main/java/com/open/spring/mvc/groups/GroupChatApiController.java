@@ -4,6 +4,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.regex.Pattern;
 
 import java.nio.charset.StandardCharsets;
 
@@ -20,6 +21,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -28,6 +30,10 @@ import org.springframework.web.bind.annotation.RestController;
 import com.open.spring.mvc.groups.GroupChatIdentityService.AuthenticatedIdentity;
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.person.PersonJpaRepository;
+import com.open.spring.mvc.reactions.ChatType;
+import com.open.spring.mvc.reactions.MessageReactionService;
+import com.open.spring.mvc.reactions.MessageReactionService.MessageReactions;
+import com.open.spring.mvc.reactions.Reaction;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -38,27 +44,37 @@ import lombok.NoArgsConstructor;
 @CrossOrigin
 public class GroupChatApiController {
 
-    // How long to wait before sharing again when S3 couldn't check a path: a throttle or a
-    // short outage clears in seconds.
-    private static final int SHARE_RETRY_AFTER_SECONDS = 5;
+    // How long to wait before trying again when S3 was unavailable for a moment, checking or
+    // writing a shared file or reading or saving a group's messages: a throttle or a short
+    // outage clears in seconds.
+    private static final int RETRY_AFTER_SECONDS = 5;
+
+    // A saved group message's id is a UUID (GroupChatMessage), written in lowercase. Reactions
+    // don't read the group's S3 file to check that the message exists, so the id at least has to
+    // look like one; an uppercase copy would match some lookups and not others on MySQL.
+    static final Pattern MESSAGE_ID =
+            Pattern.compile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$");
 
     private final GroupChatService groupChatService;
     private final GroupChatRealtimeService realtimeService;
     private final GroupChatReadService readService;
     private final GroupsJpaRepository groupsRepository;
     private final PersonJpaRepository personRepository;
+    private final MessageReactionService reactionService;
 
     public GroupChatApiController(
             GroupChatService groupChatService,
             GroupChatRealtimeService realtimeService,
             GroupChatReadService readService,
             GroupsJpaRepository groupsRepository,
-            PersonJpaRepository personRepository) {
+            PersonJpaRepository personRepository,
+            MessageReactionService reactionService) {
         this.groupChatService = groupChatService;
         this.realtimeService = realtimeService;
         this.readService = readService;
         this.groupsRepository = groupsRepository;
         this.personRepository = personRepository;
+        this.reactionService = reactionService;
     }
 
     @Data
@@ -190,15 +206,16 @@ public class GroupChatApiController {
             return new ResponseEntity<>("name and message are required", HttpStatus.BAD_REQUEST);
         }
 
+        // Answered from what was saved: a second read could fail and answer an empty chat.
+        List<GroupChatMessage> saved;
         try {
-            realtimeService.publishMessage(groupId, message.getMessage(), message.getImage(), identity);
+            saved = realtimeService.publishMessage(groupId, message.getMessage(), message.getImage(), identity);
+        } catch (MessagesStorageUnavailableException ex) {
+            return tryAgainLater(ex);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
-
-        String groupName = groupOpt.get().getName();
-        List<GroupChatMessage> updated = groupChatService.getMessages(groupName);
-        return new ResponseEntity<>(updated, HttpStatus.OK);
+        return new ResponseEntity<>(saved, HttpStatus.OK);
     }
 
     @PatchMapping("/{groupId}/messages/{messageId}")
@@ -220,21 +237,20 @@ public class GroupChatApiController {
             return new ResponseEntity<>("message is required", HttpStatus.BAD_REQUEST);
         }
 
-        boolean updated;
+        Optional<List<GroupChatMessage>> saved;
         try {
-            updated = realtimeService.editMessage(groupId, messageId, request.getMessage(), identity.getUid());
+            saved = realtimeService.editMessage(groupId, messageId, request.getMessage(), identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        } catch (MessagesStorageUnavailableException ex) {
+            return tryAgainLater(ex);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
-        if (!updated) {
+        if (saved.isEmpty()) {
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
         }
-
-        String groupName = groupOpt.get().getName();
-        List<GroupChatMessage> messages = groupChatService.getMessages(groupName);
-        return new ResponseEntity<>(messages, HttpStatus.OK);
+        return new ResponseEntity<>(saved.get(), HttpStatus.OK);
     }
 
     @DeleteMapping("/{groupId}/messages/{messageId}")
@@ -251,15 +267,85 @@ public class GroupChatApiController {
             return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
         }
 
+        boolean deleted;
         try {
-            realtimeService.deleteMessage(groupId, messageId, identity.getUid());
+            deleted = realtimeService.deleteMessage(groupId, messageId, identity.getUid());
         } catch (SecurityException ex) {
             return new ResponseEntity<>(HttpStatus.FORBIDDEN);
+        } catch (MessagesStorageUnavailableException ex) {
+            return tryAgainLater(ex);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>(ex.getMessage(), HttpStatus.BAD_REQUEST);
         }
-
+        if (!deleted) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
         return new ResponseEntity<>(HttpStatus.OK);
+    }
+
+    /**
+     * S3 couldn't read or save the group's messages, so the change isn't broadcast (a save that
+     * timed out may still be stored). That's S3 being unavailable for a moment, not a bug here:
+     * a 503, and when to try again.
+     */
+    private static ResponseEntity<String> tryAgainLater(MessagesStorageUnavailableException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .header(HttpHeaders.RETRY_AFTER, String.valueOf(RETRY_AFTER_SECONDS))
+                .body(ex.getMessage());
+    }
+
+    /**
+     * Every reaction in the group's chat, by message id: what the page draws when it opens the
+     * chat. Like posting, it needs a signed-in person but not membership.
+     */
+    @GetMapping("/{groupId}/reactions")
+    public ResponseEntity<?> getReactions(@PathVariable Long groupId) {
+        if (currentPerson() == null) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+        if (groupsRepository.findById(groupId).isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        return new ResponseEntity<>(reactionService.forChat(ChatType.GROUP, groupId), HttpStatus.OK);
+    }
+
+    /** Adds the caller's reaction, by its lowercase key such as "like", and answers with the message's reactions. */
+    @PutMapping("/{groupId}/messages/{messageId}/reactions/{reaction}")
+    public ResponseEntity<?> addReaction(
+            @PathVariable Long groupId,
+            @PathVariable String messageId,
+            @PathVariable String reaction) {
+        return setReaction(groupId, messageId, reaction, true);
+    }
+
+    /** Removes the caller's reaction; removing one that isn't there still answers 200. */
+    @DeleteMapping("/{groupId}/messages/{messageId}/reactions/{reaction}")
+    public ResponseEntity<?> removeReaction(
+            @PathVariable Long groupId,
+            @PathVariable String messageId,
+            @PathVariable String reaction) {
+        return setReaction(groupId, messageId, reaction, false);
+    }
+
+    private ResponseEntity<?> setReaction(Long groupId, String messageId, String key, boolean on) {
+        Person person = currentPerson();
+        if (person == null) {
+            return new ResponseEntity<>(HttpStatus.UNAUTHORIZED);
+        }
+        if (groupsRepository.findById(groupId).isEmpty()) {
+            return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+        Optional<Reaction> reaction = Reaction.fromKey(key);
+        if (reaction.isEmpty()) {
+            return new ResponseEntity<>("unknown reaction", HttpStatus.BAD_REQUEST);
+        }
+        if (messageId == null || !MESSAGE_ID.matcher(messageId).matches()) {
+            return new ResponseEntity<>("messageId is not a message id", HttpStatus.BAD_REQUEST);
+        }
+
+        List<MessageReactionService.ReactionSummary> reactions =
+                realtimeService.setReaction(groupId, person, messageId, reaction.get(), on);
+        return new ResponseEntity<>(new MessageReactions(messageId, reactions), HttpStatus.OK);
     }
 
     /**
@@ -399,14 +485,14 @@ public class GroupChatApiController {
             response.put("message", ex.getMessage());
             response.put("filename", ex.getPath());
             return new ResponseEntity<>(response, HttpStatus.CONFLICT);
-        } catch (SharedFileCheckFailedException ex) {
-            // S3 couldn't say whether the path is taken, so nothing was written. That's S3 being
-            // unavailable for a moment, not a bug here: a 503, and when to try again.
+        } catch (SharedFileStorageUnavailableException ex) {
+            // S3 was unavailable for a moment, checking the path or writing the file, so the file
+            // isn't shared. That's not a bug here: a 503, and when to try again.
             Map<String, String> response = new HashMap<>();
             response.put("message", ex.getMessage());
             response.put("filename", ex.getPath());
             return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
-                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(SHARE_RETRY_AFTER_SECONDS))
+                    .header(HttpHeaders.RETRY_AFTER, String.valueOf(RETRY_AFTER_SECONDS))
                     .body(response);
         } catch (RuntimeException ex) {
             return new ResponseEntity<>("Upload failed", HttpStatus.INTERNAL_SERVER_ERROR);

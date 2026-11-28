@@ -1,14 +1,21 @@
 package com.open.spring.mvc.groups;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import com.open.spring.mvc.groups.GroupChatIdentityService.AuthenticatedIdentity;
+import com.open.spring.mvc.person.Person;
+import com.open.spring.mvc.reactions.ChatType;
+import com.open.spring.mvc.reactions.MessageReactionService;
+import com.open.spring.mvc.reactions.Reaction;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Service to handle the real-time publishing of group chat messages and presence events.
@@ -16,6 +23,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class GroupChatRealtimeService {
 
     public static final String GROUP_TOPIC_PREFIX = "/topic/group/";
@@ -23,8 +31,10 @@ public class GroupChatRealtimeService {
     private final GroupChatService groupChatService;
     private final GroupsJpaRepository groupsRepository;
     private final SimpMessagingTemplate messagingTemplate;
+    private final MessageReactionService reactionService;
 
-    public GroupChatEvent publishMessage(Long groupId, String message, String image, AuthenticatedIdentity identity) {
+    /** Saves the message, tells the group, and returns the group's messages as saved. */
+    public List<GroupChatMessage> publishMessage(Long groupId, String message, String image, AuthenticatedIdentity identity) {
         Groups group = getGroupOrThrow(groupId);
 
         if ((message == null || message.isBlank()) && (image == null || image.isBlank())) {
@@ -34,7 +44,7 @@ public class GroupChatRealtimeService {
         String date = Instant.now().toString();
 
         GroupChatMessage persisted = new GroupChatMessage(identity.getDisplayName(), identity.getUid(), message, date, image);
-        groupChatService.addMessage(group.getName(), persisted);
+        List<GroupChatMessage> saved = groupChatService.addMessage(group.getName(), persisted);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("sendMessageServer")
@@ -47,18 +57,19 @@ public class GroupChatRealtimeService {
                 .build();
 
         broadcastToGroup(groupId, event);
-        return event;
+        return saved;
     }
 
     /**
-     * Returns whether the message existed (and was broadcast as edited). Throws
-     * {@link SecurityException} if the authenticated requester's uid is not the author uid.
+     * Edits the message, tells the group, and returns the group's messages as saved, or nothing
+     * when the message isn't in this group. Throws {@link SecurityException} if the
+     * authenticated requester's uid is not the author uid.
      */
-    public boolean editMessage(Long groupId, String messageId, String newMessage, String requesterUid) {
+    public Optional<List<GroupChatMessage>> editMessage(Long groupId, String messageId, String newMessage, String requesterUid) {
         Groups group = getGroupOrThrow(groupId);
-        boolean updated = groupChatService.editMessage(group.getName(), messageId, newMessage, requesterUid);
-        if (!updated) {
-            return false;
+        Optional<List<GroupChatMessage>> saved = groupChatService.editMessage(group.getName(), messageId, newMessage, requesterUid);
+        if (saved.isEmpty()) {
+            return saved;
         }
 
         GroupChatEvent event = GroupChatEvent.builder()
@@ -71,13 +82,28 @@ public class GroupChatRealtimeService {
                 .build();
 
         broadcastToGroup(groupId, event);
-        return true;
+        return saved;
     }
 
-    /** Throws {@link SecurityException} if the authenticated requester didn't send it. */
-    public void deleteMessage(Long groupId, String messageId, String requesterUid) {
+    /**
+     * Deletes the message and its reactions and tells the group, or returns false and tells no
+     * one when the message isn't in this group. Throws {@link SecurityException} if the
+     * authenticated requester didn't send it.
+     */
+    public boolean deleteMessage(Long groupId, String messageId, String requesterUid) {
         Groups group = getGroupOrThrow(groupId);
-        groupChatService.deleteMessage(group.getName(), messageId, requesterUid);
+        if (!groupChatService.deleteMessage(group.getName(), messageId, requesterUid)) {
+            // Telling the group about a message that isn't saved would take it off everyone's screen.
+            return false;
+        }
+        try {
+            reactionService.removeAllFor(ChatType.GROUP, groupId, messageId);
+        } catch (DataAccessException e) {
+            // The message is already gone from S3, so the group still has to hear about it, and a
+            // retry would find nothing to delete. Its reactions stay in the table, where no message
+            // shows them.
+            log.warn("Could not remove the reactions of deleted message {} in group {}", messageId, groupId, e);
+        }
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("deleteMessageServer")
@@ -87,6 +113,35 @@ public class GroupChatRealtimeService {
                 .build();
 
         broadcastToGroup(groupId, event);
+        return true;
+    }
+
+    /**
+     * Adds ({@code on}) or removes {@code person}'s reaction to a message, then tells the
+     * group's topic with a reactionsServer frame. Reactions are kept in the database, never in
+     * the group's S3 message file, so a reaction can't change or drop a message.
+     */
+    public List<MessageReactionService.ReactionSummary> setReaction(
+            Long groupId, Person person, String messageId, Reaction reaction, boolean on) {
+        getGroupOrThrow(groupId);
+        if (on) {
+            reactionService.add(ChatType.GROUP, groupId, messageId, person, reaction);
+        } else {
+            reactionService.remove(ChatType.GROUP, groupId, messageId, person, reaction);
+        }
+        List<MessageReactionService.ReactionSummary> reactions =
+                reactionService.forMessage(ChatType.GROUP, groupId, messageId);
+
+        GroupChatEvent event = GroupChatEvent.builder()
+                .context("reactionsServer")
+                .groupId(groupId)
+                .messageId(messageId)
+                .reactions(reactions)
+                .date(Instant.now().toString())
+                .build();
+
+        broadcastToGroup(groupId, event);
+        return reactions;
     }
 
     /**
@@ -101,10 +156,7 @@ public class GroupChatRealtimeService {
             throw new IllegalArgumentException("Invalid file path");
         }
 
-        String uploadResult = groupChatService.uploadSharedFile(group.getName(), path, base64Data, sender);
-        if (uploadResult == null) {
-            throw new IllegalStateException("Upload failed");
-        }
+        groupChatService.uploadSharedFile(group.getName(), path, base64Data, sender);
 
         GroupChatEvent event = GroupChatEvent.builder()
                 .context("sendFileServer")

@@ -54,14 +54,15 @@ class GroupChatMessageJsonTest {
     @Test
     void addingAMessageKeepsTheSenderOfOlderLines() throws Exception {
         S3FileHandler s3 = mock(S3FileHandler.class);
-        when(s3.decodeFile("CSA", "messages-images/messages.jsonl")).thenReturn(
+        when(s3.isConfigured()).thenReturn(true);
+        when(s3.decodeFileOrThrow("CSA", "messages-images/messages.jsonl")).thenReturn(
                 Base64.getEncoder().encodeToString(SAVED_BEFORE_RENAME.getBytes(StandardCharsets.UTF_8)));
         GroupChatService service = new GroupChatService(s3, objectMapper);
 
         service.addMessage("CSA", new GroupChatMessage("Grace Hopper", "hop", "hello", "2026-10-30T17:00:00Z", null));
 
         ArgumentCaptor<String> uploaded = ArgumentCaptor.forClass(String.class);
-        verify(s3).uploadFile(uploaded.capture(), eq("messages-images/messages.jsonl"), eq("CSA"));
+        verify(s3).uploadFileOrThrow(uploaded.capture(), eq("messages-images/messages.jsonl"), eq("CSA"));
         String[] lines = new String(Base64.getDecoder().decode(uploaded.getValue()), StandardCharsets.UTF_8).split("\n");
         assertEquals("Ada Lovelace", objectMapper.readTree(lines[0]).get("author").asText());
         assertEquals("Grace Hopper", objectMapper.readTree(lines[1]).get("author").asText());

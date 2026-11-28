@@ -8,15 +8,22 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 
+import org.springframework.dao.DataAccessException;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import com.open.spring.mvc.person.Person;
 import com.open.spring.mvc.push.PushNotificationService;
+import com.open.spring.mvc.reactions.ChatType;
+import com.open.spring.mvc.reactions.MessageReactionService;
+import com.open.spring.mvc.reactions.Reaction;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Business logic for direct messages: finding/creating conversations, checking
@@ -26,6 +33,7 @@ import lombok.RequiredArgsConstructor;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class DirectMessageService {
 
     public static final String DM_TOPIC_PREFIX = "/topic/dm/";
@@ -41,6 +49,7 @@ public class DirectMessageService {
     private final DirectMessageReadStateJpaRepository readStateRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final PushNotificationService pushNotificationService;
+    private final MessageReactionService reactionService;
 
     public record UnreadSender(String uid, String name) {
     }
@@ -222,6 +231,10 @@ public class DirectMessageService {
         message.setDeleted(true);
         message.setBody("");
         messageRepository.save(message);
+        // A tombstone shows no reactions, so none are kept for it. They're removed after the delete
+        // commits: an error from the reactions table inside this transaction would undo the delete.
+        Long conversationId = conversation.getId();
+        afterCommit(() -> removeReactions(conversationId, messageId));
 
         DirectMessageEvent event = DirectMessageEvent.builder()
                 .id(message.getId())
@@ -233,6 +246,68 @@ public class DirectMessageService {
                 .deleted(true)
                 .build();
         messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + conversation.getId(), event);
+    }
+
+    /**
+     * Adds ({@code on}) or removes {@code person}'s reaction to a message, then tells the
+     * conversation's topic with a "reactions" frame. A reaction isn't a message: nobody gets a
+     * phone notification and nothing becomes unread. Throws {@link NoSuchElementException} if
+     * the message isn't in this conversation and {@link IllegalStateException} if it was
+     * deleted; {@code noRollbackFor} for the reason given on {@link #editMessage}.
+     */
+    @Transactional(noRollbackFor = {NoSuchElementException.class, IllegalStateException.class})
+    public List<MessageReactionService.ReactionSummary> setReaction(DirectMessageConversation conversation,
+            Person person, Long messageId, Reaction reaction, boolean on) {
+        DirectMessage message = messageRepository.findByIdAndConversation(messageId, conversation)
+                .orElseThrow(() -> new NoSuchElementException("Message not found"));
+        if (message.isDeleted()) {
+            throw new IllegalStateException("Message was deleted");
+        }
+
+        String key = String.valueOf(messageId);
+        if (on) {
+            reactionService.add(ChatType.DM, conversation.getId(), key, person, reaction);
+        } else {
+            reactionService.remove(ChatType.DM, conversation.getId(), key, person, reaction);
+        }
+        List<MessageReactionService.ReactionSummary> reactions =
+                reactionService.forMessage(ChatType.DM, conversation.getId(), key);
+
+        // The frame goes out once this commits, with the reactions read again then. Read here,
+        // inside this transaction, they could miss a reaction someone else saved at the same time,
+        // and that person's frame would miss this one.
+        Long conversationId = conversation.getId();
+        afterCommit(() -> messagingTemplate.convertAndSend(DM_TOPIC_PREFIX + conversationId, DirectMessageEvent.builder()
+                .id(messageId)
+                .conversationId(conversationId)
+                .type("reactions")
+                .reactions(reactionService.forMessageNow(ChatType.DM, conversationId, key))
+                .build()));
+        return reactions;
+    }
+
+    // Runs once the current transaction commits, or right away outside one.
+    /** Removes a deleted message's reactions. The delete is already done, so a failure is only logged. */
+    private void removeReactions(Long conversationId, Long messageId) {
+        try {
+            reactionService.removeAllFor(ChatType.DM, conversationId, String.valueOf(messageId));
+        } catch (DataAccessException e) {
+            log.warn("Could not remove the reactions of deleted message {} in conversation {}",
+                    messageId, conversationId, e);
+        }
+    }
+
+    private static void afterCommit(Runnable action) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    action.run();
+                }
+            });
+        } else {
+            action.run();
+        }
     }
 
     @Transactional(readOnly = true)
